@@ -1,0 +1,20 @@
+{
+  "name": "convex-test-2",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "jest:debug": "node --nolazy --inspect-brk ./node_modules/jest/bin/jest.js --runInBand --colors --verbose"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "convex": "^1.7.1",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0"
+  }
+}
