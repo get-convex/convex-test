@@ -1,5 +1,5 @@
 import { GenericId, JSONValue, Value, convexToJson, jsonToConvex } from "convex/values"
-import { GenericDocument, queryGeneric, mutationGeneric } from "convex/server"
+import { GenericDocument, queryGeneric, mutationGeneric, GenericDataModel, UserIdentity, QueryBuilder, RegisteredQuery, FunctionVisibility, DefaultFunctionArgs, RegisteredMutation, GenericMutationCtx, SchemaDefinition, GenericSchema, DataModelFromSchemaDefinition } from "convex/server"
 
 /*
 - Arg validation
@@ -137,7 +137,6 @@ class DatabaseFake {
     // }
 
     startQuery(j: JSONValue) {
-      console.log(j)
       const id = this._nextQueryId
       const results = this._evaluateQuery((j as any).query)
       this._queryResults[id] = results
@@ -308,8 +307,18 @@ function syscallImpl(op: string, jsonArgs: string) {
     }
 }
 
+class AuthFake {
+  private _userIdentity: any | null = null;
+  constructor() {}
+  setUserIdentity(u: any) {
+    this._userIdentity = u
+  }
+  getUserIdentity(): Promise<any> {
+    return Promise.resolve(this._userIdentity)
+  }
+}
+
 function asyncSyscallImpl(op: string, jsonArgs: string): Promise<string> {
-  console.log("### asyncSyscallImpl", op, jsonArgs)
     const args = JSON.parse(jsonArgs);
     switch (op) {
         case "1.0/get": {
@@ -331,23 +340,66 @@ function asyncSyscallImpl(op: string, jsonArgs: string): Promise<string> {
     return Promise.resolve("")
 }
 
-export const setup = (schema: any) => {
+
+export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> = TestConvexForDataModel<DataModelFromSchemaDefinition<SchemaDef>>;
+
+export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
+  auth: {
+    setUserIdentity: (identity: UserIdentity | null) => void;
+  },
+  runQuery: <Args extends DefaultFunctionArgs, Output>(func: RegisteredQuery<FunctionVisibility, Args, Output>, args: Args) => Promise<Output>;
+  runMutation: <Args extends DefaultFunctionArgs, Output>(func: RegisteredMutation<FunctionVisibility, Args, Output>, args: Args) => Promise<Output>;
+  run: <Output>(func: (ctx: GenericMutationCtx<DataModel>) => Promise<Output>) => Promise<Output>
+}
+
+export const setup = <Schema extends GenericSchema>(schema: SchemaDefinition<Schema, boolean> | null): TestConvex<DataModelFromSchemaDefinition<SchemaDefinition<Schema, boolean>>> => {
   DatabaseFake.initialize(schema)
   // @ts-ignore
   global.Convex = {
     syscall: syscallImpl,
     asyncSyscall: asyncSyscallImpl,
   }
+  const authFake = new AuthFake();
 
-  return { 
+
+  const x: any = { 
+    auth: {
+      setUserIdentity: (u: any) => authFake.setUserIdentity(u)
+    },
     runMutation: async (func: any, args: any) => {
-      const rawResult = await func.invokeMutation(JSON.stringify([args]));
+      const q = mutationGeneric({
+        handler: (ctx: any, a: any) => {
+          const testCtx = { ...ctx, auth: authFake }
+          return func(testCtx, a)
+        }
+      })
+      // @ts-ignore
+      const rawResult = await q.invokeMutation(JSON.stringify([args]));
       return jsonToConvex(JSON.parse(rawResult))
     },
     runQuery: async (func: any, args: any) => {
-      const rawResult = await func.invokeQuery(JSON.stringify([args]));
+      const q = queryGeneric({
+        handler: (ctx: any, a: any) => {
+          const testCtx = { ...ctx, auth: authFake }
+          return func(testCtx, a)
+        }
+      })
+      // @ts-ignore
+      const rawResult = await q.invokeQuery(JSON.stringify([args]));
+      return jsonToConvex(JSON.parse(rawResult))
+      },
+    run: async (handler: (ctx: any) => any) => {
+      const q = mutationGeneric({
+        handler: (ctx: any) => {
+          const testCtx = { ...ctx, auth: authFake }
+          return handler(testCtx)
+        }
+      })
+      // @ts-ignore
+      const rawResult = await q.invokeMutation();
       return jsonToConvex(JSON.parse(rawResult))
     }
   }
+  return x
 }
 

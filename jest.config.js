@@ -13,5 +13,6 @@ module.exports = {
       },
     ],
   },
-  extensionsToTreatAsEsm: [".ts"]
+  transformIgnorePatterns: ["node_modules"],
+  extensionsToTreatAsEsm: [".ts",]
 };
