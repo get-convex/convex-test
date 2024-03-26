@@ -1,16 +1,11 @@
-import { beforeAll, describe, expect, test } from "vitest";
-import { setup, TestConvex } from "../syscalls";
+import { describe, expect, test } from "vitest";
+import { ConvexTest } from "../syscalls";
 import { api } from "./_generated/api";
 import schema from "./schema";
 
-describe("t", () => {
-  let t: TestConvex<typeof schema>;
-
-  beforeAll(() => {
-    t = setup(schema);
-  });
-
+describe("some test", () => {
   test("messages", async () => {
+    const t = ConvexTest(schema);
     await t.mutation(api.messages.send, { body: "hello", author: "sarah" });
     await t.mutation(api.messages.send, { body: "hello", author: "tom" });
     const asSarah = t.withIdentity({ name: "sarah" });
