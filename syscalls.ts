@@ -23,6 +23,9 @@ import {
   FunctionReference,
   getFunctionName,
   actionGeneric,
+  OptionalRestArgs,
+  FunctionReturnType,
+  makeFunctionReference,
 } from "convex/server";
 
 /*
@@ -30,8 +33,6 @@ import {
 - Schema validation
 - Transactions
 - Real ID algorithm
-- Actions 
-  - We need to run a function based on UDF path
 - Pagination
 
 */
@@ -90,18 +91,6 @@ class DatabaseFake {
   private _nextTableId: number = 10000;
   private _queryResults: Record<string, Array<GenericDocument>> = {};
   static __instance: null | DatabaseFake = null;
-  static initialize(schema: any) {
-    if (this.__instance !== null) {
-      throw new Error("DatabaseFake initialized multiple times");
-    }
-    this.__instance = new DatabaseFake(schema);
-  }
-  static get() {
-    if (this.__instance === null) {
-      throw new Error("DatabaseFake not initialized");
-    }
-    return this.__instance;
-  }
 
   constructor(_schema: any) {}
 
@@ -332,18 +321,22 @@ function evaluateRangeFilter(
   }
 }
 
-function syscallImpl(op: string, jsonArgs: string) {
-  const args = JSON.parse(jsonArgs);
-  switch (op) {
-    case "1.0/queryStream": {
-      const db = DatabaseFake.get();
-      const queryId = db.startQuery(args);
-      return JSON.stringify({ queryId });
+function syscallImpl(db: DatabaseFake) {
+  return (op: string, jsonArgs: string) => {
+    const args = JSON.parse(jsonArgs);
+    switch (op) {
+      case "1.0/queryStream": {
+        const queryId = db.startQuery(args);
+        return JSON.stringify({ queryId });
+      }
+      case "1.0/queryCleanup": {
+        return JSON.stringify({});
+      }
+      default: {
+        throw new Error(`\`convexTest\` does not support syscall: "${op}"`);
+      }
     }
-    case "1.0/queryCleanup": {
-      return JSON.stringify({});
-    }
-  }
+  };
 }
 
 class AuthFake {
@@ -354,28 +347,63 @@ class AuthFake {
   }
 }
 
-function asyncSyscallImpl(op: string, jsonArgs: string): Promise<string> {
-  const args = JSON.parse(jsonArgs);
-  switch (op) {
-    case "1.0/get": {
-      const db = DatabaseFake.get();
-      const doc = db.get(args.id);
-      return Promise.resolve(JSON.stringify(convexToJson(doc)));
+function asyncSyscallImpl(db: DatabaseFake) {
+  return async (op: string, jsonArgs: string): Promise<string> => {
+    const args = JSON.parse(jsonArgs);
+    switch (op) {
+      case "1.0/get": {
+        const doc = db.get(args.id);
+        return JSON.stringify(convexToJson(doc));
+      }
+      case "1.0/insert": {
+        const _id = db.insert(args.table, jsonToConvex(args.value));
+        return JSON.stringify({ _id });
+      }
+      case "1.0/queryStreamNext": {
+        const { value, done } = db.queryNext(args.queryId);
+        return JSON.stringify({ value: convexToJson(value as any), done });
+      }
+      case "1.0/actions/query": {
+        const { name, args: queryArgs } = args;
+        return JSON.stringify(
+          convexToJson(
+            await withAuth(new AuthFake()).query(
+              makeFunctionReference(name),
+              queryArgs
+            )
+          )
+        );
+      }
+      case "1.0/actions/mutation": {
+        const { name, args: mutationArgs } = args;
+        return JSON.stringify(
+          convexToJson(
+            await withAuth(new AuthFake()).mutation(
+              makeFunctionReference(name),
+              mutationArgs
+            )
+          )
+        );
+      }
+      case "1.0/actions/action": {
+        const { name, args: actionArgs } = args;
+        return JSON.stringify(
+          convexToJson(
+            await withAuth(new AuthFake()).action(
+              makeFunctionReference(name),
+              actionArgs
+            )
+          )
+        );
+      }
+      default: {
+        throw new Error(
+          `\`convexTest\` does not support async syscall: "${op}"`
+        );
+      }
     }
-    case "1.0/insert": {
-      const db = DatabaseFake.get();
-      const _id = db.insert(args.table, jsonToConvex(args.value));
-      return Promise.resolve(JSON.stringify({ _id }));
-    }
-    case "1.0/queryStreamNext": {
-      const db = DatabaseFake.get();
-      const { value, done } = db.queryNext(args.queryId);
-      return Promise.resolve(
-        JSON.stringify({ value: convexToJson(value as any), done })
-      );
-    }
-  }
-  return Promise.resolve("");
+    return Promise.resolve("");
+  };
 }
 
 export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
@@ -383,48 +411,48 @@ export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
 
 export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   withIdentity(identity: Partial<UserIdentity>): {
-    query: <Args extends DefaultFunctionArgs, Output>(
-      func: FunctionReference<"query", any, Args, Output>,
-      args: Args
-    ) => Promise<Output>;
-    mutation: <Args extends DefaultFunctionArgs, Output>(
-      func: FunctionReference<"mutation", any, Args, Output>,
-      args: Args
-    ) => Promise<Output>;
-    action: <Args extends DefaultFunctionArgs, Output>(
-      func: FunctionReference<"action", any, Args, Output>,
-      args: Args
-    ) => Promise<Output>;
+    query: <Query extends FunctionReference<"query", any>>(
+      func: Query,
+      ...args: OptionalRestArgs<Query>
+    ) => Promise<FunctionReturnType<Query>>;
+    mutation: <Mutation extends FunctionReference<"mutation", any>>(
+      func: Mutation,
+      ...args: OptionalRestArgs<Mutation>
+    ) => Promise<FunctionReturnType<Mutation>>;
+    action: <Action extends FunctionReference<"action", any>>(
+      func: Action,
+      ...args: OptionalRestArgs<Action>
+    ) => Promise<FunctionReturnType<Action>>;
     run: <Output>(
       func: (ctx: GenericMutationCtx<DataModel>) => Promise<Output>
     ) => Promise<Output>;
   };
 
-  query: <Args extends DefaultFunctionArgs, Output>(
-    func: FunctionReference<"query", any, Args, Output>,
-    args: Args
-  ) => Promise<Output>;
-  mutation: <Args extends DefaultFunctionArgs, Output>(
-    func: FunctionReference<"mutation", any, Args, Output>,
-    args: Args
-  ) => Promise<Output>;
-  action: <Args extends DefaultFunctionArgs, Output>(
-    func: FunctionReference<"action", any, Args, Output>,
-    args: Args
-  ) => Promise<Output>;
+  query: <Query extends FunctionReference<"query", any>>(
+    func: Query,
+    ...args: OptionalRestArgs<Query>
+  ) => Promise<FunctionReturnType<Query>>;
+  mutation: <Mutation extends FunctionReference<"mutation", any>>(
+    func: Mutation,
+    ...args: OptionalRestArgs<Mutation>
+  ) => Promise<FunctionReturnType<Mutation>>;
+  action: <Action extends FunctionReference<"action", any>>(
+    func: Action,
+    ...args: OptionalRestArgs<Action>
+  ) => Promise<FunctionReturnType<Action>>;
   run: <Output>(
     func: (ctx: GenericMutationCtx<DataModel>) => Promise<Output>
   ) => Promise<Output>;
 };
 
-export const ConvexTest = <Schema extends GenericSchema>(
+export const convexTest = <Schema extends GenericSchema>(
   schema: SchemaDefinition<Schema, boolean> | null
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
-  DatabaseFake.initialize(schema);
+  const db = new DatabaseFake(schema);
   // @ts-ignore
   global.Convex = {
-    syscall: syscallImpl,
-    asyncSyscall: asyncSyscallImpl,
+    syscall: syscallImpl(db),
+    asyncSyscall: asyncSyscallImpl(db),
   };
 
   return {
@@ -475,7 +503,10 @@ function withAuth(auth: AuthFake) {
         },
       });
       // @ts-ignore
-      const rawResult = await q.invokeMutation(JSON.stringify([args]));
+      const rawResult = await q.invokeAction(
+        "" + Math.random(),
+        JSON.stringify([args])
+      );
       return jsonToConvex(JSON.parse(rawResult));
     },
 
@@ -496,8 +527,11 @@ function withAuth(auth: AuthFake) {
 async function getFunctionFromReference(
   functionReference: FunctionReference<any, any, any, any>
 ) {
-  const [modulePath, exportName] =
-    getFunctionName(functionReference).split(":");
+  return await getFunctionFromName(getFunctionName(functionReference));
+}
+
+async function getFunctionFromName(functionName: string) {
+  const [modulePath, exportName] = functionName.split(":");
   const module = await import("./convex/" + modulePath);
   return module[exportName];
 }

@@ -1,9 +1,6 @@
 import { v } from "convex/values";
-// import { query, mutation } from "./_generated/server";
-import {
-  queryGeneric as query,
-  mutationGeneric as mutation,
-} from "convex/server";
+import { api } from "./_generated/api";
+import { action, mutation, query } from "./_generated/server";
 
 export const list = query(async (ctx) => {
   return await ctx.db.query("messages").collect();
@@ -24,5 +21,20 @@ export const send = mutation({
   handler: async (ctx, { body, author }) => {
     const message = { body, author };
     await ctx.db.insert("messages", message);
+  },
+});
+
+export const sendAIMessage = action({
+  args: { prompt: v.string() },
+  handler: async (ctx, { prompt }) => {
+    const response = await fetch("https://api.openai.com/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model: "gpt89", prompt }),
+    });
+    const message = await response.text();
+    await ctx.runMutation(api.messages.send, { body: message, author: "AI" });
   },
 });
