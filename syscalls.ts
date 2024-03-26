@@ -417,12 +417,9 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   ) => Promise<Output>;
 };
 
-export const setup = <Schema extends GenericSchema>(
+export const ConvexTest = <Schema extends GenericSchema>(
   schema: SchemaDefinition<Schema, boolean> | null
-): TestConvex<
-  // @ts-ignore fuck
-  DataModelFromSchemaDefinition<SchemaDefinition<Schema, boolean>>
-> => {
+): TestConvex<SchemaDefinition<Schema, boolean>> => {
   DatabaseFake.initialize(schema);
   // @ts-ignore
   global.Convex = {
