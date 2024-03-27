@@ -17,7 +17,6 @@ test("mutation scheduling action", async () => {
     expect(jobs[0].state.kind).toEqual("pending");
     expect(jobs[0].args[0].body).toEqual("through scheduler");
   }
-  console.log("after scheduled");
 
   vi.runAllTimers();
   await t.finishInProgressScheduledFunctions();
