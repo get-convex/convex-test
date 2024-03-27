@@ -5,5 +5,10 @@ export default defineSchema({
   messages: defineTable({
     author: v.string(),
     body: v.string(),
-  }).index("author", ["author"]),
+  })
+    .index("author", ["author"])
+    .searchIndex("body", {
+      searchField: "body",
+      filterFields: ["author"],
+    }),
 });
