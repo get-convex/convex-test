@@ -474,6 +474,7 @@ function asyncSyscallImpl(db: DatabaseFake) {
           )
         );
       }
+      case "1.0/actions/schedule":
       case "1.0/schedule": {
         const { name, args: fnArgs, ts: tsInSecs } = args;
         const jobId = db.insert("_scheduled_functions", {
@@ -521,6 +522,7 @@ function asyncSyscallImpl(db: DatabaseFake) {
         }, tsInSecs * 1000 - Date.now());
         return JSON.stringify(convexToJson(jobId));
       }
+      case "1.0/actions/cancel_job":
       case "1.0/cancel_job": {
         const { id } = args;
         db.patch(id, { state: { kind: "canceled" } });
