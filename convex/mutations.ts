@@ -46,3 +46,14 @@ export const deleteDoc = mutation({
     await ctx.db.delete(id);
   },
 });
+
+/// transaction
+
+export const throws = mutation({
+  args: { body: v.string(), author: v.string() },
+  handler: async (ctx, { body, author }) => {
+    const message = { body, author };
+    await ctx.db.insert("messages", message);
+    throw new Error("I changed my mind");
+  },
+});

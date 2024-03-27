@@ -89,18 +89,21 @@ type ScheduledFunction = DocumentByName<
   "_scheduled_functions"
 >;
 
+type StoredDoc = { tableName: string; document: GenericDocument };
+
 class DatabaseFake {
   private _tables: Record<string, number> = {};
-  private _documents: Record<
-    string,
-    { tableName: string; document: GenericDocument }
-  > = {};
+  private _documents: Record<string, StoredDoc> = {};
   private _nextQueryId: number = 1;
   private _nextDocId: number = 10000;
   private _nextTableId: number = 10000;
   private _queryResults: Record<string, Array<GenericDocument>> = {};
   // TODO: Make this more robust and cleaner
   jobListener: (jobId: string) => void = () => {};
+  private _writes: Record<
+    string,
+    { new: StoredDoc } | { existing: StoredDoc | null }
+  > = {};
 
   constructor(
     private _schema: SchemaDefinition<GenericSchema, boolean> | null
@@ -115,7 +118,16 @@ class DatabaseFake {
       );
     }
 
-    return this._documents[id]?.document ?? null;
+    return this._get(id)?.document ?? null;
+  }
+
+  _get(id: GenericId<string>) {
+    const write = this._writes[id];
+    if (write !== undefined) {
+      return "new" in write ? write.new : write.existing;
+    }
+
+    return this._documents[id] ?? null;
   }
 
   private _generateId<TableName extends string>(
@@ -133,7 +145,7 @@ class DatabaseFake {
       _id,
       _creationTime: Date.now(),
     };
-    this._documents[_id] = { document: doc, tableName: table };
+    this._writes[_id] = { new: { document: doc, tableName: table } };
     // this._documentIdsByTable[table].add(_id)
     return _id;
   }
@@ -142,42 +154,65 @@ class DatabaseFake {
     id: GenericId<TableName>,
     value: Record<string, any>
   ) {
-    const doc = this._documents[id];
-    if (doc === undefined) {
-      throw new Error(`Patch on non-existent document with ID "{id}"`);
+    const doc = this._get(id);
+    if (doc === null) {
+      throw new Error(`Patch on non-existent document with ID "${id}"`);
     }
     const { document, tableName } = doc;
-    this._documents[id] = { tableName, document: { ...document, ...value } };
+    this._writes[id] = {
+      existing: { tableName, document: { ...document, ...value } },
+    };
   }
 
   replace<TableName extends string>(
     id: GenericId<TableName>,
     value: Record<string, any>
   ) {
-    const doc = this._documents[id];
-    if (doc === undefined) {
-      throw new Error("Replace on non-existent doc");
+    const doc = this._get(id);
+    if (doc === null) {
+      throw new Error(`Replace on non-existent document with ID "${id}"`);
     }
     const { document, tableName } = doc;
     if (value._id !== undefined && value._id !== document._id) {
       throw new Error("_id mismatch");
     }
-    this._documents[id] = {
-      tableName,
-      document: {
-        ...value,
-        _id: document._id,
-        _creationTime: document._creationTime,
+    this._writes[id] = {
+      existing: {
+        tableName,
+        document: {
+          ...value,
+          _id: document._id,
+          _creationTime: document._creationTime,
+        },
       },
     };
   }
 
   delete(id: GenericId<string>) {
-    const doc = this._documents[id];
-    if (doc === undefined) {
+    const doc = this._get(id);
+    if (doc === null) {
       throw new Error("Delete on non-existent doc");
     }
-    delete this._documents[id];
+    this._writes[id] = { existing: null };
+  }
+
+  commit() {
+    for (const [id, write] of Object.entries(this._writes)) {
+      if ("new" in write) {
+        this._documents[id] = write.new;
+      } else {
+        if (write.existing === null) {
+          delete this._documents[id];
+        } else {
+          this._documents[id] = write.existing;
+        }
+      }
+    }
+    this.resetWrites();
+  }
+
+  resetWrites() {
+    this._writes = {};
   }
 
   startQuery(j: JSONValue) {
@@ -238,30 +273,50 @@ class DatabaseFake {
     };
   }
 
+  private _iterateDocs(
+    tableName: string,
+    callback: (doc: GenericDocument) => void
+  ) {
+    for (const write of Object.values(this._writes)) {
+      if ("new" in write) {
+        const doc = write.new;
+        if (doc.tableName === tableName) {
+          callback(doc.document);
+        }
+      }
+    }
+    for (const doc of Object.values(this._documents)) {
+      if (doc.tableName === tableName) {
+        const write = this._writes[doc.document._id as string];
+        if (write !== undefined && "existing" in write) {
+          callback(write.existing!.document);
+        } else {
+          callback(doc.document);
+        }
+      }
+    }
+  }
+
   private _evaluateQuery(query: SerializedQuery): Array<GenericDocument> {
     const source = query.source;
-    let results = [];
+    let results: GenericDocument[] = [];
     let fieldPathsToSortBy = ["_creationTime"];
     let order = "asc";
     switch (source.type) {
       case "FullTableScan": {
         const tableName = source.tableName;
-        for (const doc of Object.values(this._documents)) {
-          if (doc.tableName === tableName) {
-            results.push(doc.document);
-          }
-        }
+        this._iterateDocs(tableName, (doc) => {
+          results.push(doc);
+        });
         order = source.order ?? "asc";
 
         break;
       }
       case "IndexRange": {
         const [tableName, indexName] = source.indexName.split(".");
-        for (const doc of Object.values(this._documents)) {
-          if (doc.tableName === tableName) {
-            results.push(doc.document);
-          }
-        }
+        this._iterateDocs(tableName, (doc) => {
+          results.push(doc);
+        });
         results = results.filter((v) =>
           source.range.every((f) => evaluateRangeFilter(v, f))
         );
@@ -523,7 +578,11 @@ function asyncSyscallImpl(db: DatabaseFake) {
           )
         );
       }
-      case "1.0/actions/schedule":
+      case "1.0/actions/schedule": {
+        return (await withAuth().run(async () => {
+          return await getSyscalls().asyncSyscall("1.0/schedule", jsonArgs);
+        })) as string;
+      }
       case "1.0/schedule": {
         const { name, args: fnArgs, ts: tsInSecs } = args;
         const jobId = db.insert("_scheduled_functions", {
@@ -571,7 +630,12 @@ function asyncSyscallImpl(db: DatabaseFake) {
         }, tsInSecs * 1000 - Date.now());
         return JSON.stringify(convexToJson(jobId));
       }
-      case "1.0/actions/cancel_job":
+      case "1.0/actions/cancel_job": {
+        await withAuth().run(async () => {
+          await getSyscalls().asyncSyscall("1.0/cancel_job", jsonArgs);
+        });
+        return JSON.stringify({});
+      }
       case "1.0/cancel_job": {
         const { id } = args;
         db.patch(id, { state: { kind: "canceled" } });
@@ -628,6 +692,17 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   finishInProgressScheduledFunctions: () => Promise<void>;
 };
 
+export function getDb() {
+  return (global as any).Convex.db as DatabaseFake;
+}
+
+export function getSyscalls() {
+  return (global as any).Convex as {
+    syscall: ReturnType<typeof syscallImpl>;
+    asyncSyscall: ReturnType<typeof asyncSyscallImpl>;
+  };
+}
+
 export const convexTest = <Schema extends GenericSchema>(
   schema: SchemaDefinition<Schema, boolean> | null
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
@@ -636,44 +711,15 @@ export const convexTest = <Schema extends GenericSchema>(
   global.Convex = {
     syscall: syscallImpl(db),
     asyncSyscall: asyncSyscallImpl(db),
-  };
-
-  const jobListener = {
-    // This is needed because when we execute functions
-    // we are performing dynamic `import`s, and those
-    // are real work that cannot be force-awaited.
-    finishInProgressScheduledFunctions: async (): Promise<void> => {
-      const inProgressJobs = (await withAuth().run(async (ctx) => {
-        return (
-          await ctx.db.system.query("_scheduled_functions").collect()
-        ).filter((job: ScheduledFunction) => job.state.kind === "inProgress");
-      })) as ScheduledFunction[];
-      let numRemaining = inProgressJobs.length;
-      if (numRemaining === 0) {
-        return;
-      }
-
-      return new Promise((resolve) => {
-        db.jobListener = () => {
-          numRemaining -= 1;
-          if (numRemaining === 0) {
-            resolve();
-          }
-        };
-      });
-    },
+    db,
   };
 
   return {
     withIdentity(identity: Partial<UserIdentity>) {
       const subject = identity.subject ?? simpleHash(JSON.stringify(identity));
-      return {
-        ...withAuth(new AuthFake({ ...identity, subject })),
-        ...jobListener,
-      };
+      return withAuth(new AuthFake({ ...identity, subject }));
     },
     ...withAuth(),
-    ...jobListener,
   } as any;
 };
 
@@ -701,9 +747,14 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           return func(testCtx, a);
         },
       });
-      // @ts-ignore
-      const rawResult = await q.invokeMutation(JSON.stringify([args]));
-      return jsonToConvex(JSON.parse(rawResult));
+      try {
+        // @ts-ignore
+        const rawResult = await q.invokeMutation(JSON.stringify([args]));
+        getDb().commit();
+        return jsonToConvex(JSON.parse(rawResult));
+      } finally {
+        getDb().resetWrites();
+      }
     },
 
     action: async (functionReference: any, args: any) => {
@@ -733,9 +784,14 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           return handler(testCtx);
         },
       });
-      // @ts-ignore
-      const rawResult = await q.invokeMutation(JSON.stringify([{}]));
-      return jsonToConvex(JSON.parse(rawResult));
+      try {
+        // @ts-ignore
+        const rawResult = await q.invokeMutation(JSON.stringify([{}]));
+        getDb().commit();
+        return jsonToConvex(JSON.parse(rawResult));
+      } finally {
+        getDb().resetWrites();
+      }
     },
 
     fun: async (functionReference: any, args: any) => {
@@ -749,6 +805,30 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       if (func.isAction) {
         return await byType.action(functionReference, args);
       }
+    },
+
+    // This is needed because when we execute functions
+    // we are performing dynamic `import`s, and those
+    // are real work that cannot be force-awaited.
+    finishInProgressScheduledFunctions: async (): Promise<void> => {
+      const inProgressJobs = (await withAuth().run(async (ctx) => {
+        return (
+          await ctx.db.system.query("_scheduled_functions").collect()
+        ).filter((job: ScheduledFunction) => job.state.kind === "inProgress");
+      })) as ScheduledFunction[];
+      let numRemaining = inProgressJobs.length;
+      if (numRemaining === 0) {
+        return;
+      }
+
+      return new Promise((resolve) => {
+        getDb().jobListener = () => {
+          numRemaining -= 1;
+          if (numRemaining === 0) {
+            resolve();
+          }
+        };
+      });
     },
   };
 }
