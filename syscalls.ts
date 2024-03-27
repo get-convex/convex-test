@@ -521,6 +521,11 @@ function asyncSyscallImpl(db: DatabaseFake) {
         }, tsInSecs * 1000 - Date.now());
         return JSON.stringify(convexToJson(jobId));
       }
+      case "1.0/cancel_job": {
+        const { id } = args;
+        db.patch(id, { state: { kind: "canceled" } });
+        return JSON.stringify({});
+      }
       default: {
         throw new Error(
           `\`convexTest\` does not support async syscall: "${op}"`
@@ -593,6 +598,9 @@ export const convexTest = <Schema extends GenericSchema>(
         ).filter((job: ScheduledFunction) => job.state.kind === "inProgress");
       })) as ScheduledFunction[];
       let numRemaining = inProgressJobs.length;
+      if (numRemaining === 0) {
+        return;
+      }
 
       return new Promise((resolve) => {
         db.jobListener = () => {
