@@ -27,3 +27,14 @@ export const actionStoreBlob = internalAction({
     return await ctx.storage.store(new Blob([bytes]));
   },
 });
+
+/// action get blob (storage/getBlob)
+
+export const actionGetBlob = internalAction({
+  args: {
+    id: v.id("_storage"),
+  },
+  handler: async (ctx, { id }) => {
+    return (await ctx.storage.get(id))?.arrayBuffer();
+  },
+});
