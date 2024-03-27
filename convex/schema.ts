@@ -6,7 +6,4 @@ export default defineSchema({
     author: v.string(),
     body: v.string(),
   }),
-  foos: defineTable({
-    name: v.string(),
-  }),
 });
