@@ -26,6 +26,9 @@ import {
   OptionalRestArgs,
   FunctionReturnType,
   makeFunctionReference,
+  DocumentByName,
+  SystemDataModel,
+  GenericQueryCtx,
 } from "convex/server";
 
 /*
@@ -80,6 +83,11 @@ export type SerializedSearchFilter =
       value: JSONValue;
     };
 
+type ScheduledFunction = DocumentByName<
+  SystemDataModel,
+  "_scheduled_functions"
+>;
+
 class DatabaseFake {
   private _tables: Record<string, number> = {};
   private _documents: Record<
@@ -90,7 +98,7 @@ class DatabaseFake {
   private _nextDocId: number = 10000;
   private _nextTableId: number = 10000;
   private _queryResults: Record<string, Array<GenericDocument>> = {};
-  static __instance: null | DatabaseFake = null;
+  jobListener: (jobId: string) => void = () => {};
 
   constructor(_schema: any) {}
 
@@ -126,14 +134,17 @@ class DatabaseFake {
     return _id;
   }
 
-  // patch<TableName extends string>(id: GenericId<TableName>, value: Record<string, any>): Promise<void> {
-  //   const doc = this._documents[id];
-  //   if (doc === undefined) {
-  //     throw new Error("Patch on non existent doc")
-  //   }
-  //   this._documents[id] = {...doc, ...value}
-  //   return Promise.resolve()
-  // }
+  patch<TableName extends string>(
+    id: GenericId<TableName>,
+    value: Record<string, any>
+  ) {
+    const doc = this._documents[id];
+    if (doc === undefined) {
+      throw new Error(`Patch on non-existent document with ID "{id}"`);
+    }
+    const { document, tableName } = doc;
+    this._documents[id] = { tableName, document: { ...document, ...value } };
+  }
 
   // replace<TableName extends string>(id: GenericId<TableName>, value: Record<string, any>): Promise<void> {
   //   const doc = this._documents[id];
@@ -238,6 +249,10 @@ class DatabaseFake {
     }
 
     return results;
+  }
+
+  jobFinished(jobId: string) {
+    this.jobListener(jobId);
   }
 }
 
@@ -367,10 +382,7 @@ function asyncSyscallImpl(db: DatabaseFake) {
         const { name, args: queryArgs } = args;
         return JSON.stringify(
           convexToJson(
-            await withAuth(new AuthFake()).query(
-              makeFunctionReference(name),
-              queryArgs
-            )
+            await withAuth().query(makeFunctionReference(name), queryArgs)
           )
         );
       }
@@ -378,10 +390,7 @@ function asyncSyscallImpl(db: DatabaseFake) {
         const { name, args: mutationArgs } = args;
         return JSON.stringify(
           convexToJson(
-            await withAuth(new AuthFake()).mutation(
-              makeFunctionReference(name),
-              mutationArgs
-            )
+            await withAuth().mutation(makeFunctionReference(name), mutationArgs)
           )
         );
       }
@@ -389,12 +398,60 @@ function asyncSyscallImpl(db: DatabaseFake) {
         const { name, args: actionArgs } = args;
         return JSON.stringify(
           convexToJson(
-            await withAuth(new AuthFake()).action(
-              makeFunctionReference(name),
-              actionArgs
-            )
+            await withAuth().action(makeFunctionReference(name), actionArgs)
           )
         );
+      }
+      case "1.0/schedule": {
+        const { name, args: fnArgs, ts: tsInSecs } = args;
+        const jobId = db.insert("_scheduled_functions", {
+          args: [fnArgs],
+          name,
+          scheduledTime: tsInSecs * 1000,
+          state: { kind: "pending" },
+        });
+        setTimeout(async () => {
+          console.log("started settimeout");
+
+          {
+            const job = db.get(jobId) as ScheduledFunction;
+            if (job.state.kind === "canceled") {
+              return;
+            }
+            if (job.state.kind !== "pending") {
+              throw new Error(
+                `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`
+              );
+            }
+          }
+          db.patch(jobId, { state: { kind: "inProgress" } });
+          try {
+            console.log("before await");
+            await withAuth().fun(makeFunctionReference(name), fnArgs);
+            console.log("finished func call");
+          } catch (error) {
+            console.error(
+              `Error when running scheduled function ${name}`,
+              error
+            );
+            db.patch(jobId, {
+              state: { kind: "failed" },
+              completedTime: Date.now(),
+            });
+            db.jobFinished(jobId);
+          }
+          {
+            const job = db.get(jobId) as ScheduledFunction;
+            if (job.state.kind !== "inProgress") {
+              throw new Error(
+                `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`
+              );
+            }
+          }
+          db.patch(jobId, { state: { kind: "success" } });
+          db.jobFinished(jobId);
+        }, tsInSecs * 1000 - Date.now());
+        return JSON.stringify(convexToJson(jobId));
       }
       default: {
         throw new Error(
@@ -426,6 +483,7 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
     run: <Output>(
       func: (ctx: GenericMutationCtx<DataModel>) => Promise<Output>
     ) => Promise<Output>;
+    finishInProgressScheduledFunctions: () => Promise<void>;
   };
 
   query: <Query extends FunctionReference<"query", any>>(
@@ -443,6 +501,7 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   run: <Output>(
     func: (ctx: GenericMutationCtx<DataModel>) => Promise<Output>
   ) => Promise<Output>;
+  finishInProgressScheduledFunctions: () => Promise<void>;
 };
 
 export const convexTest = <Schema extends GenericSchema>(
@@ -455,17 +514,41 @@ export const convexTest = <Schema extends GenericSchema>(
     asyncSyscall: asyncSyscallImpl(db),
   };
 
+  const jobListener = {
+    finishInProgressScheduledFunctions: async (): Promise<void> => {
+      const inProgressJobs = (await withAuth().run(async (ctx) => {
+        return (
+          await ctx.db.system.query("_scheduled_functions").collect()
+        ).filter((job: ScheduledFunction) => job.state.kind === "inProgress");
+      })) as ScheduledFunction[];
+      let numRemaining = inProgressJobs.length;
+
+      return new Promise((resolve) => {
+        db.jobListener = () => {
+          numRemaining -= 1;
+          if (numRemaining === 0) {
+            resolve();
+          }
+        };
+      });
+    },
+  };
+
   return {
     withIdentity(identity: Partial<UserIdentity>) {
       const subject = identity.subject ?? simpleHash(JSON.stringify(identity));
-      return withAuth(new AuthFake({ ...identity, subject }));
+      return {
+        ...withAuth(new AuthFake({ ...identity, subject })),
+        ...jobListener,
+      };
     },
-    ...withAuth(new AuthFake()),
+    ...withAuth(),
+    ...jobListener,
   } as any;
 };
 
-function withAuth(auth: AuthFake) {
-  return {
+function withAuth(auth: AuthFake = new AuthFake()) {
+  const byType = {
     query: async (functionReference: any, args: any) => {
       const func = await getFunctionFromReference(functionReference);
       const q = queryGeneric({
@@ -509,6 +592,9 @@ function withAuth(auth: AuthFake) {
       );
       return jsonToConvex(JSON.parse(rawResult));
     },
+  };
+  return {
+    ...byType,
 
     run: async (handler: (ctx: any) => any) => {
       const q = mutationGeneric({
@@ -520,6 +606,25 @@ function withAuth(auth: AuthFake) {
       // @ts-ignore
       const rawResult = await q.invokeMutation(JSON.stringify([{}]));
       return jsonToConvex(JSON.parse(rawResult));
+    },
+
+    fun: async (functionReference: any, args: any) => {
+      console.log("inside fun");
+
+      const func = await getFunctionFromReference(functionReference);
+      console.log("switch");
+
+      if (func.isQuery) {
+        return await byType.query(functionReference, args);
+      }
+      if (func.isMutation) {
+        return await byType.mutation(functionReference, args);
+      }
+      if (func.isAction) {
+        console.log("isAction");
+
+        return await byType.action(functionReference, args);
+      }
     },
   };
 }

@@ -8,7 +8,7 @@ test("action calling query", async () => {
   await t.run(async (ctx) => {
     await ctx.db.insert("messages", { body: "foo", author: "test" });
   });
-  const result = await t.action(internal.actions.actionCallingQuery, {});
+  const result = await t.action(internal.actions.actionCallingQuery);
   expect(result.length).toEqual(1);
   expect(result[0].body).toEqual("foo");
   expect(result[0].author).toEqual("test");

@@ -16,6 +16,7 @@ import type {
 } from "convex/server";
 import type * as actions from "../actions.js";
 import type * as messages from "../messages.js";
+import type * as scheduler from "../scheduler.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -28,6 +29,7 @@ import type * as messages from "../messages.js";
 declare const fullApi: ApiFromModules<{
   actions: typeof actions;
   messages: typeof messages;
+  scheduler: typeof scheduler;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,
