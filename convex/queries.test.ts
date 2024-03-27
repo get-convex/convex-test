@@ -3,7 +3,7 @@ import { convexTest } from "../syscalls";
 import { api } from "./_generated/api";
 import schema from "./schema";
 
-test("paginate", async () => {
+test("collect", async () => {
   const t = convexTest(schema);
   await t.run(async (ctx) => {
     await ctx.db.insert("messages", { author: "sarah", body: "hello1" });
@@ -13,5 +13,64 @@ test("paginate", async () => {
   expect(messages).toMatchObject([
     { author: "sarah", body: "hello1" },
     { author: "sarah", body: "hello2" },
+  ]);
+});
+
+test("withIndex", async () => {
+  const t = convexTest(schema);
+  const messages = await t.run(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello1" });
+    await ctx.db.insert("messages", { author: "michal", body: "hello2" });
+    await ctx.db.insert("messages", { author: "sarah", body: "hello2" });
+    return await ctx.db
+      .query("messages")
+      .withIndex("author", (q) => q.eq("author", "sarah"))
+      .collect();
+  });
+  expect(messages).toMatchObject([
+    { author: "sarah", body: "hello1" },
+    { author: "sarah", body: "hello2" },
+  ]);
+});
+
+test("ordering", async () => {
+  const t = convexTest(schema);
+  const authors = await t.run(async (ctx) => {
+    const authors: any[] = [
+      "stringValue",
+      "xFactor",
+      undefined,
+      false,
+      true,
+      34,
+      35,
+      BigInt(34),
+      null,
+      ["a"],
+      { a: 1 },
+      new ArrayBuffer(8),
+    ];
+    await Promise.all(
+      authors.map(async (author) => {
+        await ctx.db.insert("messages", { author, body: "hello" });
+      })
+    );
+    return (
+      await ctx.db.query("messages").withIndex("author").order("desc").collect()
+    ).map(({ author }) => (author === undefined ? "UNDEFINED" : author));
+  });
+  expect(authors).toMatchObject([
+    { a: 1 },
+    ["a"],
+    new ArrayBuffer(8),
+    "xFactor",
+    "stringValue",
+    true,
+    false,
+    35,
+    34,
+    BigInt(34),
+    null,
+    "UNDEFINED",
   ]);
 });
