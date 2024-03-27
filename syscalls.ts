@@ -724,6 +724,26 @@ export const convexTest = <Schema extends GenericSchema>(
 };
 
 function withAuth(auth: AuthFake = new AuthFake()) {
+  const runTransaction = async (
+    handler: (ctx: any, args: any) => any,
+    args: any
+  ) => {
+    const m = mutationGeneric({
+      handler: (ctx: any, a: any) => {
+        const testCtx = { ...ctx, auth };
+        return handler(testCtx, a);
+      },
+    });
+    try {
+      // @ts-ignore
+      const rawResult = await m.invokeMutation(JSON.stringify([args]));
+      getDb().commit();
+      return jsonToConvex(JSON.parse(rawResult));
+    } finally {
+      getDb().resetWrites();
+    }
+  };
+
   const byType = {
     query: async (functionReference: any, args: any) => {
       const func = await getFunctionFromReference(functionReference);
@@ -740,21 +760,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
 
     mutation: async (functionReference: any, args: any) => {
       const func = await getFunctionFromReference(functionReference);
-
-      const q = mutationGeneric({
-        handler: (ctx: any, a: any) => {
-          const testCtx = { ...ctx, auth };
-          return func(testCtx, a);
-        },
-      });
-      try {
-        // @ts-ignore
-        const rawResult = await q.invokeMutation(JSON.stringify([args]));
-        getDb().commit();
-        return jsonToConvex(JSON.parse(rawResult));
-      } finally {
-        getDb().resetWrites();
-      }
+      return await runTransaction(func, args);
     },
 
     action: async (functionReference: any, args: any) => {
@@ -778,20 +784,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     ...byType,
 
     run: async (handler: (ctx: any) => any) => {
-      const q = mutationGeneric({
-        handler: (ctx: any) => {
-          const testCtx = { ...ctx, auth };
-          return handler(testCtx);
-        },
-      });
-      try {
-        // @ts-ignore
-        const rawResult = await q.invokeMutation(JSON.stringify([{}]));
-        getDb().commit();
-        return jsonToConvex(JSON.parse(rawResult));
-      } finally {
-        getDb().resetWrites();
-      }
+      return await runTransaction(handler, {});
     },
 
     fun: async (functionReference: any, args: any) => {
