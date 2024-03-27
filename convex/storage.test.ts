@@ -63,3 +63,9 @@ test("query get URL", async () => {
     expect(result).toBeNull();
   }
 });
+
+test("mutation generate upload URL", async () => {
+  const t = convexTest(schema);
+  const result = await t.mutation(internal.storage.mutationGenerateUploadUrl);
+  expect(result).toMatch("https://");
+});

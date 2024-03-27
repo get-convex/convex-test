@@ -732,6 +732,13 @@ function asyncSyscallImpl(db: DatabaseFake) {
           "https://some-deployment.convex.cloud/api/storage/" + sha256;
         return JSON.stringify(convexToJson(url));
       }
+      case "1.0/storageGenerateUploadUrl": {
+        // In the real backend the token is cryptographically secure
+        const url =
+          "https://some-deployment.convex.cloud/api/storage/upload?token=" +
+          Math.random();
+        return JSON.stringify(convexToJson(url));
+      }
       default: {
         throw new Error(
           `\`convexTest\` does not support async syscall: "${op}"`
