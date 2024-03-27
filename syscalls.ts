@@ -168,6 +168,10 @@ class DatabaseFake {
     this._storage[storageId] = blob;
   }
 
+  getFile(storageId: GenericId<"_storage">) {
+    return this._storage[storageId];
+  }
+
   insert<TableName extends string>(table: TableName, value: any) {
     const _id = this._generateId(table);
     const doc = {
@@ -634,9 +638,9 @@ function asyncSyscallImpl(db: DatabaseFake) {
         );
       }
       case "1.0/actions/schedule": {
-        return (await withAuth().run(async () => {
+        return await withAuth().run(async () => {
           return await getSyscalls().asyncSyscall("1.0/schedule", jsonArgs);
-        })) as string;
+        });
       }
       case "1.0/schedule": {
         const { name, args: fnArgs, ts: tsInSecs } = args;
@@ -706,16 +710,22 @@ function asyncSyscallImpl(db: DatabaseFake) {
 }
 
 function jsSyscallImpl(db: DatabaseFake) {
-  return async (op: string, args: Record<string, any>): Promise<string> => {
+  return async (op: string, args: Record<string, any>): Promise<any> => {
     switch (op) {
       case "storage/storeBlob": {
         const { blob } = args as { blob: Blob };
-        const storageId = db.insert("_storage", {
-          size: blob.size,
-          sha256: await blobSha(blob),
+        const storageId = await withAuth().run(async () => {
+          return db.insert("_storage", {
+            size: blob.size,
+            sha256: await blobSha(blob),
+          });
         });
         db.storeFile(storageId, blob);
         return storageId;
+      }
+      case "storage/getBlob": {
+        const { storageId } = args as { storageId: GenericId<"_storage"> };
+        return db.getFile(storageId);
       }
       default: {
         throw new Error(`\`convexTest\` does not support js syscall: "${op}"`);
@@ -805,10 +815,10 @@ export const convexTest = <Schema extends GenericSchema>(
 };
 
 function withAuth(auth: AuthFake = new AuthFake()) {
-  const runTransaction = async (
-    handler: (ctx: any, args: any) => any,
+  const runTransaction = async <T>(
+    handler: (ctx: any, args: any) => T,
     args: any
-  ) => {
+  ): Promise<T> => {
     const m = mutationGeneric({
       handler: (ctx: any, a: any) => {
         const testCtx = { ...ctx, auth };
@@ -822,7 +832,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         JSON.stringify(convexToJson([parseArgs(args)]))
       );
       getDb().commit();
-      return jsonToConvex(JSON.parse(rawResult));
+      return jsonToConvex(JSON.parse(rawResult)) as T;
     } finally {
       getDb().resetWrites();
       getDb().endTransaction(markTransactionDone);
@@ -850,7 +860,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       }
     },
 
-    mutation: async (functionReference: any, args: any) => {
+    mutation: async (functionReference: any, args: any): Promise<Value> => {
       const func = await getFunctionFromReference(functionReference);
       return await runTransaction(func, args);
     },
@@ -875,7 +885,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
   return {
     ...byType,
 
-    run: async (handler: (ctx: any) => any) => {
+    run: async <T>(handler: (ctx: any) => T): Promise<T> => {
       return await runTransaction(handler, {});
     },
 
