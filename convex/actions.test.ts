@@ -26,3 +26,17 @@ test("action calling action", async () => {
   });
   expect(result.called).toEqual(2);
 });
+
+test("action calling mutations concurrently", async () => {
+  const t = convexTest(schema);
+  await t.action(api.actions.actionCallingMutationsConcurrently, {
+    authors: ["A", "B", "C"],
+    body: "foo",
+  });
+  const result = await t.query(internal.actions.list);
+  expect(result).toMatchObject([
+    { author: "A", body: "foo" },
+    { author: "B", body: "foo" },
+    { author: "C", body: "foo" },
+  ]);
+});

@@ -104,10 +104,32 @@ class DatabaseFake {
     string,
     { new: StoredDoc } | { existing: StoredDoc | null }
   > = {};
+  // The DatabaseFake is used in the Convex global,
+  // and so it restricts `convexTest` to run one function
+  // at a time.
+  // We force sequential execution to make sure actions
+  // can run mutations in parallel.
+  private _waitOnCurrentFunction: Promise<void> | null = null;
 
   constructor(
     private _schema: SchemaDefinition<GenericSchema, boolean> | null
   ) {}
+
+  async startTransaction() {
+    if (this._waitOnCurrentFunction !== null) {
+      await this._waitOnCurrentFunction;
+    }
+    let markTransactionDone: () => void;
+    this._waitOnCurrentFunction = new Promise((resolve) => {
+      markTransactionDone = resolve;
+    });
+    return markTransactionDone!;
+  }
+
+  endTransaction(token: () => void) {
+    token();
+    this._waitOnCurrentFunction = null;
+  }
 
   get(id: GenericId<string>) {
     if (typeof id !== "string") {
@@ -734,6 +756,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         return handler(testCtx, a);
       },
     });
+    const markTransactionDone = await getDb().startTransaction();
     try {
       // @ts-ignore
       const rawResult = await m.invokeMutation(JSON.stringify([args]));
@@ -741,6 +764,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       return jsonToConvex(JSON.parse(rawResult));
     } finally {
       getDb().resetWrites();
+      getDb().endTransaction(markTransactionDone);
     }
   };
 
@@ -753,9 +777,14 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           return func(testCtx, a);
         },
       });
-      // @ts-ignore
-      const rawResult = await q.invokeQuery(JSON.stringify([args]));
-      return jsonToConvex(JSON.parse(rawResult));
+      const markTransactionDone = await getDb().startTransaction();
+      try {
+        // @ts-ignore
+        const rawResult = await q.invokeQuery(JSON.stringify([args]));
+        return jsonToConvex(JSON.parse(rawResult));
+      } finally {
+        getDb().endTransaction(markTransactionDone);
+      }
     },
 
     mutation: async (functionReference: any, args: any) => {
