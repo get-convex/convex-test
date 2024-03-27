@@ -69,3 +69,12 @@ export const queryGetUrl = internalQuery({
     return await ctx.storage.getUrl(id);
   },
 });
+
+/// mutation generate upload URL (1.0/storageGenerateUploadUrl)
+
+export const mutationGenerateUploadUrl = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.storage.generateUploadUrl();
+  },
+});
