@@ -20,6 +20,7 @@ import type * as mutations from "../mutations.js";
 import type * as pagination from "../pagination.js";
 import type * as queries from "../queries.js";
 import type * as scheduler from "../scheduler.js";
+import type * as storage from "../storage.js";
 import type * as textSearch from "../textSearch.js";
 
 /**
@@ -37,6 +38,7 @@ declare const fullApi: ApiFromModules<{
   pagination: typeof pagination;
   queries: typeof queries;
   scheduler: typeof scheduler;
+  storage: typeof storage;
   textSearch: typeof textSearch;
 }>;
 export declare const api: FilterApi<
