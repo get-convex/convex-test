@@ -31,6 +31,7 @@ import {
   GenericQueryCtx,
   Indexes,
 } from "convex/server";
+import { createHash } from "crypto";
 
 /*
 - Arg validation
@@ -89,11 +90,14 @@ type ScheduledFunction = DocumentByName<
   "_scheduled_functions"
 >;
 
+type StoredFileMetadata = DocumentByName<SystemDataModel, "_storage">;
+
 type StoredDoc = { tableName: string; document: GenericDocument };
 
 class DatabaseFake {
   private _tables: Record<string, number> = {};
   private _documents: Record<string, StoredDoc> = {};
+  private _storage: Record<string, Blob> = {};
   private _nextQueryId: number = 1;
   private _nextDocId: number = 10000;
   private _nextTableId: number = 10000;
@@ -158,6 +162,10 @@ class DatabaseFake {
     const id = this._nextDocId.toString();
     this._nextDocId += 1;
     return id as GenericId<TableName>;
+  }
+
+  storeFile(storageId: GenericId<"_storage">, blob: Blob) {
+    this._storage[storageId] = blob;
   }
 
   insert<TableName extends string>(table: TableName, value: any) {
@@ -694,8 +702,33 @@ function asyncSyscallImpl(db: DatabaseFake) {
         );
       }
     }
-    return Promise.resolve("");
   };
+}
+
+function jsSyscallImpl(db: DatabaseFake) {
+  return async (op: string, args: Record<string, any>): Promise<string> => {
+    switch (op) {
+      case "storage/storeBlob": {
+        const { blob } = args as { blob: Blob };
+        const storageId = db.insert("_storage", {
+          size: blob.size,
+          sha256: await blobSha(blob),
+        });
+        db.storeFile(storageId, blob);
+        return storageId;
+      }
+      default: {
+        throw new Error(`\`convexTest\` does not support js syscall: "${op}"`);
+      }
+    }
+  };
+}
+
+async function blobSha(blob: Blob) {
+  const arrayBuffer = await blob.arrayBuffer();
+  const sha256 = createHash("sha256");
+  sha256.update(Buffer.from(arrayBuffer));
+  return sha256.digest("base64");
 }
 
 export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
@@ -758,6 +791,7 @@ export const convexTest = <Schema extends GenericSchema>(
   global.Convex = {
     syscall: syscallImpl(db),
     asyncSyscall: asyncSyscallImpl(db),
+    jsSyscall: jsSyscallImpl(db),
     db,
   };
 
@@ -784,7 +818,9 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     const markTransactionDone = await getDb().startTransaction();
     try {
       // @ts-ignore
-      const rawResult = await m.invokeMutation(JSON.stringify([args]));
+      const rawResult = await m.invokeMutation(
+        JSON.stringify(convexToJson([parseArgs(args)]))
+      );
       getDb().commit();
       return jsonToConvex(JSON.parse(rawResult));
     } finally {
@@ -805,7 +841,9 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       const markTransactionDone = await getDb().startTransaction();
       try {
         // @ts-ignore
-        const rawResult = await q.invokeQuery(JSON.stringify([args]));
+        const rawResult = await q.invokeQuery(
+          JSON.stringify(convexToJson([parseArgs(args)]))
+        );
         return jsonToConvex(JSON.parse(rawResult));
       } finally {
         getDb().endTransaction(markTransactionDone);
@@ -829,7 +867,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       // @ts-ignore
       const rawResult = await q.invokeAction(
         "" + Math.random(),
-        JSON.stringify([args])
+        JSON.stringify(convexToJson([parseArgs(args)]))
       );
       return jsonToConvex(JSON.parse(rawResult));
     },
@@ -878,6 +916,22 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       });
     },
   };
+}
+
+export function parseArgs(
+  args: Record<string, Value> | undefined
+): Record<string, Value> {
+  if (args === undefined) {
+    return {};
+  }
+  if (!isSimpleObject(args)) {
+    throw new Error(
+      `The arguments to a Convex function must be an object. Received: ${
+        args as any
+      }`
+    );
+  }
+  return args;
 }
 
 async function getFunctionFromReference(
