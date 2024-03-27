@@ -40,15 +40,38 @@ export const mutationSchedulingAction = mutation({
     const id: Id<"_scheduled_functions"> = await ctx.scheduler.runAfter(
       delayMs,
       api.scheduler.actionCallingMutation,
-      {
-        body,
-      }
+      { body }
     );
     return id;
   },
 });
 
+/// cancel scheduled function (1.0/cancel_job)
+
 export const cancel = mutation({
+  args: { id: v.id("_scheduled_functions") },
+  handler: async (ctx, { id }) => {
+    await ctx.scheduler.cancel(id);
+  },
+});
+
+/// actions scheduling action (1.0/actions/schedule)
+
+export const actionSchedulingAction = action({
+  args: { body: v.string(), delayMs: v.number() },
+  handler: async (ctx, { body, delayMs }) => {
+    const id: Id<"_scheduled_functions"> = await ctx.scheduler.runAfter(
+      delayMs,
+      api.scheduler.actionCallingMutation,
+      { body }
+    );
+    return id;
+  },
+});
+
+/// cancel scheduled function via action (1.0/actions/cancel_job)
+
+export const cancelAction = action({
   args: { id: v.id("_scheduled_functions") },
   handler: async (ctx, { id }) => {
     await ctx.scheduler.cancel(id);
