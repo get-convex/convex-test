@@ -62,3 +62,16 @@ export const actionCallingAction = internalAction({
     return { called: 0 };
   },
 });
+
+/// actions calling mutations concurrently
+
+export const actionCallingMutationsConcurrently = action({
+  args: { authors: v.array(v.string()), body: v.string() },
+  handler: async (ctx, { authors, body }) => {
+    await Promise.all(
+      authors.map(async (author) => {
+        return await ctx.runMutation(api.actions.add, { body, author });
+      })
+    );
+  },
+});
