@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { convexTest, getDb } from "../syscalls";
+import { convexTest } from "../syscalls";
 import { internal } from "./_generated/api";
 import schema from "./schema";
 
@@ -25,4 +25,26 @@ test("action get blob", async () => {
     id: storageId,
   });
   expect(result).toEqual(bytes);
+});
+
+test("action delete blob", async () => {
+  const t = convexTest(schema);
+  const bytes = new Uint8Array([0b00001100, 0b00000000]).buffer;
+  const storageId = await t.action(internal.storage.actionStoreBlob, { bytes });
+  await t.action(internal.storage.actionDeleteBlob, { id: storageId });
+  const result = await t.action(internal.storage.actionGetBlob, {
+    id: storageId,
+  });
+  expect(result).toBeNull();
+});
+
+test("mutation delete blob", async () => {
+  const t = convexTest(schema);
+  const bytes = new Uint8Array([0b00001100, 0b00000000]).buffer;
+  const storageId = await t.action(internal.storage.actionStoreBlob, { bytes });
+  await t.mutation(internal.storage.mutationDeleteBlob, { id: storageId });
+  const result = await t.action(internal.storage.actionGetBlob, {
+    id: storageId,
+  });
+  expect(result).toBeNull();
 });

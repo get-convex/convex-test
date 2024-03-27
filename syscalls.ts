@@ -135,6 +135,12 @@ class DatabaseFake {
     this._waitOnCurrentFunction = null;
   }
 
+  // Used to distinguish between mutation and action execution
+  // environment.
+  isInTransaction() {
+    return this._waitOnCurrentFunction !== null;
+  }
+
   get(id: GenericId<string>) {
     if (typeof id !== "string") {
       throw new Error(
@@ -169,6 +175,9 @@ class DatabaseFake {
   }
 
   getFile(storageId: GenericId<"_storage">) {
+    if (this.get(storageId) === null) {
+      return null;
+    }
     return this._storage[storageId];
   }
 
@@ -699,6 +708,24 @@ function asyncSyscallImpl(db: DatabaseFake) {
         const { id } = args;
         db.patch(id, { state: { kind: "canceled" } });
         return JSON.stringify({});
+      }
+      // case "1.0/storageDelete" => self.async_syscall_storageDelete(args).await,
+      // "1.0/storageGetMetadata" => self.async_syscall_storageGetMetadata(args).await,
+      // "1.0/storageGenerateUploadUrl" => {
+      //     self.async_syscall_storageGenerateUploadUrl(args).await
+      // },
+      // "1.0/storageGetUrl
+      case "1.0/storageDelete": {
+        const { storageId } = args;
+        if (!db.isInTransaction()) {
+          await withAuth().run(async () => {
+            db.delete(storageId);
+          });
+        } else {
+          db.delete(storageId);
+        }
+        return JSON.stringify({});
+        break;
       }
       default: {
         throw new Error(

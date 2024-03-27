@@ -1,12 +1,10 @@
 import { v } from "convex/values";
-import { api, internal } from "./_generated/api";
 import {
-  action,
   internalAction,
+  internalMutation,
   internalQuery,
   mutation,
 } from "./_generated/server";
-import { Doc } from "./_generated/dataModel";
 
 /// helpers
 
@@ -36,5 +34,27 @@ export const actionGetBlob = internalAction({
   },
   handler: async (ctx, { id }) => {
     return (await ctx.storage.get(id))?.arrayBuffer();
+  },
+});
+
+/// action delete blob (1.0/storageDelete)
+
+export const actionDeleteBlob = internalAction({
+  args: {
+    id: v.id("_storage"),
+  },
+  handler: async (ctx, { id }) => {
+    await ctx.storage.delete(id);
+  },
+});
+
+/// mutation delete blob (1.0/storageDelete)
+
+export const mutationDeleteBlob = internalMutation({
+  args: {
+    id: v.id("_storage"),
+  },
+  handler: async (ctx, { id }) => {
+    await ctx.storage.delete(id);
   },
 });
