@@ -337,11 +337,12 @@ class DatabaseFake {
       case "IndexRange": {
         const [tableName, indexName] = source.indexName.split(".");
         this._iterateDocs(tableName, (doc) => {
-          results.push(doc);
+          if (
+            source.range.every((filter) => evaluateRangeFilter(doc, filter))
+          ) {
+            results.push(doc);
+          }
         });
-        results = results.filter((v) =>
-          source.range.every((f) => evaluateRangeFilter(v, f))
-        );
         fieldPathsToSortBy = (
           this._schema!.tables[tableName] as any
         ).indexes!.find(
@@ -352,7 +353,16 @@ class DatabaseFake {
         break;
       }
       case "Search": {
-        throw new Error("not implemented");
+        const [tableName] = source.indexName.split(".");
+        this._iterateDocs(tableName, (doc) => {
+          if (
+            source.filters.every((filter) => evaluateSearchFilter(doc, filter))
+          ) {
+            results.push(doc);
+          }
+        });
+        order = "asc";
+        break;
       }
     }
     const filters: Array<FilterJson> = query.operators
@@ -507,6 +517,21 @@ function evaluateRangeFilter(
       return (result as any) < (value as any);
     case "Lte":
       return (result as any) <= (value as any);
+  }
+}
+
+function evaluateSearchFilter(
+  document: GenericDocument,
+  filter: SerializedSearchFilter
+) {
+  const result = evaluateFieldPath(filter.fieldPath, document);
+  switch (filter.type) {
+    case "Eq":
+      return result === filter.value;
+    case "Search":
+      return (result as string)
+        .split(/\s/)
+        .some((word) => word.startsWith(filter.value));
   }
 }
 
@@ -864,7 +889,18 @@ async function getFunctionFromReference(
 async function getFunctionFromName(functionName: string) {
   const [modulePath, exportName] = functionName.split(":");
   const module = await import("./convex/" + modulePath);
-  return module[exportName];
+  const func = module[exportName];
+  if (func === undefined) {
+    throw new Error(
+      `Expected a Convex function exported from module "${modulePath}" as \`${exportName}\`, but there is no such export.`
+    );
+  }
+  if (typeof func !== "function") {
+    throw new Error(
+      `Expected a Convex function exported from module "${modulePath}" as \`${exportName}\`, but got: ${func}`
+    );
+  }
+  return func;
 }
 
 function simpleHash(string: string) {

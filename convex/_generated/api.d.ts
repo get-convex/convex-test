@@ -20,6 +20,7 @@ import type * as mutations from "../mutations.js";
 import type * as pagination from "../pagination.js";
 import type * as queries from "../queries.js";
 import type * as scheduler from "../scheduler.js";
+import type * as textSearch from "../textSearch.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -36,6 +37,7 @@ declare const fullApi: ApiFromModules<{
   pagination: typeof pagination;
   queries: typeof queries;
   scheduler: typeof scheduler;
+  textSearch: typeof textSearch;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,
