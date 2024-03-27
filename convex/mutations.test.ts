@@ -1,4 +1,4 @@
-import { expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 import { convexTest } from "../syscalls";
 import { api } from "./_generated/api";
 import schema from "./schema";

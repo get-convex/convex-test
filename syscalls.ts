@@ -193,8 +193,46 @@ class DatabaseFake {
     if (results.length === 0) {
       return { value: null, done: true };
     } else {
-      return { value: results.pop(), done: false };
+      return { value: results.shift()!, done: false };
     }
+  }
+
+  paginate({
+    query,
+    cursor,
+    pageSize,
+  }: {
+    query: SerializedQuery;
+    cursor: string | null;
+    pageSize: number;
+  }) {
+    const queryId = this.startQuery({ query } as any);
+    const page = [];
+    let isInPage = cursor === null;
+    let isDone = false;
+    let continueCursor = null;
+    for (;;) {
+      const { value, done } = this.queryNext(queryId);
+      if (done) {
+        isDone = true;
+        break;
+      }
+      if (isInPage) {
+        page.push(value);
+        if (page.length >= pageSize) {
+          continueCursor = value!._id;
+          break;
+        }
+      }
+      if (value!._id === cursor) {
+        isInPage = true;
+      }
+    }
+    return {
+      page,
+      isDone,
+      continueCursor,
+    };
   }
 
   private _evaluateQuery(query: SerializedQuery): Array<GenericDocument> {
@@ -380,6 +418,19 @@ function asyncSyscallImpl(db: DatabaseFake) {
         const doc = db.get(args.id);
         return JSON.stringify(convexToJson(doc));
       }
+      case "1.0/queryStreamNext": {
+        const { value, done } = db.queryNext(args.queryId);
+        return JSON.stringify(convexToJson({ value, done }));
+      }
+      case "1.0/queryPage": {
+        const { query, cursor, pageSize } = args;
+        const { page, isDone, continueCursor } = db.paginate({
+          query,
+          cursor,
+          pageSize,
+        });
+        return JSON.stringify(convexToJson({ page, isDone, continueCursor }));
+      }
       case "1.0/insert": {
         const _id = db.insert(args.table, jsonToConvex(args.value));
         return JSON.stringify({ _id });
@@ -398,10 +449,6 @@ function asyncSyscallImpl(db: DatabaseFake) {
         const { id } = args;
         db.delete(id);
         return JSON.stringify({});
-      }
-      case "1.0/queryStreamNext": {
-        const { value, done } = db.queryNext(args.queryId);
-        return JSON.stringify({ value: convexToJson(value as any), done });
       }
       case "1.0/actions/query": {
         const { name, args: queryArgs } = args;

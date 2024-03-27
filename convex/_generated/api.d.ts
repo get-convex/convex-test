@@ -17,6 +17,8 @@ import type {
 import type * as actions from "../actions.js";
 import type * as messages from "../messages.js";
 import type * as mutations from "../mutations.js";
+import type * as pagination from "../pagination.js";
+import type * as queries from "../queries.js";
 import type * as scheduler from "../scheduler.js";
 
 /**
@@ -31,6 +33,8 @@ declare const fullApi: ApiFromModules<{
   actions: typeof actions;
   messages: typeof messages;
   mutations: typeof mutations;
+  pagination: typeof pagination;
+  queries: typeof queries;
   scheduler: typeof scheduler;
 }>;
 export declare const api: FilterApi<
