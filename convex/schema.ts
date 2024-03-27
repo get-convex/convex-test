@@ -5,5 +5,5 @@ export default defineSchema({
   messages: defineTable({
     author: v.string(),
     body: v.string(),
-  }),
+  }).index("author", ["author"]),
 });

@@ -29,6 +29,7 @@ import {
   DocumentByName,
   SystemDataModel,
   GenericQueryCtx,
+  Indexes,
 } from "convex/server";
 
 /*
@@ -101,7 +102,9 @@ class DatabaseFake {
   // TODO: Make this more robust and cleaner
   jobListener: (jobId: string) => void = () => {};
 
-  constructor(_schema: any) {}
+  constructor(
+    private _schema: SchemaDefinition<GenericSchema, boolean> | null
+  ) {}
 
   get(id: GenericId<string>) {
     if (typeof id !== "string") {
@@ -262,8 +265,12 @@ class DatabaseFake {
         results = results.filter((v) =>
           source.range.every((f) => evaluateRangeFilter(v, f))
         );
-        // this should really look up the index
-        fieldPathsToSortBy = source.range.map((v) => v.fieldPath);
+        fieldPathsToSortBy = (
+          this._schema!.tables[tableName] as any
+        ).indexes!.find(
+          ({ indexDescriptor }: { indexDescriptor: string }) =>
+            indexDescriptor === indexName
+        ).fields;
         order = source.order ?? "asc";
         break;
       }
@@ -305,7 +312,6 @@ class DatabaseFake {
 }
 
 function compareValues(a: Value | undefined, b: Value | undefined) {
-  // TODO: respect the comparison ordering between different value types
   if (a === b) {
     return 0;
   }
@@ -321,6 +327,49 @@ function compareValues(a: Value | undefined, b: Value | undefined) {
   if (b === null) {
     return 1;
   }
+  const aType = typeof a;
+  const bType = typeof b;
+  if (aType !== bType) {
+    if (aType === "bigint") {
+      return -1;
+    }
+    if (bType === "bigint") {
+      return 1;
+    }
+    if (aType === "number") {
+      return -1;
+    }
+    if (bType === "number") {
+      return 1;
+    }
+    if (aType === "boolean") {
+      return -1;
+    }
+    if (bType === "boolean") {
+      return 1;
+    }
+    if (aType === "string") {
+      return -1;
+    }
+    if (bType === "string") {
+      return 1;
+    }
+  }
+  if (aType === "object") {
+    if (a instanceof ArrayBuffer && !(b instanceof ArrayBuffer)) {
+      return -1;
+    }
+    if (b instanceof ArrayBuffer && !(a instanceof ArrayBuffer)) {
+      return 1;
+    }
+    if (Array.isArray(a) && !Array.isArray(b)) {
+      return -1;
+    }
+    if (Array.isArray(b) && !Array.isArray(a)) {
+      return 1;
+    }
+  }
+
   return a < b ? -1 : 1;
 }
 
