@@ -709,12 +709,6 @@ function asyncSyscallImpl(db: DatabaseFake) {
         db.patch(id, { state: { kind: "canceled" } });
         return JSON.stringify({});
       }
-      // case "1.0/storageDelete" => self.async_syscall_storageDelete(args).await,
-      // "1.0/storageGetMetadata" => self.async_syscall_storageGetMetadata(args).await,
-      // "1.0/storageGenerateUploadUrl" => {
-      //     self.async_syscall_storageGenerateUploadUrl(args).await
-      // },
-      // "1.0/storageGetUrl
       case "1.0/storageDelete": {
         const { storageId } = args;
         if (!db.isInTransaction()) {
@@ -725,7 +719,18 @@ function asyncSyscallImpl(db: DatabaseFake) {
           db.delete(storageId);
         }
         return JSON.stringify({});
-        break;
+      }
+      case "1.0/storageGetUrl": {
+        const { storageId } = args;
+        const metadata = db.get(storageId);
+        if (metadata === null) {
+          return JSON.stringify(null);
+        }
+        const { sha256 } = metadata;
+        // In the real backend the URL ofc isn't the sha
+        const url =
+          "https://some-deployment.convex.cloud/api/storage/" + sha256;
+        return JSON.stringify(convexToJson(url));
       }
       default: {
         throw new Error(
