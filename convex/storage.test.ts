@@ -48,3 +48,18 @@ test("mutation delete blob", async () => {
   });
   expect(result).toBeNull();
 });
+
+test("query get URL", async () => {
+  const t = convexTest(schema);
+  const bytes = new Uint8Array([0b00001100, 0b00000000]).buffer;
+  const id = await t.action(internal.storage.actionStoreBlob, { bytes });
+  {
+    const result = await t.query(internal.storage.queryGetUrl, { id });
+    expect(result).toMatch("https://");
+  }
+  await t.mutation(internal.storage.mutationDeleteBlob, { id });
+  {
+    const result = await t.query(internal.storage.queryGetUrl, { id });
+    expect(result).toBeNull();
+  }
+});

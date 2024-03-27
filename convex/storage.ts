@@ -58,3 +58,14 @@ export const mutationDeleteBlob = internalMutation({
     await ctx.storage.delete(id);
   },
 });
+
+/// query get URL (1.0/storageGetUrl)
+
+export const queryGetUrl = internalQuery({
+  args: {
+    id: v.id("_storage"),
+  },
+  handler: async (ctx, { id }) => {
+    return await ctx.storage.getUrl(id);
+  },
+});
