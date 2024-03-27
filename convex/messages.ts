@@ -8,8 +8,6 @@ export const list = query(async (ctx) => {
 
 export const listByAuth = query(async (ctx) => {
   const user = await ctx.auth.getUserIdentity();
-  console.log("user", user);
-
   return await ctx.db
     .query("messages")
     .filter((q) => q.eq(q.field("author"), user!.name))

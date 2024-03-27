@@ -9,18 +9,14 @@ test("action calling query", async () => {
     await ctx.db.insert("messages", { body: "foo", author: "test" });
   });
   const result = await t.action(internal.actions.actionCallingQuery);
-  expect(result.length).toEqual(1);
-  expect(result[0].body).toEqual("foo");
-  expect(result[0].author).toEqual("test");
+  expect(result).toMatchObject([{ body: "foo", author: "test" }]);
 });
 
 test("action calling mutation", async () => {
   const t = convexTest(schema);
   await t.action(api.actions.actionCallingMutation, { body: "heya" });
   const result = await t.query(internal.actions.list);
-  expect(result.length).toEqual(1);
-  expect(result[0].body).toEqual("heya");
-  expect(result[0].author).toEqual("AI");
+  expect(result).toMatchObject([{ body: "heya", author: "AI" }]);
 });
 
 test("action calling action", async () => {

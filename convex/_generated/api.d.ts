@@ -16,6 +16,7 @@ import type {
 } from "convex/server";
 import type * as actions from "../actions.js";
 import type * as messages from "../messages.js";
+import type * as mutations from "../mutations.js";
 import type * as scheduler from "../scheduler.js";
 
 /**
@@ -29,6 +30,7 @@ import type * as scheduler from "../scheduler.js";
 declare const fullApi: ApiFromModules<{
   actions: typeof actions;
   messages: typeof messages;
+  mutations: typeof mutations;
   scheduler: typeof scheduler;
 }>;
 export declare const api: FilterApi<

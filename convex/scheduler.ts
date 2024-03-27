@@ -12,8 +12,6 @@ export const list = internalQuery({
 export const add = mutation({
   args: { body: v.string(), author: v.string() },
   handler: async (ctx, { body, author }) => {
-    console.log("add");
-
     const message = { body, author };
     await ctx.db.insert("messages", message);
   },

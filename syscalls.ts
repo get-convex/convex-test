@@ -98,6 +98,7 @@ class DatabaseFake {
   private _nextDocId: number = 10000;
   private _nextTableId: number = 10000;
   private _queryResults: Record<string, Array<GenericDocument>> = {};
+  // TODO: Make this more robust and cleaner
   jobListener: (jobId: string) => void = () => {};
 
   constructor(_schema: any) {}
@@ -146,26 +147,35 @@ class DatabaseFake {
     this._documents[id] = { tableName, document: { ...document, ...value } };
   }
 
-  // replace<TableName extends string>(id: GenericId<TableName>, value: Record<string, any>): Promise<void> {
-  //   const doc = this._documents[id];
-  //   if (doc === undefined) {
-  //     throw new Error("Patch on non existent doc")
-  //   }
-  //   if (value._id !== undefined && value._id !== doc._id) {
-  //     throw new Error("_id mismatch")
-  //   }
-  //   this._documents[id] = {...value, _id: doc._id, _creationTime: doc._creationTime }
-  //   return Promise.resolve()
-  // }
+  replace<TableName extends string>(
+    id: GenericId<TableName>,
+    value: Record<string, any>
+  ) {
+    const doc = this._documents[id];
+    if (doc === undefined) {
+      throw new Error("Replace on non-existent doc");
+    }
+    const { document, tableName } = doc;
+    if (value._id !== undefined && value._id !== document._id) {
+      throw new Error("_id mismatch");
+    }
+    this._documents[id] = {
+      tableName,
+      document: {
+        ...value,
+        _id: document._id,
+        _creationTime: document._creationTime,
+      },
+    };
+  }
 
-  // delete(id: GenericId<string>): Promise<void> {
-  //   const doc = this._documents[id];
-  //   if (doc === undefined) {
-  //     throw new Error("Delete on non existent doc")
-  //   }
-  //   delete this._documents[id]
-  //   return Promise.resolve()
-  // }
+  delete(id: GenericId<string>) {
+    const doc = this._documents[id];
+    if (doc === undefined) {
+      throw new Error("Delete on non-existent doc");
+    }
+    delete this._documents[id];
+  }
 
   startQuery(j: JSONValue) {
     const id = this._nextQueryId;
@@ -374,6 +384,21 @@ function asyncSyscallImpl(db: DatabaseFake) {
         const _id = db.insert(args.table, jsonToConvex(args.value));
         return JSON.stringify({ _id });
       }
+      case "1.0/shallowMerge": {
+        const { id, value } = args;
+        db.patch(id, value);
+        return JSON.stringify({});
+      }
+      case "1.0/replace": {
+        const { id, value } = args;
+        db.replace(id, value);
+        return JSON.stringify({});
+      }
+      case "1.0/remove": {
+        const { id } = args;
+        db.delete(id);
+        return JSON.stringify({});
+      }
       case "1.0/queryStreamNext": {
         const { value, done } = db.queryNext(args.queryId);
         return JSON.stringify({ value: convexToJson(value as any), done });
@@ -411,8 +436,6 @@ function asyncSyscallImpl(db: DatabaseFake) {
           state: { kind: "pending" },
         });
         setTimeout(async () => {
-          console.log("started settimeout");
-
           {
             const job = db.get(jobId) as ScheduledFunction;
             if (job.state.kind === "canceled") {
@@ -426,9 +449,7 @@ function asyncSyscallImpl(db: DatabaseFake) {
           }
           db.patch(jobId, { state: { kind: "inProgress" } });
           try {
-            console.log("before await");
             await withAuth().fun(makeFunctionReference(name), fnArgs);
-            console.log("finished func call");
           } catch (error) {
             console.error(
               `Error when running scheduled function ${name}`,
@@ -515,6 +536,9 @@ export const convexTest = <Schema extends GenericSchema>(
   };
 
   const jobListener = {
+    // This is needed because when we execute functions
+    // we are performing dynamic `import`s, and those
+    // are real work that cannot be force-awaited.
     finishInProgressScheduledFunctions: async (): Promise<void> => {
       const inProgressJobs = (await withAuth().run(async (ctx) => {
         return (
@@ -609,11 +633,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     },
 
     fun: async (functionReference: any, args: any) => {
-      console.log("inside fun");
-
       const func = await getFunctionFromReference(functionReference);
-      console.log("switch");
-
       if (func.isQuery) {
         return await byType.query(functionReference, args);
       }
@@ -621,8 +641,6 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         return await byType.mutation(functionReference, args);
       }
       if (func.isAction) {
-        console.log("isAction");
-
         return await byType.action(functionReference, args);
       }
     },
