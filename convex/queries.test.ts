@@ -2,6 +2,8 @@ import { expect, test } from "vitest";
 import { convexTest } from "../syscalls";
 import { api } from "./_generated/api";
 import schema from "./schema";
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
 
 test("collect", async () => {
   const t = convexTest(schema);
@@ -33,8 +35,15 @@ test("withIndex", async () => {
   ]);
 });
 
+const relaxedSchema = defineSchema({
+  messages: defineTable({
+    author: v.optional(v.any()),
+    body: v.string(),
+  }).index("author", ["author"]),
+});
+
 test("ordering", async () => {
-  const t = convexTest(schema);
+  const t = convexTest(relaxedSchema);
   const authors = await t.run(async (ctx) => {
     const authors: any[] = [
       "stringValue",

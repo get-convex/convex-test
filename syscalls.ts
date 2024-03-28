@@ -1,6 +1,7 @@
 import {
   GenericId,
   JSONValue,
+  Validator,
   Value,
   convexToJson,
   jsonToConvex,
@@ -184,6 +185,7 @@ class DatabaseFake {
 
   insert<TableName extends string>(table: TableName, value: any) {
     const _id = this._generateId(table);
+    this._validate(table, value);
     const doc = {
       ...value,
       _id,
@@ -202,9 +204,14 @@ class DatabaseFake {
     if (doc === null) {
       throw new Error(`Patch on non-existent document with ID "${id}"`);
     }
-    const { document, tableName } = doc;
+    const {
+      document: { _id, _creationTime, ...fields },
+      tableName,
+    } = doc;
+    const merged = { ...fields, ...value };
+    this._validate(tableName, merged);
     this._writes[id] = {
-      existing: { tableName, document: { ...document, ...value } },
+      existing: { tableName, document: { _id, _creationTime, ...merged } },
     };
   }
 
@@ -220,6 +227,7 @@ class DatabaseFake {
     if (value._id !== undefined && value._id !== document._id) {
       throw new Error("_id mismatch");
     }
+    this._validate(tableName, value);
     this._writes[id] = {
       existing: {
         tableName,
@@ -257,6 +265,18 @@ class DatabaseFake {
 
   resetWrites() {
     this._writes = {};
+  }
+
+  _validate(tableName: string, doc: Record<string, any>) {
+    if (this._schema === null) {
+      return;
+    }
+    if (this._schema.tables[tableName] === undefined) {
+      return;
+    }
+    const schema = this._schema.tables[tableName];
+    const validator = (schema as any).documentType as Validator<any>;
+    validateValidator((validator as any).json, doc);
   }
 
   startQuery(j: JSONValue) {
@@ -599,6 +619,136 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
     return 0;
   } else {
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  }
+}
+
+type ObjectFieldType = { fieldType: ValidatorJSON; optional: boolean };
+
+type ValidatorJSON =
+  | {
+      type: "null";
+    }
+  | { type: "number" }
+  | { type: "bigint" }
+  | { type: "boolean" }
+  | { type: "string" }
+  | { type: "bytes" }
+  | { type: "any" }
+  | {
+      type: "literal";
+      value: JSONValue;
+    }
+  | { type: "id"; tableName: string }
+  | { type: "array"; value: ValidatorJSON }
+  | { type: "object"; value: Record<string, ObjectFieldType> }
+  | { type: "union"; value: ValidatorJSON[] };
+
+function validateValidator(validator: ValidatorJSON, value: any) {
+  switch (validator.type) {
+    case "null": {
+      if (value !== null) {
+        throw new Error(`Validator error: Expected \`null\`, got \`${value}\``);
+      }
+      return;
+    }
+    case "number": {
+      if (typeof value !== "number") {
+        throw new Error(
+          `Validator error: Expected \`number\`, got \`${value}\``
+        );
+      }
+      return;
+    }
+    case "bigint": {
+      if (typeof value !== "bigint") {
+        throw new Error(
+          `Validator error: Expected \`bigint\`, got \`${value}\``
+        );
+      }
+      return;
+    }
+    case "boolean": {
+      if (typeof value !== "boolean") {
+        throw new Error(
+          `Validator error: Expected \`boolean\`, got \`${value}\``
+        );
+      }
+      return;
+    }
+    case "string": {
+      if (typeof value !== "string") {
+        throw new Error(
+          `Validator error: Expected \`string\`, got \`${value}\``
+        );
+      }
+      return;
+    }
+    case "bytes": {
+      if (!(value instanceof ArrayBuffer)) {
+        throw new Error(
+          `Validator error: Expected \`ArrayBuffer\`, got \`${value}\``
+        );
+      }
+      return;
+    }
+    case "any": {
+      return;
+    }
+    case "literal": {
+      if (value !== validator.value) {
+        throw new Error(
+          `Validator error: Expected \`${validator.value}\`, got \`${value}\``
+        );
+      }
+      return;
+    }
+    case "id": {
+      if (typeof value !== "string") {
+        throw new Error(
+          `Validator error: Expected \`string\`, got \`${value}\``
+        );
+      }
+      return;
+    }
+    case "array": {
+      if (!Array.isArray(value)) {
+        throw new Error(
+          `Validator error: Expected \`Array\`, got \`${value}\``
+        );
+      }
+      for (const v of value) {
+        validateValidator(validator.value, v);
+      }
+      return;
+    }
+    case "object": {
+      if (typeof value !== "object") {
+        throw new Error(
+          `Validator error: Expected \`object\`, got \`${value}\``
+        );
+      }
+      for (const [k, { fieldType, optional }] of Object.entries(
+        validator.value
+      )) {
+        if (value[k] === undefined) {
+          if (!optional) {
+            throw new Error(
+              `Validator error: Missing required field \`${k}\` in object`
+            );
+          }
+        } else {
+          validateValidator(fieldType, value[k]);
+        }
+      }
+      for (const k of Object.keys(value)) {
+        if (validator.value[k] === undefined) {
+          throw new Error(
+            `Validator error: Unexpected field \`${k}\` in object`
+          );
+        }
+      }
+      return;
+    }
   }
 }
 
