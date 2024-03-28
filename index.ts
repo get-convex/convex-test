@@ -81,14 +81,16 @@ type StoredDocument = GenericDocument & {
   _creationTime: number;
 };
 
-type QueryId = string;
+type QueryId = number;
 
-type DocumentId = GenericId<string>;
+type TableName = string;
+
+type DocumentId = GenericId<TableName>;
 
 class DatabaseFake {
   private _documents: Record<DocumentId, StoredDocument> = {};
   private _storage: Record<DocumentId, Blob> = {};
-  private _nextQueryId: number = 1;
+  private _nextQueryId: QueryId = 1;
   private _nextDocId: number = 10000;
   private _queryResults: Record<QueryId, Array<GenericDocument>> = {};
   // TODO: Make this more robust and cleaner
@@ -169,7 +171,7 @@ class DatabaseFake {
     return this._storage[storageId];
   }
 
-  insert<TableName extends string>(table: TableName, value: any) {
+  insert<Table extends TableName>(table: Table, value: any) {
     const _id = this._generateId(table);
     this._validate(table, value);
     this._writes[_id] = {
@@ -183,10 +185,7 @@ class DatabaseFake {
     return _id;
   }
 
-  patch<TableName extends string>(
-    id: GenericId<TableName>,
-    value: Record<string, any>
-  ) {
+  patch(id: DocumentId, value: Record<string, any>) {
     const document = this.get(id);
     if (document === null) {
       throw new Error(`Patch on non-existent document with ID "${id}"`);
@@ -200,10 +199,7 @@ class DatabaseFake {
     };
   }
 
-  replace<TableName extends string>(
-    id: GenericId<TableName>,
-    value: Record<string, any>
-  ) {
+  replace(id: DocumentId, value: Record<string, any>) {
     const document = this.get(id);
     if (document === null) {
       throw new Error(`Replace on non-existent document with ID "${id}"`);
@@ -224,7 +220,7 @@ class DatabaseFake {
     };
   }
 
-  delete(id: GenericId<string>) {
+  delete(id: DocumentId) {
     const document = this.get(id);
     if (document === null) {
       throw new Error("Delete on non-existent doc");
@@ -247,7 +243,7 @@ class DatabaseFake {
     this._writes = {};
   }
 
-  _validate(tableName: string, doc: Record<string, any>) {
+  _validate(tableName: string, doc: GenericDocument) {
     if (this._schema === null) {
       return;
     }
@@ -259,15 +255,15 @@ class DatabaseFake {
     validateValidator((validator as any).json, doc);
   }
 
-  startQuery(j: JSONValue) {
+  startQuery(query: SerializedQuery) {
     const id = this._nextQueryId;
-    const results = this._evaluateQuery((j as any).query);
+    const results = this._evaluateQuery(query);
     this._queryResults[id] = results;
     this._nextQueryId += 1;
     return id;
   }
 
-  queryNext(queryId: number) {
+  queryNext(queryId: QueryId) {
     const results = this._queryResults[queryId];
     if (results === undefined) {
       throw new Error("Bad queryId");
@@ -288,7 +284,7 @@ class DatabaseFake {
     cursor: string | null;
     pageSize: number;
   }) {
-    const queryId = this.startQuery({ query } as any);
+    const queryId = this.startQuery(query);
     const page = [];
     let isInPage = cursor === null;
     let isDone = false;
@@ -720,6 +716,11 @@ function validateValidator(validator: ValidatorJSON, value: any) {
           `Validator error: Expected \`object\`, got \`${value}\``
         );
       }
+      if (!isSimpleObject(value)) {
+        throw new Error(
+          `Validator error: Expected a plain old JavaScript \`object\`, got \`${value}\``
+        );
+      }
       for (const [k, { fieldType, optional }] of Object.entries(
         validator.value
       )) {
@@ -750,7 +751,8 @@ function syscallImpl(db: DatabaseFake) {
     const args = JSON.parse(jsonArgs);
     switch (op) {
       case "1.0/queryStream": {
-        const queryId = db.startQuery(args);
+        const { query } = args;
+        const queryId = db.startQuery(query);
         return JSON.stringify({ queryId });
       }
       case "1.0/queryCleanup": {
