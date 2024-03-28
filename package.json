@@ -7,9 +7,10 @@
     "dist"
   ],
   "scripts": {
-    "prebuild": "npm run test",
+    "prebuild": "npm run test:once",
     "build": "tsc",
     "test": "vitest",
+    "test:once": "vitest run",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "clean": "rm -rf dist"
   },
@@ -19,6 +20,7 @@
     "convex": "^1.10.0"
   },
   "devDependencies": {
+    "typescript": "^5.4.3",
     "vitest": "^1.4.0"
   }
 }

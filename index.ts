@@ -53,13 +53,13 @@ type SerializedQuery = {
   operators: Array<QueryOperator>;
 };
 
-export type SerializedRangeExpression = {
+type SerializedRangeExpression = {
   type: "Eq" | "Gt" | "Gte" | "Lt" | "Lte";
   fieldPath: string;
   value: JSONValue;
 };
 
-export type SerializedSearchFilter =
+type SerializedSearchFilter =
   | {
       type: "Search";
       fieldPath: string;
@@ -509,7 +509,7 @@ function compareValues(a: Value | undefined, b: Value | undefined) {
   return a < b ? -1 : 1;
 }
 
-export function isSimpleObject(value: unknown) {
+function isSimpleObject(value: unknown) {
   const isObject = typeof value === "object";
   const prototype = Object.getPrototypeOf(value);
   const isSimple =
@@ -1023,17 +1023,18 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   finishInProgressScheduledFunctions: () => Promise<void>;
 };
 
-export function getDb() {
+function getDb() {
   return (global as any).Convex.db as DatabaseFake;
 }
 
-export function getSyscalls() {
+function getSyscalls() {
   return (global as any).Convex as {
     syscall: ReturnType<typeof syscallImpl>;
     asyncSyscall: ReturnType<typeof asyncSyscallImpl>;
   };
 }
 
+// Main entrypoint to the library
 export const convexTest = <Schema extends GenericSchema>(
   schema: SchemaDefinition<Schema, boolean> | null
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
@@ -1184,7 +1185,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
   };
 }
 
-export function parseArgs(
+function parseArgs(
   args: Record<string, Value> | undefined
 ): Record<string, Value> {
   if (args === undefined) {
