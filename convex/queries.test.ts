@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { convexTest } from "../syscalls";
+import { convexTest } from "../index";
 import { api } from "./_generated/api";
 import schema from "./schema";
 import { defineSchema, defineTable } from "convex/server";

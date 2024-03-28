@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { convexTest } from "../syscalls";
+import { convexTest } from "../index";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 

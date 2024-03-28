@@ -1,4 +1,24 @@
 import {
+  DataModelFromSchemaDefinition,
+  DocumentByName,
+  FunctionReference,
+  FunctionReturnType,
+  GenericDataModel,
+  GenericDocument,
+  GenericMutationCtx,
+  GenericSchema,
+  OptionalRestArgs,
+  SchemaDefinition,
+  StorageActionWriter,
+  SystemDataModel,
+  UserIdentity,
+  actionGeneric,
+  getFunctionName,
+  makeFunctionReference,
+  mutationGeneric,
+  queryGeneric,
+} from "convex/server";
+import {
   GenericId,
   JSONValue,
   Validator,
@@ -6,43 +26,7 @@ import {
   convexToJson,
   jsonToConvex,
 } from "convex/values";
-import {
-  GenericDocument,
-  queryGeneric,
-  mutationGeneric,
-  GenericDataModel,
-  UserIdentity,
-  QueryBuilder,
-  RegisteredQuery,
-  FunctionVisibility,
-  DefaultFunctionArgs,
-  RegisteredMutation,
-  GenericMutationCtx,
-  SchemaDefinition,
-  GenericSchema,
-  DataModelFromSchemaDefinition,
-  FunctionReference,
-  getFunctionName,
-  actionGeneric,
-  OptionalRestArgs,
-  FunctionReturnType,
-  makeFunctionReference,
-  DocumentByName,
-  SystemDataModel,
-  GenericQueryCtx,
-  Indexes,
-  StorageActionWriter,
-} from "convex/server";
 import { createHash } from "crypto";
-
-/*
-- Arg validation
-- Schema validation
-- Transactions
-- Real ID algorithm
-- Pagination
-
-*/
 
 type FilterJson =
   | { $eq: [FilterJson, FilterJson] }
@@ -92,17 +76,13 @@ type ScheduledFunction = DocumentByName<
   "_scheduled_functions"
 >;
 
-type StoredFileMetadata = DocumentByName<SystemDataModel, "_storage">;
-
 type StoredDoc = { tableName: string; document: GenericDocument };
 
 class DatabaseFake {
-  private _tables: Record<string, number> = {};
   private _documents: Record<string, StoredDoc> = {};
   private _storage: Record<string, Blob> = {};
   private _nextQueryId: number = 1;
   private _nextDocId: number = 10000;
-  private _nextTableId: number = 10000;
   private _queryResults: Record<string, Array<GenericDocument>> = {};
   // TODO: Make this more robust and cleaner
   jobListener: (jobId: string) => void = () => {};
@@ -165,7 +145,7 @@ class DatabaseFake {
   }
 
   private _generateId<TableName extends string>(
-    table: TableName
+    _table: TableName
   ): GenericId<TableName> {
     const id = this._nextDocId.toString();
     this._nextDocId += 1;
