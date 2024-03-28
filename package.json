@@ -1,11 +1,11 @@
 {
-  "name": "convex-test-2",
-  "version": "1.0.0",
+  "name": "convex-test",
+  "version": "0.0.1",
   "description": "",
   "main": "index.js",
   "scripts": {
     "test": "vitest",
-    "jest:debug": "node --nolazy --inspect-brk ./node_modules/jest/bin/jest.js --runInBand --colors --verbose"
+    "test:debug": "vitest --inspect-brk --no-file-parallelism"
   },
   "author": "",
   "license": "ISC",
