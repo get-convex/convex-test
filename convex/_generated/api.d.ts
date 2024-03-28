@@ -22,6 +22,7 @@ import type * as queries from "../queries.js";
 import type * as scheduler from "../scheduler.js";
 import type * as storage from "../storage.js";
 import type * as textSearch from "../textSearch.js";
+import type * as vectorSearch from "../vectorSearch.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   scheduler: typeof scheduler;
   storage: typeof storage;
   textSearch: typeof textSearch;
+  vectorSearch: typeof vectorSearch;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,

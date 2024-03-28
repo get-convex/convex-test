@@ -3,7 +3,7 @@ import { query } from "./_generated/server";
 
 /// search (Search index)
 
-export const search = query({
+export const textSearch = query({
   args: { author: v.union(v.string(), v.null()), body: v.string() },
   handler: async (ctx, { author, body }) => {
     return await ctx.db

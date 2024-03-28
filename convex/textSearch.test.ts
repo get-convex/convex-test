@@ -3,7 +3,7 @@ import { convexTest } from "../syscalls";
 import { api } from "./_generated/api";
 import schema from "./schema";
 
-test("search", async () => {
+test("text search", async () => {
   const t = convexTest(schema);
   await t.run(async (ctx) => {
     await ctx.db.insert("messages", { author: "sarah", body: "hello convex" });
@@ -11,7 +11,7 @@ test("search", async () => {
     await ctx.db.insert("messages", { author: "sarah", body: "hello base" });
   });
   {
-    const messages = await t.query(api.textSearch.search, {
+    const messages = await t.query(api.textSearch.textSearch, {
       body: "hello",
       author: null,
     });
@@ -22,7 +22,7 @@ test("search", async () => {
     ]);
   }
   {
-    const messages = await t.query(api.textSearch.search, {
+    const messages = await t.query(api.textSearch.textSearch, {
       body: "hello",
       author: "sarah",
     });
@@ -32,7 +32,7 @@ test("search", async () => {
     ]);
   }
   {
-    const messages = await t.query(api.textSearch.search, {
+    const messages = await t.query(api.textSearch.textSearch, {
       body: "con",
       author: null,
     });

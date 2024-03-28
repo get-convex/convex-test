@@ -418,6 +418,33 @@ class DatabaseFake {
   jobFinished(jobId: string) {
     this.jobListener(jobId);
   }
+
+  vectorSearch(
+    tableAndIndexName: string,
+    vector: number[],
+    expressions: SerializedRangeExpression[],
+    limit: number
+  ) {
+    let results: GenericDocument[] = [];
+    const [tableName, indexName] = tableAndIndexName.split(".");
+    this._iterateDocs(tableName, (doc) => {
+      if (expressions.every((filter) => evaluateFilter(doc, filter))) {
+        results.push(doc);
+      }
+    });
+    const { vectorField } = (
+      this._schema!.tables[tableName] as any
+    ).vectorIndexes!.find(
+      ({ indexDescriptor }: { indexDescriptor: string }) =>
+        indexDescriptor === indexName
+    );
+    const idsAndScores = results.map((doc) => {
+      const score = cosineSimilarity(vector, doc[vectorField] as number[]);
+      return { _id: doc._id, _score: score };
+    });
+    idsAndScores.sort((a, b) => b._score - a._score);
+    return idsAndScores.slice(0, limit);
+  }
 }
 
 function compareValues(a: Value | undefined, b: Value | undefined) {
@@ -554,6 +581,24 @@ function evaluateSearchFilter(
       return (result as string)
         .split(/\s/)
         .some((word) => word.startsWith(filter.value));
+  }
+}
+
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  let dotProduct = 0.0;
+  let normA = 0.0;
+  let normB = 0.0;
+
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+
+  if (normA === 0 || normB === 0) {
+    return 0;
+  } else {
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
   }
 }
 
@@ -704,6 +749,20 @@ function asyncSyscallImpl(db: DatabaseFake) {
           await getSyscalls().asyncSyscall("1.0/cancel_job", jsonArgs);
         });
         return JSON.stringify({});
+      }
+      case "1.0/actions/vectorSearch": {
+        const {
+          query: { indexName, limit, vector, expressions },
+        } = args;
+        const results = db.vectorSearch(
+          indexName,
+          vector,
+          // Probably an unintentional implementation in Convex
+          // where expressions is only a single expression
+          expressions === null ? [] : [expressions],
+          limit
+        );
+        return JSON.stringify(convexToJson({ results }));
       }
       case "1.0/cancel_job": {
         const { id } = args;
