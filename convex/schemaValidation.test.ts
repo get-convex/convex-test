@@ -63,3 +63,30 @@ test("arrays", async () => {
       })
   ).rejects.toThrowError(/Validator error/);
 });
+
+test("ids", async () => {
+  const t = convexTest(
+    defineSchema({
+      messages: defineTable({
+        author: v.optional(v.id("users")),
+      }),
+    })
+  );
+  await expect(
+    async () =>
+      await t.run(async (ctx) => {
+        await ctx.db.insert("messages", {
+          author: "no bueno" as any,
+        });
+      })
+  ).rejects.toThrowError(/Validator error/);
+  await expect(
+    async () =>
+      await t.run(async (ctx) => {
+        const messageId = await ctx.db.insert("messages", {});
+        await ctx.db.insert("messages", {
+          author: messageId as any,
+        });
+      })
+  ).rejects.toThrowError(/Validator error/);
+});

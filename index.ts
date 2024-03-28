@@ -76,19 +76,27 @@ type ScheduledFunction = DocumentByName<
   "_scheduled_functions"
 >;
 
-type StoredDoc = { tableName: string; document: GenericDocument };
+type StoredDocument = GenericDocument & {
+  _id: DocumentId;
+  _creationTime: number;
+};
+
+type QueryId = string;
+
+type DocumentId = GenericId<string>;
 
 class DatabaseFake {
-  private _documents: Record<string, StoredDoc> = {};
-  private _storage: Record<string, Blob> = {};
+  private _documents: Record<DocumentId, StoredDocument> = {};
+  private _storage: Record<DocumentId, Blob> = {};
   private _nextQueryId: number = 1;
   private _nextDocId: number = 10000;
-  private _queryResults: Record<string, Array<GenericDocument>> = {};
+  private _queryResults: Record<QueryId, Array<GenericDocument>> = {};
   // TODO: Make this more robust and cleaner
   jobListener: (jobId: string) => void = () => {};
   private _writes: Record<
-    string,
-    { new: StoredDoc } | { existing: StoredDoc | null }
+    DocumentId,
+    | { newValue: StoredDocument; isInsert: true }
+    | { newValue: StoredDocument | null; isInsert: false }
   > = {};
   // The DatabaseFake is used in the Convex global,
   // and so it restricts `convexTest` to run one function
@@ -132,22 +140,20 @@ class DatabaseFake {
       );
     }
 
-    return this._get(id)?.document ?? null;
-  }
-
-  _get(id: GenericId<string>) {
     const write = this._writes[id];
     if (write !== undefined) {
-      return "new" in write ? write.new : write.existing;
+      return write.newValue;
     }
 
     return this._documents[id] ?? null;
   }
 
+  // Note that this is not the format the real backend
+  // uses for IDs.
   private _generateId<TableName extends string>(
-    _table: TableName
+    table: TableName
   ): GenericId<TableName> {
-    const id = this._nextDocId.toString();
+    const id = this._nextDocId.toString() + ";" + table;
     this._nextDocId += 1;
     return id as GenericId<TableName>;
   }
@@ -166,13 +172,14 @@ class DatabaseFake {
   insert<TableName extends string>(table: TableName, value: any) {
     const _id = this._generateId(table);
     this._validate(table, value);
-    const doc = {
-      ...value,
-      _id,
-      _creationTime: Date.now(),
+    this._writes[_id] = {
+      newValue: {
+        ...value,
+        _id,
+        _creationTime: Date.now(),
+      },
+      isInsert: true,
     };
-    this._writes[_id] = { new: { document: doc, tableName: table } };
-    // this._documentIdsByTable[table].add(_id)
     return _id;
   }
 
@@ -180,18 +187,16 @@ class DatabaseFake {
     id: GenericId<TableName>,
     value: Record<string, any>
   ) {
-    const doc = this._get(id);
-    if (doc === null) {
+    const document = this.get(id);
+    if (document === null) {
       throw new Error(`Patch on non-existent document with ID "${id}"`);
     }
-    const {
-      document: { _id, _creationTime, ...fields },
-      tableName,
-    } = doc;
+    const { _id, _creationTime, ...fields } = document;
     const merged = { ...fields, ...value };
-    this._validate(tableName, merged);
+    this._validate(tableNameFromId(_id as string)!, merged);
     this._writes[id] = {
-      existing: { tableName, document: { _id, _creationTime, ...merged } },
+      newValue: { _id, _creationTime, ...merged },
+      isInsert: false,
     };
   }
 
@@ -199,45 +204,40 @@ class DatabaseFake {
     id: GenericId<TableName>,
     value: Record<string, any>
   ) {
-    const doc = this._get(id);
-    if (doc === null) {
+    const document = this.get(id);
+    if (document === null) {
       throw new Error(`Replace on non-existent document with ID "${id}"`);
     }
-    const { document, tableName } = doc;
     if (value._id !== undefined && value._id !== document._id) {
-      throw new Error("_id mismatch");
+      throw new Error(
+        `Value passed to replace must include the same \`_id\`, got "${value._id}"`
+      );
     }
-    this._validate(tableName, value);
+    this._validate(tableNameFromId(document._id as string)!, value);
     this._writes[id] = {
-      existing: {
-        tableName,
-        document: {
-          ...value,
-          _id: document._id,
-          _creationTime: document._creationTime,
-        },
+      newValue: {
+        ...value,
+        _id: document._id,
+        _creationTime: document._creationTime,
       },
+      isInsert: false,
     };
   }
 
   delete(id: GenericId<string>) {
-    const doc = this._get(id);
-    if (doc === null) {
+    const document = this.get(id);
+    if (document === null) {
       throw new Error("Delete on non-existent doc");
     }
-    this._writes[id] = { existing: null };
+    this._writes[id] = { newValue: null, isInsert: false };
   }
 
   commit() {
-    for (const [id, write] of Object.entries(this._writes)) {
-      if ("new" in write) {
-        this._documents[id] = write.new;
+    for (const [id, { newValue }] of Object.entries(this._writes)) {
+      if (newValue === null) {
+        delete this._documents[id as DocumentId];
       } else {
-        if (write.existing === null) {
-          delete this._documents[id];
-        } else {
-          this._documents[id] = write.existing;
-        }
+        this._documents[id as DocumentId] = newValue;
       }
     }
     this.resetWrites();
@@ -322,20 +322,20 @@ class DatabaseFake {
     callback: (doc: GenericDocument) => void
   ) {
     for (const write of Object.values(this._writes)) {
-      if ("new" in write) {
-        const doc = write.new;
-        if (doc.tableName === tableName) {
-          callback(doc.document);
+      if (write.isInsert) {
+        const document = write.newValue;
+        if (tableNameFromId(document._id) === tableName) {
+          callback(document);
         }
       }
     }
-    for (const doc of Object.values(this._documents)) {
-      if (doc.tableName === tableName) {
-        const write = this._writes[doc.document._id as string];
-        if (write !== undefined && "existing" in write) {
-          callback(write.existing!.document);
+    for (const document of Object.values(this._documents)) {
+      if (tableNameFromId(document._id) === tableName) {
+        const write = this._writes[document._id];
+        if (write !== undefined && !write.isInsert && write.newValue !== null) {
+          callback(write.newValue);
         } else {
-          callback(doc.document);
+          callback(document);
         }
       }
     }
@@ -445,6 +445,14 @@ class DatabaseFake {
     idsAndScores.sort((a, b) => b._score - a._score);
     return idsAndScores.slice(0, limit);
   }
+}
+
+function tableNameFromId(id: string) {
+  const parts = id.split(";");
+  if (parts.length !== 2) {
+    return null;
+  }
+  return id.split(";")[1];
 }
 
 function compareValues(a: Value | undefined, b: Value | undefined) {
@@ -686,6 +694,11 @@ function validateValidator(validator: ValidatorJSON, value: any) {
       if (typeof value !== "string") {
         throw new Error(
           `Validator error: Expected \`string\`, got \`${value}\``
+        );
+      }
+      if (tableNameFromId(value) !== validator.tableName) {
+        throw new Error(
+          `Validator error: Expected ID for table ${validator.tableName}, got \`${value}\``
         );
       }
       return;
