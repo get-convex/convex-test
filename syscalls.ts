@@ -1104,6 +1104,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
   const byType = {
     query: async (functionReference: any, args: any) => {
       const func = await getFunctionFromReference(functionReference);
+      validateValidator(JSON.parse(func.exportArgs()), args ?? {});
       const q = queryGeneric({
         handler: (ctx: any, a: any) => {
           const testCtx = { ...ctx, auth };
@@ -1124,11 +1125,13 @@ function withAuth(auth: AuthFake = new AuthFake()) {
 
     mutation: async (functionReference: any, args: any): Promise<Value> => {
       const func = await getFunctionFromReference(functionReference);
+      validateValidator(JSON.parse(func.exportArgs()), args ?? {});
       return await runTransaction(func, args);
     },
 
     action: async (functionReference: any, args: any) => {
       const func = await getFunctionFromReference(functionReference);
+      validateValidator(JSON.parse(func.exportArgs()), args ?? {});
 
       const a = actionGeneric({
         handler: (ctx: any, a: any) => {

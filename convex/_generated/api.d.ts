@@ -15,6 +15,7 @@ import type {
   FunctionReference,
 } from "convex/server";
 import type * as actions from "../actions.js";
+import type * as argumentsValidation from "../argumentsValidation.js";
 import type * as messages from "../messages.js";
 import type * as mutations from "../mutations.js";
 import type * as pagination from "../pagination.js";
@@ -34,6 +35,7 @@ import type * as vectorSearch from "../vectorSearch.js";
  */
 declare const fullApi: ApiFromModules<{
   actions: typeof actions;
+  argumentsValidation: typeof argumentsValidation;
   messages: typeof messages;
   mutations: typeof mutations;
   pagination: typeof pagination;
