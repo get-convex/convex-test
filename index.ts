@@ -244,7 +244,7 @@ class DatabaseFake {
   }
 
   _validate(tableName: string, doc: GenericDocument) {
-    if (this._schema === null) {
+    if (this._schema === null || !(this._schema as any).schemaValidation) {
       return;
     }
     if (this._schema.tables[tableName] === undefined) {
