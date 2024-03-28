@@ -40,8 +40,10 @@ test("action delete blob", async () => {
 
 test("mutation delete blob", async () => {
   const t = convexTest(schema);
-  const bytes = new Uint8Array([0b00001100, 0b00000000]).buffer;
-  const storageId = await t.action(internal.storage.actionStoreBlob, { bytes });
+  const storageId = await t.run(async (ctx) => {
+    const bytes = new Uint8Array([0b00001100, 0b00000000]).buffer;
+    return await ctx.storage.store(new Blob([bytes]));
+  });
   await t.mutation(internal.storage.mutationDeleteBlob, { id: storageId });
   const result = await t.action(internal.storage.actionGetBlob, {
     id: storageId,

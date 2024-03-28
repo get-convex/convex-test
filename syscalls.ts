@@ -30,6 +30,7 @@ import {
   SystemDataModel,
   GenericQueryCtx,
   Indexes,
+  StorageActionWriter,
 } from "convex/server";
 import { createHash } from "crypto";
 
@@ -711,13 +712,9 @@ function asyncSyscallImpl(db: DatabaseFake) {
       }
       case "1.0/storageDelete": {
         const { storageId } = args;
-        if (!db.isInTransaction()) {
-          await withAuth().run(async () => {
-            db.delete(storageId);
-          });
-        } else {
+        await writeToDatabase(async (db) => {
           db.delete(storageId);
-        }
+        });
         return JSON.stringify({});
       }
       case "1.0/storageGetUrl": {
@@ -753,7 +750,7 @@ function jsSyscallImpl(db: DatabaseFake) {
     switch (op) {
       case "storage/storeBlob": {
         const { blob } = args as { blob: Blob };
-        const storageId = await withAuth().run(async () => {
+        const storageId = await writeToDatabase(async (db) => {
           return db.insert("_storage", {
             size: blob.size,
             sha256: await blobSha(blob),
@@ -771,6 +768,18 @@ function jsSyscallImpl(db: DatabaseFake) {
       }
     }
   };
+}
+
+// If we're in action, wrap the write in a transaction.
+async function writeToDatabase<T>(impl: (db: DatabaseFake) => Promise<T>) {
+  const db = getDb();
+  if (!db.isInTransaction()) {
+    return await withAuth().run(async () => {
+      return await impl(db);
+    });
+  } else {
+    return await impl(db);
+  }
 }
 
 async function blobSha(blob: Blob) {
@@ -798,7 +807,9 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
       ...args: OptionalRestArgs<Action>
     ) => Promise<FunctionReturnType<Action>>;
     run: <Output>(
-      func: (ctx: GenericMutationCtx<DataModel>) => Promise<Output>
+      func: (
+        ctx: GenericMutationCtx<DataModel> & { storage: StorageActionWriter }
+      ) => Promise<Output>
     ) => Promise<Output>;
     finishInProgressScheduledFunctions: () => Promise<void>;
   };
@@ -816,7 +827,9 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
     ...args: OptionalRestArgs<Action>
   ) => Promise<FunctionReturnType<Action>>;
   run: <Output>(
-    func: (ctx: GenericMutationCtx<DataModel>) => Promise<Output>
+    func: (
+      ctx: GenericMutationCtx<DataModel> & { storage: StorageActionWriter }
+    ) => Promise<Output>
   ) => Promise<Output>;
   finishInProgressScheduledFunctions: () => Promise<void>;
 };
@@ -856,11 +869,12 @@ export const convexTest = <Schema extends GenericSchema>(
 function withAuth(auth: AuthFake = new AuthFake()) {
   const runTransaction = async <T>(
     handler: (ctx: any, args: any) => T,
-    args: any
+    args: any,
+    extraCtx: any = {}
   ): Promise<T> => {
     const m = mutationGeneric({
       handler: (ctx: any, a: any) => {
-        const testCtx = { ...ctx, auth };
+        const testCtx = { ...ctx, auth, ...extraCtx };
         return handler(testCtx, a);
       },
     });
@@ -907,14 +921,14 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     action: async (functionReference: any, args: any) => {
       const func = await getFunctionFromReference(functionReference);
 
-      const q = actionGeneric({
+      const a = actionGeneric({
         handler: (ctx: any, a: any) => {
           const testCtx = { ...ctx, auth };
           return func(testCtx, a);
         },
       });
       // @ts-ignore
-      const rawResult = await q.invokeAction(
+      const rawResult = await a.invokeAction(
         "" + Math.random(),
         JSON.stringify(convexToJson([parseArgs(args)]))
       );
@@ -925,7 +939,18 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     ...byType,
 
     run: async <T>(handler: (ctx: any) => T): Promise<T> => {
-      return await runTransaction(handler, {});
+      // Grab StorageActionWriter from action ctx
+      const a = actionGeneric({
+        handler: async ({ storage }: any) => {
+          return await runTransaction(handler, {}, { storage });
+        },
+      });
+      // @ts-ignore
+      const rawResult = await a.invokeAction(
+        "" + Math.random(),
+        JSON.stringify(convexToJson([{}]))
+      );
+      return jsonToConvex(JSON.parse(rawResult)) as T;
     },
 
     fun: async (functionReference: any, args: any) => {
