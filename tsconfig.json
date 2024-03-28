@@ -19,5 +19,6 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["./"]
+  "include": ["./"],
+  "exclude": ["convex"]
 }
