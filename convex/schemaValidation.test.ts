@@ -90,3 +90,22 @@ test("ids", async () => {
       })
   ).rejects.toThrowError(/Validator error/);
 });
+
+test("schema validation off", async () => {
+  const t = convexTest(
+    defineSchema(
+      {
+        messages: defineTable({
+          author: v.string(),
+        }),
+      },
+      { schemaValidation: false }
+    )
+  );
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", {
+      author: 3,
+      extraField: true,
+    } as any);
+  });
+});
