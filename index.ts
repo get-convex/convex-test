@@ -1064,8 +1064,14 @@ export const convexTest = <Schema extends GenericSchema>(
 
   return {
     withIdentity(identity: Partial<UserIdentity>) {
-      const subject = identity.subject ?? simpleHash(JSON.stringify(identity));
-      return withAuth(new AuthFake({ ...identity, subject }));
+      const subject =
+        identity.subject ?? "" + simpleHash(JSON.stringify(identity));
+      const issuer = identity.issuer ?? "https://convex.test";
+      const tokenIdentifier =
+        identity.tokenIdentifier ?? `${issuer}|${subject}`;
+      return withAuth(
+        new AuthFake({ ...identity, subject, issuer, tokenIdentifier })
+      );
     },
     ...withAuth(),
   } as any;
