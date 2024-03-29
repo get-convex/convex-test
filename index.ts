@@ -1135,9 +1135,11 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           return func(testCtx, a);
         },
       });
+      // Real backend uses different ID format
+      const requestId = "" + Math.random();
       // @ts-ignore
       const rawResult = await a.invokeAction(
-        "" + Math.random(),
+        requestId,
         JSON.stringify(convexToJson([parseArgs(args)]))
       );
       return jsonToConvex(JSON.parse(rawResult));
