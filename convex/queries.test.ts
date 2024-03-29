@@ -42,47 +42,47 @@ const relaxedSchema = defineSchema({
   }).index("author", ["author"]),
 });
 
-// test("type ordering", async () => {
-//   const t = convexTest(relaxedSchema);
-//   const authors = await t.run(async (ctx) => {
-//     const authors: any[] = [
-//       "stringValue",
-//       "xFactor",
-//       undefined,
-//       false,
-//       true,
-//       34,
-//       35,
-//       BigInt(34),
-//       null,
-//       ["a"],
-//       { a: 1 },
-//       new ArrayBuffer(8),
-//     ];
-//     await Promise.all(
-//       authors.map(async (author) => {
-//         await ctx.db.insert("messages", { author, body: "hello" });
-//       })
-//     );
-//     return (
-//       await ctx.db.query("messages").withIndex("author").order("desc").collect()
-//     ).map(({ author }) => (author === undefined ? "UNDEFINED" : author));
-//   });
-//   expect(authors).toMatchObject([
-//     { a: 1 },
-//     ["a"],
-//     new ArrayBuffer(8),
-//     "xFactor",
-//     "stringValue",
-//     true,
-//     false,
-//     35,
-//     34,
-//     BigInt(34),
-//     null,
-//     "UNDEFINED",
-//   ]);
-// });
+test("type ordering", async () => {
+  const t = convexTest(relaxedSchema);
+  const authors = await t.run(async (ctx) => {
+    const authors: any[] = [
+      "stringValue",
+      "xFactor",
+      undefined,
+      false,
+      true,
+      34,
+      35,
+      BigInt(34),
+      null,
+      ["a"],
+      { a: 1 },
+      new ArrayBuffer(8),
+    ];
+    await Promise.all(
+      authors.map(async (author) => {
+        await ctx.db.insert("messages", { author, body: "hello" });
+      })
+    );
+    return (
+      await ctx.db.query("messages").withIndex("author").order("desc").collect()
+    ).map(({ author }) => (author === undefined ? "UNDEFINED" : author));
+  });
+  expect(authors).toMatchObject([
+    { a: 1 },
+    ["a"],
+    new ArrayBuffer(8),
+    "xFactor",
+    "stringValue",
+    true,
+    false,
+    35,
+    34,
+    BigInt(34),
+    null,
+    "UNDEFINED",
+  ]);
+});
 
 test("order", async () => {
   const t = convexTest(schema);
