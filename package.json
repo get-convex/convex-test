@@ -12,7 +12,8 @@
     "test": "vitest",
     "test:once": "vitest run",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
   },
   "author": "Sarah Shader & Michal Srb <srb@convex.dev>",
   "license": "Apache-2.0",
