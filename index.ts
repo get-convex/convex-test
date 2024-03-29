@@ -92,7 +92,7 @@ class DatabaseFake {
   private _storage: Record<DocumentId, Blob> = {};
   private _nextQueryId: QueryId = 1;
   private _nextDocId: number = 10000;
-  private _creationTimeOffset: number = 0;
+  private _lastCreationTime: number = 0;
   private _queryResults: Record<QueryId, Array<GenericDocument>> = {};
   // TODO: Make this more robust and cleaner
   jobListener: (jobId: string) => void = () => {};
@@ -120,7 +120,6 @@ class DatabaseFake {
     this._waitOnCurrentFunction = new Promise((resolve) => {
       markTransactionDone = resolve;
     });
-    this._creationTimeOffset = 0;
     return markTransactionDone!;
   }
 
@@ -176,13 +175,12 @@ class DatabaseFake {
   insert<Table extends TableName>(table: Table, value: any) {
     this._validate(table, value);
     const _id = this._generateId(table);
-    this._creationTimeOffset += 0.001;
+    const now = Date.now();
+    const _creationTime =
+      now <= this._lastCreationTime ? this._lastCreationTime + 0.001 : now;
+    this._lastCreationTime = _creationTime;
     this._writes[_id] = {
-      newValue: {
-        ...value,
-        _id,
-        _creationTime: Date.now() + this._creationTimeOffset,
-      },
+      newValue: { ...value, _id, _creationTime },
       isInsert: true,
     };
     return _id;
