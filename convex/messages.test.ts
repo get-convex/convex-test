@@ -24,8 +24,6 @@ test("ai", async () => {
   );
   await t.action(api.messages.sendAIMessage, { prompt: "hello" });
   const messages = await t.query(api.messages.list);
-  expect(messages.length).toEqual(1);
-  expect(messages[0].author).toEqual("AI");
-  expect(messages[0].body).toEqual("I am the overlord");
+  expect(messages).toMatchObject([{ author: "AI", body: "I am the overlord" }]);
   vi.unstubAllGlobals();
 });
