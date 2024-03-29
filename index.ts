@@ -1051,9 +1051,9 @@ function getSyscalls() {
 
 // Main entrypoint to the library
 export const convexTest = <Schema extends GenericSchema>(
-  schema: SchemaDefinition<Schema, boolean> | null
+  schema?: SchemaDefinition<Schema, boolean>
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
-  const db = new DatabaseFake(schema);
+  const db = new DatabaseFake(schema ?? null);
   // @ts-ignore
   global.Convex = {
     syscall: syscallImpl(db),
