@@ -1,7 +1,16 @@
 {
   "name": "convex-test",
-  "description": "A JS mock of the Convex backend for testing your Convex functions.",
   "version": "0.0.1",
+  "description": "A JS mock of the Convex backend for testing your Convex functions.",
+  "keywords": [
+    "test",
+    "jest",
+    "vitest",
+    "convex"
+  ],
+  "homepage": "https://docs.convex.dev/functions/testing",
+  "bugs": "https://github.com/get-convex/convex-test/issues",
+  "repository": "https://github.com/get-convex/convex-test",
   "main": "dist/index.js",
   "files": [
     "dist"
