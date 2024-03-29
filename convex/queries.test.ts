@@ -42,7 +42,7 @@ const relaxedSchema = defineSchema({
   }).index("author", ["author"]),
 });
 
-test("ordering", async () => {
+test("type ordering", async () => {
   const t = convexTest(relaxedSchema);
   const authors = await t.run(async (ctx) => {
     const authors: any[] = [
@@ -81,5 +81,19 @@ test("ordering", async () => {
     BigInt(34),
     null,
     "UNDEFINED",
+  ]);
+});
+
+test("order", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello1" });
+    await ctx.db.insert("messages", { author: "sarah", body: "hello2" });
+    await ctx.db.insert("messages", { author: "sarah", body: "hello3" });
+  });
+  const messages = await t.query(api.queries.lastN, { count: 2 });
+  expect(messages).toMatchObject([
+    { author: "sarah", body: "hello2" },
+    { author: "sarah", body: "hello3" },
   ]);
 });
