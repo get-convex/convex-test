@@ -34,9 +34,11 @@ test("mutation scheduling action", async () => {
     const jobs = await t.query(internal.scheduler.jobs);
     expect(jobs).toMatchObject([{ state: { kind: "success" } }]);
   }
+  vi.useRealTimers();
 });
 
 test("cancel mutation", async () => {
+  vi.useFakeTimers();
   const t = convexTest(schema);
   const id = await t.mutation(api.scheduler.mutationSchedulingAction, {
     body: "through scheduler",
@@ -51,6 +53,7 @@ test("cancel mutation", async () => {
 
   const result = await t.query(internal.scheduler.list);
   expect(result).toMatchObject([]);
+  vi.useRealTimers();
 });
 
 test("action scheduling action", async () => {
@@ -77,9 +80,11 @@ test("action scheduling action", async () => {
     const jobs = await t.query(internal.scheduler.jobs);
     expect(jobs).toMatchObject([{ state: { kind: "success" } }]);
   }
+  vi.useRealTimers();
 });
 
 test("cancel action", async () => {
+  vi.useFakeTimers();
   const t = convexTest(schema);
   const id = await t.action(api.scheduler.actionSchedulingAction, {
     body: "through scheduler",
@@ -94,4 +99,5 @@ test("cancel action", async () => {
 
   const result = await t.query(internal.scheduler.list);
   expect(result).toMatchObject([]);
+  vi.useRealTimers();
 });
