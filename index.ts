@@ -21,7 +21,6 @@ import {
 import {
   GenericId,
   JSONValue,
-  Validator,
   Value,
   convexToJson,
   jsonToConvex,
@@ -81,6 +80,18 @@ type StoredDocument = GenericDocument & {
   _creationTime: number;
 };
 
+type Index = {
+  indexDescriptor: string;
+  fields: string[];
+};
+
+type VectorIndex = {
+  indexDescriptor: string;
+  vectorField: string;
+  dimensions: number;
+  filterFields: string[];
+};
+
 type QueryId = number;
 
 type TableName = string;
@@ -108,9 +119,32 @@ class DatabaseFake {
   // can run mutations in parallel.
   private _waitOnCurrentFunction: Promise<void> | null = null;
 
-  constructor(
-    private _schema: SchemaDefinition<GenericSchema, boolean> | null
-  ) {}
+  private _schema: {
+    schemaValidation: boolean;
+    tables: Map<
+      string,
+      {
+        indexes: Index[];
+        vectorIndexes: VectorIndex[];
+        documentType: ValidatorJSON;
+      }
+    >;
+  } | null;
+
+  constructor(schema: SchemaDefinition<GenericSchema, boolean> | null) {
+    this._schema =
+      schema === null
+        ? null
+        : {
+            schemaValidation: (schema as any).schemaValidation,
+            tables: new Map(
+              Object.entries(schema.tables).map(([name, tableSchema]) => [
+                name,
+                (tableSchema as any).export(),
+              ])
+            ),
+          };
+  }
 
   async startTransaction() {
     if (this._waitOnCurrentFunction !== null) {
@@ -245,15 +279,14 @@ class DatabaseFake {
   }
 
   _validate(tableName: string, doc: GenericDocument) {
-    if (this._schema === null || !(this._schema as any).schemaValidation) {
+    if (this._schema === null || !this._schema.schemaValidation) {
       return;
     }
-    if (this._schema.tables[tableName] === undefined) {
+    const validator = this._schema.tables.get(tableName)?.documentType;
+    if (validator === undefined) {
       return;
     }
-    const schema = this._schema.tables[tableName];
-    const validator = (schema as any).documentType as Validator<any>;
-    validateValidator((validator as any).json, doc);
+    validateValidator(validator, doc);
   }
 
   startQuery(query: SerializedQuery) {
@@ -362,12 +395,18 @@ class DatabaseFake {
             results.push(doc);
           }
         });
-        fieldPathsToSortBy = (
-          this._schema!.tables[tableName] as any
-        ).indexes!.find(
+        const indexes = this._schema?.tables.get(tableName)?.indexes;
+        const index = indexes?.find(
           ({ indexDescriptor }: { indexDescriptor: string }) =>
             indexDescriptor === indexName
-        ).fields;
+        );
+        if (index === undefined) {
+          throw new Error(
+            `Cannot use index "${indexName}" for table "${tableName}" because ` +
+              `it is not declared in the schema.`
+          );
+        }
+        fieldPathsToSortBy = index.fields;
         order = source.order ?? "asc";
         break;
       }
@@ -429,12 +468,18 @@ class DatabaseFake {
         results.push(doc);
       }
     });
-    const { vectorField } = (
-      this._schema!.tables[tableName] as any
-    ).vectorIndexes!.find(
+    const vectorIndexes = this._schema?.tables.get(tableName)?.vectorIndexes;
+    const vectorIndex = vectorIndexes?.find(
       ({ indexDescriptor }: { indexDescriptor: string }) =>
         indexDescriptor === indexName
     );
+    if (vectorIndex === undefined) {
+      throw new Error(
+        `Cannot use vector index "${indexName}" for table "${tableName}" because ` +
+          `it is not declared in the schema.`
+      );
+    }
+    const { vectorField } = vectorIndex;
     const idsAndScores = results.map((doc) => {
       const score = cosineSimilarity(vector, doc[vectorField] as number[]);
       return { _id: doc._id, _score: score };
