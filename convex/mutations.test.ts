@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { convexTest, getDb } from "../index";
+import { convexTest } from "../index";
 import { api } from "./_generated/api";
 import schema from "./schema";
 
@@ -47,7 +47,7 @@ test("transaction", async () => {
   const t = convexTest(schema);
   await expect(async () => {
     await t.mutation(api.mutations.throws, { body: "hello", author: "sarah" });
-  }).rejects.toThrow("I changed my mind");
+  }).rejects.toThrowError("I changed my mind");
 
   const messages = await t.query(api.messages.list);
   expect(messages).toMatchObject([]);

@@ -15,7 +15,7 @@ test("extra fields", async () => {
           extraField: true,
         } as any);
       })
-  ).rejects.toThrowError(/Validator error/);
+  ).rejects.toThrowError("Validator error");
 });
 
 test("patch", async () => {
@@ -29,7 +29,7 @@ test("patch", async () => {
         });
         await ctx.db.patch(id, { author: false as any });
       })
-  ).rejects.toThrowError(/Validator error/);
+  ).rejects.toThrowError("Validator error");
 });
 
 test("replace", async () => {
@@ -43,7 +43,7 @@ test("replace", async () => {
         });
         await ctx.db.replace(id, { author: null as any, body: "hey" });
       })
-  ).rejects.toThrowError(/Validator error/);
+  ).rejects.toThrowError("Validator error");
 });
 
 test("arrays", async () => {
@@ -61,7 +61,7 @@ test("arrays", async () => {
           values: ["bad" as any],
         });
       })
-  ).rejects.toThrowError(/Validator error/);
+  ).rejects.toThrowError("Validator error");
 });
 
 test("ids", async () => {
@@ -79,7 +79,7 @@ test("ids", async () => {
           author: "no bueno" as any,
         });
       })
-  ).rejects.toThrowError(/Validator error/);
+  ).rejects.toThrowError("Validator error");
   await expect(
     async () =>
       await t.run(async (ctx) => {
@@ -88,7 +88,7 @@ test("ids", async () => {
           author: messageId as any,
         });
       })
-  ).rejects.toThrowError(/Validator error/);
+  ).rejects.toThrowError("Validator error");
 });
 
 test("schema validation off", async () => {

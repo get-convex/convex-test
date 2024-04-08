@@ -8,7 +8,7 @@ test("query arguments validation", async () => {
   await expect(
     async () =>
       await t.query(api.argumentsValidation.queryWithArgs, { a: "bad" as any })
-  ).rejects.toThrowError(/Validator error/);
+  ).rejects.toThrowError("Validator error");
   await t.query(api.argumentsValidation.queryWithoutArgs, { a: "ok" } as any);
 });
 
@@ -20,7 +20,7 @@ test("mutation arguments validation", async () => {
         a: 42,
         bad: 1,
       } as any)
-  ).rejects.toThrowError(/Validator error/);
+  ).rejects.toThrowError("Validator error");
   await t.mutation(api.argumentsValidation.mutationWithoutArgs, {
     a: "ok",
   } as any);
@@ -31,6 +31,6 @@ test("action arguments validation", async () => {
   await expect(
     async () =>
       await t.action(api.argumentsValidation.actionWithArgs, {} as any)
-  ).rejects.toThrowError(/Validator error/);
+  ).rejects.toThrowError("Validator error");
   await t.action(api.argumentsValidation.actionWithoutArgs, { a: "ok" } as any);
 });
