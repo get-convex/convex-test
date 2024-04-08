@@ -423,12 +423,16 @@ class DatabaseFake {
         break;
       }
     }
-    const filters: Array<FilterJson> = query.operators
-      .filter((o) => (o as any).filter !== undefined)
-      .map((o) => (o as any).filter);
-    // @ts-ignore
-    const limit: { limit: number } | null =
-      query.operators.filter((o) => (o as any).limit !== undefined)[0] ?? null;
+    const filters = query.operators
+      .filter(
+        (operator): operator is { filter: FilterJson } => "filter" in operator
+      )
+      .map((operator) => operator.filter);
+
+    const limit =
+      query.operators.filter(
+        (operator): operator is { limit: number } => "limit" in operator
+      )[0] ?? null;
 
     results = results.filter((v) => filters.every((f) => evaluateFilter(v, f)));
 
@@ -461,7 +465,7 @@ class DatabaseFake {
     expressions: SerializedRangeExpression[],
     limit: number
   ) {
-    let results: GenericDocument[] = [];
+    const results: GenericDocument[] = [];
     const [tableName, indexName] = tableAndIndexName.split(".");
     this._iterateDocs(tableName, (doc) => {
       if (expressions.every((filter) => evaluateFilter(doc, filter))) {
@@ -727,7 +731,9 @@ function validateValidator(validator: ValidatorJSON, value: any) {
     case "literal": {
       if (value !== validator.value) {
         throw new Error(
-          `Validator error: Expected \`${validator.value}\`, got \`${value}\``
+          `Validator error: Expected \`${
+            validator.value as any
+          }\`, got \`${value}\``
         );
       }
       return;
@@ -896,43 +902,46 @@ function asyncSyscallImpl(db: DatabaseFake) {
           scheduledTime: tsInSecs * 1000,
           state: { kind: "pending" },
         });
-        setTimeout(async () => {
-          {
-            const job = db.get(jobId) as ScheduledFunction;
-            if (job.state.kind === "canceled") {
-              return;
+        setTimeout(
+          (async () => {
+            {
+              const job = db.get(jobId) as ScheduledFunction;
+              if (job.state.kind === "canceled") {
+                return;
+              }
+              if (job.state.kind !== "pending") {
+                throw new Error(
+                  `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`
+                );
+              }
             }
-            if (job.state.kind !== "pending") {
-              throw new Error(
-                `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`
+            db.patch(jobId, { state: { kind: "inProgress" } });
+            try {
+              await withAuth().fun(makeFunctionReference(name), fnArgs);
+            } catch (error) {
+              console.error(
+                `Error when running scheduled function ${name}`,
+                error
               );
+              db.patch(jobId, {
+                state: { kind: "failed" },
+                completedTime: Date.now(),
+              });
+              db.jobFinished(jobId);
             }
-          }
-          db.patch(jobId, { state: { kind: "inProgress" } });
-          try {
-            await withAuth().fun(makeFunctionReference(name), fnArgs);
-          } catch (error) {
-            console.error(
-              `Error when running scheduled function ${name}`,
-              error
-            );
-            db.patch(jobId, {
-              state: { kind: "failed" },
-              completedTime: Date.now(),
-            });
+            {
+              const job = db.get(jobId) as ScheduledFunction;
+              if (job.state.kind !== "inProgress") {
+                throw new Error(
+                  `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`
+                );
+              }
+            }
+            db.patch(jobId, { state: { kind: "success" } });
             db.jobFinished(jobId);
-          }
-          {
-            const job = db.get(jobId) as ScheduledFunction;
-            if (job.state.kind !== "inProgress") {
-              throw new Error(
-                `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`
-              );
-            }
-          }
-          db.patch(jobId, { state: { kind: "success" } });
-          db.jobFinished(jobId);
-        }, tsInSecs * 1000 - Date.now());
+          }) as () => void,
+          tsInSecs * 1000 - Date.now()
+        );
         return JSON.stringify(convexToJson(jobId));
       }
       case "1.0/actions/cancel_job": {
@@ -976,7 +985,8 @@ function asyncSyscallImpl(db: DatabaseFake) {
         const { sha256 } = metadata;
         // In the real backend the URL ofc isn't the sha
         const url =
-          "https://some-deployment.convex.cloud/api/storage/" + sha256;
+          "https://some-deployment.convex.cloud/api/storage/" +
+          (sha256 as string);
         return JSON.stringify(convexToJson(url));
       }
       case "1.0/storageGenerateUploadUrl": {
@@ -1100,8 +1110,7 @@ export const convexTest = <Schema extends GenericSchema>(
   schema?: SchemaDefinition<Schema, boolean>
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
   const db = new DatabaseFake(schema ?? null);
-  // @ts-ignore
-  global.Convex = {
+  (global as unknown as { Convex: any }).Convex = {
     syscall: syscallImpl(db),
     asyncSyscall: asyncSyscallImpl(db),
     jsSyscall: jsSyscallImpl(db),
@@ -1137,10 +1146,9 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     });
     const markTransactionDone = await getDb().startTransaction();
     try {
-      // @ts-ignore
-      const rawResult = await m.invokeMutation(
-        JSON.stringify(convexToJson([parseArgs(args)]))
-      );
+      const rawResult = await (
+        m as unknown as { invokeMutation: (args: string) => Promise<string> }
+      ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
       getDb().commit();
       return jsonToConvex(JSON.parse(rawResult)) as T;
     } finally {
@@ -1161,10 +1169,9 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       });
       const markTransactionDone = await getDb().startTransaction();
       try {
-        // @ts-ignore
-        const rawResult = await q.invokeQuery(
-          JSON.stringify(convexToJson([parseArgs(args)]))
-        );
+        const rawResult = await (
+          q as unknown as { invokeQuery: (args: string) => Promise<string> }
+        ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
         return jsonToConvex(JSON.parse(rawResult));
       } finally {
         getDb().endTransaction(markTransactionDone);
@@ -1189,8 +1196,11 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       });
       // Real backend uses different ID format
       const requestId = "" + Math.random();
-      // @ts-ignore
-      const rawResult = await a.invokeAction(
+      const rawResult = await (
+        a as unknown as {
+          invokeAction: (requestId: string, args: string) => Promise<string>;
+        }
+      ).invokeAction(
         requestId,
         JSON.stringify(convexToJson([parseArgs(args)]))
       );
@@ -1207,11 +1217,13 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           return await runTransaction(handler, {}, { storage });
         },
       });
-      // @ts-ignore
-      const rawResult = await a.invokeAction(
-        "" + Math.random(),
-        JSON.stringify(convexToJson([{}]))
-      );
+      // Real backend uses different ID format
+      const requestId = "" + Math.random();
+      const rawResult = await (
+        a as unknown as {
+          invokeAction: (requestId: string, args: string) => Promise<string>;
+        }
+      ).invokeAction(requestId, JSON.stringify(convexToJson([{}])));
       return jsonToConvex(JSON.parse(rawResult)) as T;
     },
 

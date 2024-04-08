@@ -3,7 +3,6 @@ import {
   internalAction,
   internalMutation,
   internalQuery,
-  mutation,
 } from "./_generated/server";
 
 /// helpers
