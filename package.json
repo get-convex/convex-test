@@ -13,7 +13,9 @@
   "repository": "https://github.com/get-convex/convex-test",
   "main": "dist/index.js",
   "files": [
-    "dist"
+    "dist/*.js",
+    "dist/*.ts",
+    "dist/*.map"
   ],
   "scripts": {
     "prebuild": "npm run lint && npm run test:once",
