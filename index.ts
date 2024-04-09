@@ -1050,49 +1050,88 @@ async function blobSha(blob: Blob) {
 }
 
 export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
-  TestConvexForDataModel<DataModelFromSchemaDefinition<SchemaDef>>;
+  TestConvexForDataModelAndIdentity<DataModelFromSchemaDefinition<SchemaDef>>;
 
 export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
-  withIdentity(identity: Partial<UserIdentity>): {
-    query: <Query extends FunctionReference<"query", any>>(
-      func: Query,
-      ...args: OptionalRestArgs<Query>
-    ) => Promise<FunctionReturnType<Query>>;
-    mutation: <Mutation extends FunctionReference<"mutation", any>>(
-      func: Mutation,
-      ...args: OptionalRestArgs<Mutation>
-    ) => Promise<FunctionReturnType<Mutation>>;
-    action: <Action extends FunctionReference<"action", any>>(
-      func: Action,
-      ...args: OptionalRestArgs<Action>
-    ) => Promise<FunctionReturnType<Action>>;
-    run: <Output>(
-      func: (
-        ctx: GenericMutationCtx<DataModel> & { storage: StorageActionWriter }
-      ) => Promise<Output>
-    ) => Promise<Output>;
-    finishInProgressScheduledFunctions: () => Promise<void>;
-  };
-
+  /**
+   * Call a public or internal query.
+   *
+   * @param query A {@link FunctionReference} for the query.
+   * @param args  An arguments object for the query. If this is omitted,
+   *   the arguments will be `{}`.
+   * @returns A `Promise` of the query's result.
+   */
   query: <Query extends FunctionReference<"query", any>>(
-    func: Query,
+    query: Query,
     ...args: OptionalRestArgs<Query>
   ) => Promise<FunctionReturnType<Query>>;
+
+  /**
+   * Call a public or internal mutation.
+   *
+   * @param mutation A {@link FunctionReference} for the mutation.
+   * @param args  An arguments object for the mutation. If this is omitted,
+   *   the arguments will be `{}`.
+   * @returns A `Promise` of the mutation's result.
+   */
   mutation: <Mutation extends FunctionReference<"mutation", any>>(
-    func: Mutation,
+    mutation: Mutation,
     ...args: OptionalRestArgs<Mutation>
   ) => Promise<FunctionReturnType<Mutation>>;
+
+  /**
+   * Call a public or internal action.
+   *
+   * @param action A {@link FunctionReference} for the action.
+   * @param args  An arguments object for the action. If this is omitted,
+   *   the arguments will be `{}`.
+   * @returns A `Promise` of the action's result.
+   */
   action: <Action extends FunctionReference<"action", any>>(
-    func: Action,
+    action: Action,
     ...args: OptionalRestArgs<Action>
   ) => Promise<FunctionReturnType<Action>>;
+
+  /**
+   * Read from and write to the mock backend.
+   *
+   * @param func The async function that reads or writes to the mock backend.
+   *   It receives a {@link GenericMutationCtx} as its first argument, enriched
+   *   with the `storage` API available in actions, so it can read and write
+   *   directly to file storage.
+   * @returns A `Promise` of the function's result.
+   */
   run: <Output>(
     func: (
       ctx: GenericMutationCtx<DataModel> & { storage: StorageActionWriter }
     ) => Promise<Output>
   ) => Promise<Output>;
+
+  /**
+   * Wait for all scheduled functions currently in the "inProgress" state
+   * to either finish successfully or fail.
+   *
+   * Use in combination with `vi.useFakeTimers()` and `vi.runAllTimers()`
+   * to control precisely the execution of scheduled functions.
+   */
   finishInProgressScheduledFunctions: () => Promise<void>;
 };
+
+export type TestConvexForDataModelAndIdentity<
+  DataModel extends GenericDataModel
+> = {
+  /**
+   * To test functions which depend on the current authenticated user identity
+   * you can create a version of the `t` accessor with given user identity
+   * attributes.
+   * @param identity A subset of {@link UserIdentity} attributes. If you
+   *   don't provide `issuer`, `subject` or `tokenIdentifier` they are
+   *   generated automatically.
+   */
+  withIdentity(
+    identity: Partial<UserIdentity>
+  ): TestConvexForDataModel<DataModel>;
+} & TestConvexForDataModel<DataModel>;
 
 function getDb() {
   return (global as any).Convex.db as DatabaseFake;
@@ -1105,7 +1144,13 @@ function getSyscalls() {
   };
 }
 
-// Main entrypoint to the library
+/**
+ * Call this function at the start of each of your tests.
+ *
+ * @param schema The default export from your "schema.ts" file.
+ * @returns an object which is by convention stored in the `t` variable
+ *   and which provides methods for exercising your Convex functions.
+ */
 export const convexTest = <Schema extends GenericSchema>(
   schema?: SchemaDefinition<Schema, boolean>
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
