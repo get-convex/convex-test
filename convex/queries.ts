@@ -16,6 +16,6 @@ export const lastN = query({
       .query("messages")
       .order("desc")
       .take(args.count);
-    return lastMessages.toReversed();
+    return lastMessages.reverse();
   },
 });
