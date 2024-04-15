@@ -19,3 +19,8 @@ export const lastN = query({
     return lastMessages.reverse();
   },
 });
+
+// To test default exports
+export default query(async (ctx) => {
+  return ctx.db.query("messages").collect()
+})

@@ -19,6 +19,12 @@ test("patch", async () => {
   await t.mutation(api.mutations.patch, { id, body: "hi" });
   const messages = await t.query(api.messages.list);
   expect(messages).toMatchObject([{ body: "hi", author: "sarah" }]);
+
+  // should not crash even with `_id` included
+  await t.mutation(api.mutations.patch, { id, body: "hi", extraProperties: { _id: id } });
+
+  // throws if `_id` doesn't match
+  await expect(t.mutation(api.mutations.patch, { id, body: "hi", extraProperties: { _id: "nonsense" } })).rejects.toThrow(/does not match '_id' field/)
 });
 
 test("replace", async () => {
