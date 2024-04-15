@@ -823,7 +823,7 @@ function syscallImpl(db: DatabaseFake) {
       }
       case "1.0/db/normalizeId": {
         const idString: string = args.idString;
-        const isInTable = idString.endsWith(`;${args.tableName}`)
+        const isInTable = idString.endsWith(`;${args.table}`)
         return JSON.stringify({
           id: isInTable ? idString : null
         })
