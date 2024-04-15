@@ -104,3 +104,26 @@ test("order", async () => {
     { author: "sarah", body: "hello4" },
   ]);
 });
+
+test("normalizeId", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    const messageId = await ctx.db.insert("messages", { author: "sarah", body: "hello" })
+    expect(ctx.db.normalizeId("messages", messageId)).toEqual(messageId);
+    expect(ctx.db.normalizeId("messages", "Not an ID")).toEqual(null);
+  })
+})
+
+
+test("default export", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello1" });
+    await ctx.db.insert("messages", { author: "sarah", body: "hello2" });
+  });
+  const messages = await t.query(api.queries.default);
+  expect(messages).toMatchObject([
+    { author: "sarah", body: "hello1" },
+    { author: "sarah", body: "hello2" },
+  ]);
+})

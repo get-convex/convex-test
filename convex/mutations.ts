@@ -23,9 +23,10 @@ export const insert = mutation({
 /// patch
 
 export const patch = mutation({
-  args: { id: v.id("messages"), body: v.string() },
-  handler: async (ctx, { id, body }) => {
-    await ctx.db.patch(id, { body });
+  args: { id: v.id("messages"), body: v.string(), extraProperties: v.optional(v.any()) },
+  handler: async (ctx, { id, body, extraProperties }) => {
+    const patchUpdate = extraProperties === undefined ? { body } : { body, ...extraProperties }
+    await ctx.db.patch(id, patchUpdate);
   },
 });
 
