@@ -227,13 +227,22 @@ class DatabaseFake {
     }
     const { _id, _creationTime, ...fields } = document;
     if (value._id !== undefined && value._id !== _id) {
-      throw new Error(`Provided document ID ${value._id} does not match '_id' field ${_id}`)
+      throw new Error(
+        `Provided \`_id\` field value "${value._id}" ` +
+          `does not match the document ID "${_id}"`
+      );
     }
-    if (value._creationTime !== undefined && value._creationTime !== _creationTime) {
-      throw new Error(`Provided creation time ${value._creationTime} does not match '_creationTime' field ${_creationTime}`)
+    if (
+      value._creationTime !== undefined &&
+      value._creationTime !== _creationTime
+    ) {
+      throw new Error(
+        `Provided \`_creationTime\` field value ${value._creationTime} ` +
+          `does not match the document's creation time ${_creationTime}`
+      );
     }
-    delete value["_id"]
-    delete value["_creationTime"]
+    delete value["_id"];
+    delete value["_creationTime"];
     const merged = { ...fields, ...value };
     this._validate(tableNameFromId(_id as string)!, merged);
     this._writes[id] = {
@@ -248,13 +257,22 @@ class DatabaseFake {
       throw new Error(`Replace on non-existent document with ID "${id}"`);
     }
     if (value._id !== undefined && value._id !== document._id) {
-      throw new Error(`Provided document ID ${value._id} does not match '_id' field ${document._id}`)
+      throw new Error(
+        `Provided \`_id\` field value "${value._id}" ` +
+          `does not match the document ID "${document._id}"`
+      );
     }
-    if (value._creationTime !== undefined && value._creationTime !== document._creationTime) {
-      throw new Error(`Provided creation time ${value._creationTime} does not match '_creationTime' field ${document._creationTime}`)
+    if (
+      value._creationTime !== undefined &&
+      value._creationTime !== document._creationTime
+    ) {
+      throw new Error(
+        `Provided \`_creationTime\` field value ${value._creationTime} ` +
+          `does not match the document's creation time ${document._creationTime}`
+      );
     }
-    delete value["_id"]
-    delete value["_creationTime"]
+    delete value["_id"];
+    delete value["_creationTime"];
     this._validate(tableNameFromId(document._id as string)!, value);
     this._writes[id] = {
       newValue: {
@@ -757,7 +775,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
       }
       if (tableNameFromId(value) !== validator.tableName) {
         throw new Error(
-          `Validator error: Expected ID for table ${validator.tableName}, got \`${value}\``
+          `Validator error: Expected ID for table "${validator.tableName}", got \`${value}\``
         );
       }
       return;
@@ -823,10 +841,10 @@ function syscallImpl(db: DatabaseFake) {
       }
       case "1.0/db/normalizeId": {
         const idString: string = args.idString;
-        const isInTable = idString.endsWith(`;${args.table}`)
+        const isInTable = idString.endsWith(`;${args.table}`);
         return JSON.stringify({
-          id: isInTable ? idString : null
-        })
+          id: isInTable ? idString : null,
+        });
       }
       default: {
         throw new Error(`\`convexTest\` does not support syscall: "${op}"`);
@@ -1354,7 +1372,8 @@ async function getFunctionFromReference(
 async function getFunctionFromName(functionName: string) {
   // api.foo.bar.default -> `foo/bar`
   const [modulePath, maybeExportName] = functionName.split(":");
-  const exportName = maybeExportName === undefined ? "default" : maybeExportName;
+  const exportName =
+    maybeExportName === undefined ? "default" : maybeExportName;
   const module = await import("./convex/" + modulePath);
   const func = module[exportName];
   if (func === undefined) {

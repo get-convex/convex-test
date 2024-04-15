@@ -20,7 +20,8 @@ export const lastN = query({
   },
 });
 
-// To test default exports
+/// default exports
+
 export default query(async (ctx) => {
-  return ctx.db.query("messages").collect()
-})
+  return ctx.db.query("messages").collect();
+});

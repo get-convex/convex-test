@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { convexTest } from "../index";
 import { api } from "./_generated/api";
 import schema from "./schema";
+import { Id } from "./_generated/dataModel";
 
 test("insert", async () => {
   const t = convexTest(schema);
@@ -19,12 +20,6 @@ test("patch", async () => {
   await t.mutation(api.mutations.patch, { id, body: "hi" });
   const messages = await t.query(api.messages.list);
   expect(messages).toMatchObject([{ body: "hi", author: "sarah" }]);
-
-  // should not crash even with `_id` included
-  await t.mutation(api.mutations.patch, { id, body: "hi", extraProperties: { _id: id } });
-
-  // throws if `_id` doesn't match
-  await expect(t.mutation(api.mutations.patch, { id, body: "hi", extraProperties: { _id: "nonsense" } })).rejects.toThrow(/does not match '_id' field/)
 });
 
 test("replace", async () => {
@@ -57,4 +52,24 @@ test("transaction", async () => {
 
   const messages = await t.query(api.messages.list);
   expect(messages).toMatchObject([]);
+});
+
+test("patch with _id", async () => {
+  const t = convexTest(schema);
+  const id = await t.mutation(api.mutations.insert, {
+    body: "hello",
+    author: "sarah",
+  });
+
+  // should not crash even with `_id` included
+  await t.run(async (ctx) => {
+    await ctx.db.patch(id, { _id: id });
+  });
+
+  // throws if `_id` doesn't match
+  await expect(async () => {
+    await t.run(async (ctx) => {
+      await ctx.db.patch(id, { _id: "nonsense" as Id<"messages"> });
+    });
+  }).rejects.toThrowError("does not match the document ID");
 });
