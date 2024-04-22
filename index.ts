@@ -1,3 +1,4 @@
+import type { EdgeContext } from "@edge-runtime/vm";
 import {
   DataModelFromSchemaDefinition,
   DocumentByName,
@@ -1372,11 +1373,13 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       });
       // Real backend uses different ID format
       const requestId = "" + Math.random();
+      const reset = await runInEdgeEnvironment();
       const rawResult = await (
         a as unknown as {
           invokeAction: (requestId: string, args: string) => Promise<string>;
         }
       ).invokeAction(requestId, JSON.stringify(convexToJson([{}])));
+      reset();
       return jsonToConvex(JSON.parse(rawResult)) as T;
     },
 
@@ -1470,3 +1473,350 @@ function simpleHash(string: string) {
   }
   return hash;
 }
+
+let edgeVM: { context: EdgeContext; keys: Set<string> } | null = null;
+async function getEdgeVM() {
+  if (edgeVM !== null) {
+    return edgeVM;
+  }
+  const { EdgeVM } = await import("@edge-runtime/vm");
+  const vm = new EdgeVM({
+    extend: (context) => {
+      context.global = context;
+      context.Buffer = Buffer;
+      KEYS.forEach((key) => {
+        if (key in global) {
+          context[key] = (global as any)[key];
+        }
+      });
+      return context;
+    },
+  });
+  edgeVM = { context: vm.context, keys: getWindowKeys(global, vm.context) };
+  return edgeVM;
+}
+
+export function getWindowKeys(global: any, win: any) {
+  const keys = new Set(
+    KEYS.concat(
+      Object.getOwnPropertyNames(win).filter((key) => !(key in global)),
+    ),
+  );
+  return keys;
+}
+
+async function runInEdgeEnvironment() {
+  console.time("get vm");
+  const vm = await getEdgeVM();
+  console.timeEnd("get vm");
+  console.time("populate");
+  const originals = populateGlobal(global, vm.context, vm.keys);
+  console.timeEnd("populate");
+  return () => {
+    vm.keys.forEach((key) => delete (global as any)[key]);
+    originals.forEach((v, k) => ((global as any)[k] = v));
+  };
+}
+
+function populateGlobal(global: any, win: any, keys: Set<string>) {
+  const originals = new Map<string | symbol, any>();
+
+  const overrideObject = new Map<string | symbol, any>();
+  keys.forEach((key) => {
+    if (skipKeys.has(key)) {
+      return;
+    }
+    const boundFunction =
+      typeof win[key] === "function" &&
+      !isClassLikeName(key) &&
+      win[key].bind(win);
+
+    if (KEYS.includes(key) && key in global) {
+      originals.set(key, global[key]);
+    }
+
+    Object.defineProperty(global, key, {
+      get() {
+        if (overrideObject.has(key)) {
+          return overrideObject.get(key);
+        }
+        if (boundFunction) {
+          return boundFunction;
+        }
+        return win[key];
+      },
+      set(v) {
+        overrideObject.set(key, v);
+      },
+      configurable: true,
+    });
+  });
+
+  global.window = global;
+  global.self = global;
+  global.top = global;
+  global.parent = global;
+
+  if (global.global) {
+    global.global = global;
+  }
+
+  return originals;
+}
+
+const skipKeys = new Set(["window", "self", "top", "parent"]);
+
+function isClassLikeName(name: string) {
+  return name[0] === name[0].toUpperCase();
+}
+
+// SEE https://github.com/jsdom/jsdom/blob/master/lib/jsdom/living/interfaces.js
+const LIVING_KEYS = [
+  "DOMException",
+  "URL",
+  "URLSearchParams",
+  "EventTarget",
+  "NamedNodeMap",
+  "Node",
+  "Attr",
+  "Element",
+  "DocumentFragment",
+  "DOMImplementation",
+  "Document",
+  "XMLDocument",
+  "CharacterData",
+  "Text",
+  "CDATASection",
+  "ProcessingInstruction",
+  "Comment",
+  "DocumentType",
+  "NodeList",
+  "RadioNodeList",
+  "HTMLCollection",
+  "HTMLOptionsCollection",
+  "DOMStringMap",
+  "DOMTokenList",
+  "StyleSheetList",
+  "HTMLElement",
+  "HTMLHeadElement",
+  "HTMLTitleElement",
+  "HTMLBaseElement",
+  "HTMLLinkElement",
+  "HTMLMetaElement",
+  "HTMLStyleElement",
+  "HTMLBodyElement",
+  "HTMLHeadingElement",
+  "HTMLParagraphElement",
+  "HTMLHRElement",
+  "HTMLPreElement",
+  "HTMLUListElement",
+  "HTMLOListElement",
+  "HTMLLIElement",
+  "HTMLMenuElement",
+  "HTMLDListElement",
+  "HTMLDivElement",
+  "HTMLAnchorElement",
+  "HTMLAreaElement",
+  "HTMLBRElement",
+  "HTMLButtonElement",
+  "HTMLCanvasElement",
+  "HTMLDataElement",
+  "HTMLDataListElement",
+  "HTMLDetailsElement",
+  "HTMLDialogElement",
+  "HTMLDirectoryElement",
+  "HTMLFieldSetElement",
+  "HTMLFontElement",
+  "HTMLFormElement",
+  "HTMLHtmlElement",
+  "HTMLImageElement",
+  "HTMLInputElement",
+  "HTMLLabelElement",
+  "HTMLLegendElement",
+  "HTMLMapElement",
+  "HTMLMarqueeElement",
+  "HTMLMediaElement",
+  "HTMLMeterElement",
+  "HTMLModElement",
+  "HTMLOptGroupElement",
+  "HTMLOptionElement",
+  "HTMLOutputElement",
+  "HTMLPictureElement",
+  "HTMLProgressElement",
+  "HTMLQuoteElement",
+  "HTMLScriptElement",
+  "HTMLSelectElement",
+  "HTMLSlotElement",
+  "HTMLSourceElement",
+  "HTMLSpanElement",
+  "HTMLTableCaptionElement",
+  "HTMLTableCellElement",
+  "HTMLTableColElement",
+  "HTMLTableElement",
+  "HTMLTimeElement",
+  "HTMLTableRowElement",
+  "HTMLTableSectionElement",
+  "HTMLTemplateElement",
+  "HTMLTextAreaElement",
+  "HTMLUnknownElement",
+  "HTMLFrameElement",
+  "HTMLFrameSetElement",
+  "HTMLIFrameElement",
+  "HTMLEmbedElement",
+  "HTMLObjectElement",
+  "HTMLParamElement",
+  "HTMLVideoElement",
+  "HTMLAudioElement",
+  "HTMLTrackElement",
+  "HTMLFormControlsCollection",
+  "SVGElement",
+  "SVGGraphicsElement",
+  "SVGSVGElement",
+  "SVGTitleElement",
+  "SVGAnimatedString",
+  "SVGNumber",
+  "SVGStringList",
+  "Event",
+  "CloseEvent",
+  "CustomEvent",
+  "MessageEvent",
+  "ErrorEvent",
+  "HashChangeEvent",
+  "PopStateEvent",
+  "StorageEvent",
+  "ProgressEvent",
+  "PageTransitionEvent",
+  "SubmitEvent",
+  "UIEvent",
+  "FocusEvent",
+  "InputEvent",
+  "MouseEvent",
+  "KeyboardEvent",
+  "TouchEvent",
+  "CompositionEvent",
+  "WheelEvent",
+  "BarProp",
+  "External",
+  "Location",
+  "History",
+  "Screen",
+  "Crypto",
+  "Performance",
+  "Navigator",
+  "PluginArray",
+  "MimeTypeArray",
+  "Plugin",
+  "MimeType",
+  "FileReader",
+  "Blob",
+  "File",
+  "FileList",
+  "ValidityState",
+  "DOMParser",
+  "XMLSerializer",
+  "FormData",
+  "XMLHttpRequestEventTarget",
+  "XMLHttpRequestUpload",
+  "XMLHttpRequest",
+  "WebSocket",
+  "NodeFilter",
+  "NodeIterator",
+  "TreeWalker",
+  "AbstractRange",
+  "Range",
+  "StaticRange",
+  "Selection",
+  "Storage",
+  "CustomElementRegistry",
+  "ShadowRoot",
+  "MutationObserver",
+  "MutationRecord",
+  "Headers",
+  "AbortController",
+  "AbortSignal",
+
+  "Uint8Array",
+  "Uint16Array",
+  "Uint32Array",
+  "Uint8ClampedArray",
+  "Int8Array",
+  "Int16Array",
+  "Int32Array",
+  "Float32Array",
+  "Float64Array",
+  "ArrayBuffer",
+  "DOMRectReadOnly",
+  "DOMRect",
+
+  // not specified in docs, but is available
+  "Image",
+  "Audio",
+  "Option",
+
+  "CSS",
+];
+
+const OTHER_KEYS = [
+  "addEventListener",
+  "alert",
+  // 'atob',
+  "blur",
+  // 'btoa',
+  "cancelAnimationFrame",
+  /* 'clearInterval', */
+  /* 'clearTimeout', */
+  "close",
+  "confirm",
+  /* 'console', */
+  "createPopup",
+  "dispatchEvent",
+  "document",
+  "focus",
+  "frames",
+  "getComputedStyle",
+  "history",
+  "innerHeight",
+  "innerWidth",
+  "length",
+  "location",
+  "matchMedia",
+  "moveBy",
+  "moveTo",
+  "name",
+  "navigator",
+  "open",
+  "outerHeight",
+  "outerWidth",
+  "pageXOffset",
+  "pageYOffset",
+  "parent",
+  "postMessage",
+  "print",
+  "prompt",
+  "removeEventListener",
+  "requestAnimationFrame",
+  "resizeBy",
+  "resizeTo",
+  "screen",
+  "screenLeft",
+  "screenTop",
+  "screenX",
+  "screenY",
+  "scroll",
+  "scrollBy",
+  "scrollLeft",
+  "scrollTo",
+  "scrollTop",
+  "scrollX",
+  "scrollY",
+  "self",
+  /* 'setInterval', */
+  /* 'setTimeout', */
+  "stop",
+  /* 'toString', */
+  "top",
+  "Window",
+  "window",
+];
+
+export const KEYS = LIVING_KEYS.concat(OTHER_KEYS);
