@@ -6,6 +6,7 @@ export default defineSchema({
     author: v.string(),
     body: v.string(),
     embedding: v.optional(v.array(v.number())),
+    score: v.optional(v.number()),
   })
     .index("author", ["author"])
     .searchIndex("body", {
