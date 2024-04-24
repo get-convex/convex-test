@@ -20,6 +20,6 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["./"],
+  "include": ["./index.ts"],
   "exclude": ["convex"]
 }
