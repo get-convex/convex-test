@@ -1157,6 +1157,28 @@ async function blobSha(blob: Blob) {
   return sha256.digest("base64");
 }
 
+async function waitForInProgressScheduledFunctions(): Promise<boolean> {
+  const inProgressJobs = (await withAuth().run(async (ctx) => {
+    return (await ctx.db.system.query("_scheduled_functions").collect()).filter(
+      (job: ScheduledFunction) => job.state.kind === "inProgress",
+    );
+  })) as ScheduledFunction[];
+  let numRemaining = inProgressJobs.length;
+  if (numRemaining === 0) {
+    return false;
+  }
+
+  await new Promise<void>((resolve) => {
+    getDb().jobListener = () => {
+      numRemaining -= 1;
+      if (numRemaining === 0) {
+        resolve();
+      }
+    };
+  });
+  return true;
+}
+
 export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
   TestConvexForDataModelAndIdentity<DataModelFromSchemaDefinition<SchemaDef>>;
 
@@ -1221,8 +1243,25 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    *
    * Use in combination with `vi.useFakeTimers()` and `vi.runAllTimers()`
    * to control precisely the execution of scheduled functions.
+   *
+   * Typically:
+   * 1. Use `vi.runAllTimers()` or similar to advance
+   *   time such that a function is scheduled.
+   * 2. Use `finishInProgressScheduledFunctions()` to wait for the function
    */
   finishInProgressScheduledFunctions: () => Promise<void>;
+
+  /**
+   * Wait for all currently scheduled functions and any functions they
+   * schedule to either finish successfully or fail.
+   *
+   * Use in combination with `vi.useFakeTimers()` to test scheduled functions.
+   *
+   * @param advanceTimers Function that advances timers,
+   *   usually `vi.runAllTimers`. This function will be called in a loop
+   *   with `finishInProgressScheduledFunctions()`.
+   */
+  finishAllScheduledFunctions: (advanceTimers: () => void) => Promise<void>;
 };
 
 export type TestConvexForDataModelAndIdentity<
@@ -1397,24 +1436,17 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     // we are performing dynamic `import`s, and those
     // are real work that cannot be force-awaited.
     finishInProgressScheduledFunctions: async (): Promise<void> => {
-      const inProgressJobs = (await withAuth().run(async (ctx) => {
-        return (
-          await ctx.db.system.query("_scheduled_functions").collect()
-        ).filter((job: ScheduledFunction) => job.state.kind === "inProgress");
-      })) as ScheduledFunction[];
-      let numRemaining = inProgressJobs.length;
-      if (numRemaining === 0) {
-        return;
-      }
+      await waitForInProgressScheduledFunctions();
+    },
 
-      return new Promise((resolve) => {
-        getDb().jobListener = () => {
-          numRemaining -= 1;
-          if (numRemaining === 0) {
-            resolve();
-          }
-        };
-      });
+    finishAllScheduledFunctions: async (
+      advanceTimers: () => void,
+    ): Promise<void> => {
+      let hadScheduledFunctions;
+      do {
+        advanceTimers();
+        hadScheduledFunctions = await waitForInProgressScheduledFunctions();
+      } while (hadScheduledFunctions);
     },
   };
 }

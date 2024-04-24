@@ -83,6 +83,21 @@ test("action scheduling action", async () => {
   vi.useRealTimers();
 });
 
+test.only("action scheduling action many times", async () => {
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  await t.action(api.scheduler.actionSchedulingActionNTimes, {
+    count: 10,
+  });
+
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+  const result = (await t.query(internal.scheduler.list)).at(-1);
+  expect(result).toMatchObject({ body: "count 0", author: "AI" });
+
+  vi.useRealTimers();
+});
+
 test("cancel action", async () => {
   vi.useFakeTimers();
   const t = convexTest(schema);

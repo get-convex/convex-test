@@ -77,3 +77,22 @@ export const cancelAction = action({
     await ctx.scheduler.cancel(id);
   },
 });
+
+/// many scheduled functions
+
+export const actionSchedulingActionNTimes = action({
+  args: { count: v.number() },
+  handler: async (ctx, { count }) => {
+    await ctx.runMutation(api.scheduler.add, {
+      body: `count ${count}`,
+      author: "AI",
+    });
+    if (count > 0) {
+      await ctx.scheduler.runAfter(
+        0,
+        api.scheduler.actionSchedulingActionNTimes,
+        { count: count - 1 }
+      );
+    }
+  },
+});
