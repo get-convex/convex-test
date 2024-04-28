@@ -27,3 +27,12 @@ export const actionWithArgs = action({
 });
 
 export const actionWithoutArgs = action(() => {});
+
+export const queryWithOptionalArgs = query({
+  args: {
+    a: v.optional(v.number()),
+  },
+  handler: () => {
+    return "ok";
+  },
+});
