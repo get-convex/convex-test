@@ -11,7 +11,6 @@
   "homepage": "https://docs.convex.dev/functions/testing",
   "bugs": "https://github.com/get-convex/convex-test/issues",
   "repository": "https://github.com/get-convex/convex-test",
-  "type": "module",
   "main": "dist/index.js",
   "files": [
     "dist/*.js",
