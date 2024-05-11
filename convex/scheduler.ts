@@ -40,7 +40,7 @@ export const mutationSchedulingAction = mutation({
     const id: Id<"_scheduled_functions"> = await ctx.scheduler.runAfter(
       delayMs,
       api.scheduler.actionCallingMutation,
-      { body }
+      { body },
     );
     return id;
   },
@@ -63,7 +63,7 @@ export const actionSchedulingAction = action({
     const id: Id<"_scheduled_functions"> = await ctx.scheduler.runAfter(
       delayMs,
       api.scheduler.actionCallingMutation,
-      { body }
+      { body },
     );
     return id;
   },
@@ -91,7 +91,7 @@ export const actionSchedulingActionNTimes = action({
       await ctx.scheduler.runAfter(
         0,
         api.scheduler.actionSchedulingActionNTimes,
-        { count: count - 1 }
+        { count: count - 1 },
       );
     }
   },

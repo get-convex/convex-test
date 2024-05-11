@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import {
   DataModelFromSchemaDefinition,
   DocumentByName,
@@ -1296,15 +1298,66 @@ function getSyscalls() {
   };
 }
 
+function getModuleCache() {
+  return (global as any).Convex.modules as ReturnType<typeof moduleCache>;
+}
+
+function moduleCache(specifiedModules?: Record<string, () => Promise<any>>) {
+  const modules = specifiedModules ?? import.meta.glob("./convex/**/*.*s");
+  const prefix = findModulesRoot(
+    Object.keys(modules),
+    specifiedModules !== undefined,
+  );
+  const modulesWithoutExtension = Object.fromEntries(
+    Object.entries(modules).map(([path, module]) => [
+      path.replace(/\.[^.]+$/, ""),
+      module,
+    ]),
+  );
+  return async (path: string) => {
+    const module = modulesWithoutExtension[prefix + path];
+    if (module === undefined) {
+      throw new Error(`Could not find module for: "${path}"`);
+    }
+    return await module();
+  };
+}
+
+function findModulesRoot(modulesPaths: string[], userProvidedModules: boolean) {
+  const generatedFilePath = modulesPaths.find((path) =>
+    path.includes("_generated"),
+  );
+  if (generatedFilePath !== undefined) {
+    return generatedFilePath.split("_generated", 2)[0];
+  }
+
+  throw new Error(
+    'Could not find the "_generated" directory, make sure to run ' +
+      "`npx convex dev` or `npx convex codegen`. " +
+      (userProvidedModules
+        ? "Make sure your `import.meta.glob` includes the files in the " +
+          '"_generated" directory'
+        : "If your Convex functions aren't defined in a directory " +
+          'called "convex" sibling to your node_modules, ' +
+          "provide the second argument to `convexTest`"),
+  );
+}
+
 /**
  * Call this function at the start of each of your tests.
  *
  * @param schema The default export from your "schema.ts" file.
+ * @param modules If you have a custom `functions` path
+ *   in convex.json, provide the module map with your functions
+ *   by calling `import.meta.glob` with the appropriate glob pattern
+ *   for paths relative to the file where you call it.
  * @returns an object which is by convention stored in the `t` variable
  *   and which provides methods for exercising your Convex functions.
  */
 export const convexTest = <Schema extends GenericSchema>(
   schema?: SchemaDefinition<Schema, boolean>,
+  // For example `import.meta.glob("./**/*.*s")`
+  modules?: Record<string, () => Promise<any>>,
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
   const db = new DatabaseFake(schema ?? null);
   (global as unknown as { Convex: any }).Convex = {
@@ -1312,6 +1365,7 @@ export const convexTest = <Schema extends GenericSchema>(
     asyncSyscall: asyncSyscallImpl(db),
     jsSyscall: jsSyscallImpl(db),
     db,
+    modules: moduleCache(modules),
   };
 
   return {
@@ -1483,7 +1537,9 @@ async function getFunctionFromName(functionName: string) {
   const [modulePath, maybeExportName] = functionName.split(":");
   const exportName =
     maybeExportName === undefined ? "default" : maybeExportName;
-  const module = await import("./convex/" + modulePath);
+
+  const module = await getModuleCache()(modulePath);
+
   const func = module[exportName];
   if (func === undefined) {
     throw new Error(
