@@ -7,7 +7,7 @@ import { Id } from "./_generated/dataModel";
 test("insert", async () => {
   const t = convexTest(schema);
   await t.mutation(api.mutations.insert, { body: "hello", author: "sarah" });
-  const messages = await t.query(api.messages.list);
+  const messages = await t.query(api.mutations.list);
   expect(messages).toMatchObject([{ body: "hello", author: "sarah" }]);
 });
 
@@ -18,7 +18,7 @@ test("patch", async () => {
     author: "sarah",
   });
   await t.mutation(api.mutations.patch, { id, body: "hi" });
-  const messages = await t.query(api.messages.list);
+  const messages = await t.query(api.mutations.list);
   expect(messages).toMatchObject([{ body: "hi", author: "sarah" }]);
 });
 
@@ -29,7 +29,7 @@ test("replace", async () => {
     author: "sarah",
   });
   await t.mutation(api.mutations.replace, { id, author: "michal", body: "hi" });
-  const messages = await t.query(api.messages.list);
+  const messages = await t.query(api.mutations.list);
   expect(messages).toMatchObject([{ body: "hi", author: "michal" }]);
 });
 
@@ -40,7 +40,7 @@ test("delete", async () => {
     author: "sarah",
   });
   await t.mutation(api.mutations.deleteDoc, { id });
-  const messages = await t.query(api.messages.list);
+  const messages = await t.query(api.mutations.list);
   expect(messages).toMatchObject([]);
 });
 
@@ -50,7 +50,7 @@ test("transaction", async () => {
     await t.mutation(api.mutations.throws, { body: "hello", author: "sarah" });
   }).rejects.toThrowError("I changed my mind");
 
-  const messages = await t.query(api.messages.list);
+  const messages = await t.query(api.mutations.list);
   expect(messages).toMatchObject([]);
 });
 

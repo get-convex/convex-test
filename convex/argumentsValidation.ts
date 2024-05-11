@@ -5,6 +5,8 @@ export const queryWithArgs = query({
   args: {
     a: v.number(),
   },
+  // Never gets called in the test
+  /* v8 ignore next */
   handler: () => {},
 });
 
@@ -14,6 +16,8 @@ export const mutationWithArgs = mutation({
   args: {
     a: v.number(),
   },
+  // Never gets called in the test
+  /* v8 ignore next */
   handler: () => {},
 });
 
@@ -23,6 +27,8 @@ export const actionWithArgs = action({
   args: {
     a: v.number(),
   },
+  // Never gets called in the test
+  /* v8 ignore next */
   handler: () => {},
 });
 
