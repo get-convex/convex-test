@@ -5,7 +5,12 @@ module.exports = {
     "eslint:recommended",
     "plugin:@typescript-eslint/recommended-type-checked",
   ],
-  ignorePatterns: [".eslintrc.cjs", "convex/_generated", "dist"],
+  ignorePatterns: [
+    ".eslintrc.cjs",
+    "convex/_generated",
+    "dist",
+    "*.config.mts",
+  ],
   parser: "@typescript-eslint/parser",
   parserOptions: {
     project: true,
