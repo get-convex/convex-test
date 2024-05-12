@@ -169,6 +169,11 @@ class DatabaseFake {
   }
 
   get(id: GenericId<string>) {
+    const { document } = this.getForWrite(id);
+    return document;
+  }
+
+  getForWrite(id: GenericId<string>) {
     if (typeof id !== "string") {
       throw new Error(
         `Invalid argument \`id\` for \`db.get\`, expected string but got '${typeof id}': ${
@@ -179,10 +184,10 @@ class DatabaseFake {
 
     const write = this._writes[id];
     if (write !== undefined) {
-      return write.newValue;
+      return { document: write.newValue, isInsert: write.isInsert };
     }
 
-    return this._documents[id] ?? null;
+    return { document: this._documents[id] ?? null, isInsert: false };
   }
 
   // Note that this is not the format the real backend
@@ -221,7 +226,7 @@ class DatabaseFake {
   }
 
   patch(id: DocumentId, value: Record<string, any>) {
-    const document = this.get(id);
+    const { document, isInsert } = this.getForWrite(id);
     if (document === null) {
       throw new Error(`Patch on non-existent document with ID "${id}"`);
     }
@@ -247,12 +252,12 @@ class DatabaseFake {
     this._validate(tableNameFromId(_id as string)!, merged);
     this._writes[id] = {
       newValue: { _id, _creationTime, ...merged },
-      isInsert: false,
+      isInsert,
     };
   }
 
   replace(id: DocumentId, value: Record<string, any>) {
-    const document = this.get(id);
+    const { document, isInsert } = this.getForWrite(id);
     if (document === null) {
       throw new Error(`Replace on non-existent document with ID "${id}"`);
     }
@@ -280,7 +285,7 @@ class DatabaseFake {
         _id: document._id,
         _creationTime: document._creationTime,
       },
-      isInsert: false,
+      isInsert,
     };
   }
 
