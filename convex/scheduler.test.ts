@@ -83,7 +83,7 @@ test("action scheduling action", async () => {
   vi.useRealTimers();
 });
 
-test.only("action scheduling action many times", async () => {
+test("action scheduling action many times", async () => {
   vi.useFakeTimers();
   const t = convexTest(schema);
   await t.action(api.scheduler.actionSchedulingActionNTimes, {
