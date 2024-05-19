@@ -703,7 +703,7 @@ function evaluateFilter(
     return evaluateFieldPath(filter.$field, document);
   }
   if (filter.$literal !== undefined) {
-    return filter.$literal;
+    return evaluateValue(filter.$literal);
   }
   throw new Error(`not implemented: ${JSON.stringify(filter)}`);
 }
@@ -713,7 +713,7 @@ function evaluateRangeFilter(
   expr: SerializedRangeExpression,
 ) {
   const result = evaluateFieldPath(expr.fieldPath, document);
-  const value = expr.value;
+  const value = evaluateValue(expr.value);
   switch (expr.type) {
     case "Eq":
       return result === value;
@@ -726,6 +726,13 @@ function evaluateRangeFilter(
     case "Lte":
       return (result as any) <= (value as any);
   }
+}
+
+function evaluateValue(value: JSONValue) {
+  if (typeof value === "object" && value !== null && "$undefined" in value) {
+    return undefined;
+  }
+  return value;
 }
 
 function evaluateSearchFilter(

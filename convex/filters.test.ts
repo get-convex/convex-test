@@ -1,6 +1,26 @@
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
 import { expect, test } from "vitest";
 import { convexTest } from "../index";
 import schema from "./schema";
+
+test("by undefined", async () => {
+  const schema = defineSchema({
+    things: defineTable({
+      field: v.optional(v.string()),
+    }).index("field", ["field"]),
+  });
+  const t = convexTest(schema);
+  const things = await t.run(async (ctx) => {
+    await ctx.db.insert("things", {});
+    await ctx.db.insert("things", { field: "some" });
+    return await ctx.db
+      .query("things")
+      .filter((q) => q.eq(q.field("field"), undefined))
+      .collect();
+  });
+  expect(things).toMatchObject([{}]);
+});
 
 test("and operator", async () => {
   const t = convexTest(schema);

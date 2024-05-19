@@ -35,14 +35,31 @@ test("withIndex", async () => {
   ]);
 });
 
-const relaxedSchema = defineSchema({
-  messages: defineTable({
-    author: v.optional(v.any()),
-    body: v.string(),
-  }).index("author", ["author"]),
+test("withIndex with undefined", async () => {
+  const schema = defineSchema({
+    things: defineTable({
+      field: v.optional(v.string()),
+    }).index("field", ["field"]),
+  });
+  const t = convexTest(schema);
+  const things = await t.run(async (ctx) => {
+    await ctx.db.insert("things", {});
+    await ctx.db.insert("things", { field: "some" });
+    return await ctx.db
+      .query("things")
+      .withIndex("field", (q) => q.eq("field", undefined))
+      .collect();
+  });
+  expect(things).toMatchObject([{}]);
 });
 
 test("type ordering", async () => {
+  const relaxedSchema = defineSchema({
+    messages: defineTable({
+      author: v.optional(v.any()),
+      body: v.string(),
+    }).index("author", ["author"]),
+  });
   const t = convexTest(relaxedSchema);
   const authors = await t.run(async (ctx) => {
     const authors: any[] = [
@@ -62,7 +79,7 @@ test("type ordering", async () => {
     await Promise.all(
       authors.map(async (author) => {
         await ctx.db.insert("messages", { author, body: "hello" });
-      })
+      }),
     );
     return (
       await ctx.db.query("messages").withIndex("author").order("desc").collect()
@@ -108,12 +125,14 @@ test("order", async () => {
 test("normalizeId", async () => {
   const t = convexTest(schema);
   await t.run(async (ctx) => {
-    const messageId = await ctx.db.insert("messages", { author: "sarah", body: "hello" })
+    const messageId = await ctx.db.insert("messages", {
+      author: "sarah",
+      body: "hello",
+    });
     expect(ctx.db.normalizeId("messages", messageId)).toEqual(messageId);
     expect(ctx.db.normalizeId("messages", "Not an ID")).toEqual(null);
-  })
-})
-
+  });
+});
 
 test("default export", async () => {
   const t = convexTest(schema);
@@ -126,4 +145,4 @@ test("default export", async () => {
     { author: "sarah", body: "hello1" },
     { author: "sarah", body: "hello2" },
   ]);
-})
+});
