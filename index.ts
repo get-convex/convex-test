@@ -1417,7 +1417,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
 
   const byType = {
     query: async (functionReference: any, args: any) => {
-      const func = await getFunctionFromReference(functionReference);
+      const func = await getFunctionFromReference(functionReference, "query");
       validateValidator(JSON.parse(func.exportArgs()), args ?? {});
       const q = queryGeneric({
         handler: (ctx: any, a: any) => {
@@ -1437,13 +1437,16 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     },
 
     mutation: async (functionReference: any, args: any): Promise<Value> => {
-      const func = await getFunctionFromReference(functionReference);
+      const func = await getFunctionFromReference(
+        functionReference,
+        "mutation",
+      );
       validateValidator(JSON.parse(func.exportArgs()), args ?? {});
       return await runTransaction(func, args);
     },
 
     action: async (functionReference: any, args: any) => {
-      const func = await getFunctionFromReference(functionReference);
+      const func = await getFunctionFromReference(functionReference, "action");
       validateValidator(JSON.parse(func.exportArgs()), args ?? {});
 
       const a = actionGeneric({
@@ -1492,7 +1495,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     },
 
     fun: async (functionReference: any, args: any) => {
-      const func = await getFunctionFromReference(functionReference);
+      const func = await getFunctionFromReference(functionReference, "any");
       if (func.isQuery) {
         return await byType.query(functionReference, args);
       }
@@ -1541,11 +1544,15 @@ function parseArgs(
 
 async function getFunctionFromReference(
   functionReference: FunctionReference<any, any, any, any>,
+  type: "query" | "mutation" | "action" | "any",
 ) {
-  return await getFunctionFromName(getFunctionName(functionReference));
+  return await getFunctionFromName(getFunctionName(functionReference), type);
 }
 
-async function getFunctionFromName(functionName: string) {
+async function getFunctionFromName(
+  functionName: string,
+  type: "query" | "mutation" | "action" | "any",
+) {
   // api.foo.bar.default -> `foo/bar`
   const [modulePath, maybeExportName] = functionName.split(":");
   const exportName =
@@ -1563,6 +1570,33 @@ async function getFunctionFromName(functionName: string) {
     throw new Error(
       `Expected a Convex function exported from module "${modulePath}" as \`${exportName}\`, but got: ${func}`,
     );
+  }
+  switch (type) {
+    case "query":
+      if (!func.isQuery) {
+        throw new Error(
+          `Expected a query function, but the function exported from module "${modulePath}" as \`${exportName}\` is not a query.`,
+        );
+      }
+      break;
+    case "mutation":
+      if (!func.isMutation) {
+        throw new Error(
+          `Expected a mutation function, but the function exported from module "${modulePath}" as \`${exportName}\` is not a mutation.`,
+        );
+      }
+      break;
+    case "action":
+      if (!func.isAction) {
+        throw new Error(
+          `Expected an action function, but the function exported from module "${modulePath}" as \`${exportName}\` is not an action.`,
+        );
+      }
+      break;
+    case "any":
+      break;
+    default:
+      throw type satisfies never;
   }
   return func;
 }
