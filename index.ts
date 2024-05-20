@@ -1448,7 +1448,13 @@ function withAuth(auth: AuthFake = new AuthFake()) {
 
       const a = actionGeneric({
         handler: (ctx: any, a: any) => {
-          const testCtx = { ...ctx, auth };
+          const testCtx = {
+            ...ctx,
+            runQuery: byType.query,
+            runMutation: byType.mutation,
+            runAction: byType.action,
+            auth,
+          };
           return func(testCtx, a);
         },
       });
