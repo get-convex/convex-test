@@ -14,6 +14,15 @@ http.route({
 });
 
 http.route({
+  path: "/buzz",
+  method: "POST",
+  handler: httpAction(async (_, request) => {
+    const { text } = await request.json();
+    return new Response(text, { status: 200 });
+  }),
+});
+
+http.route({
   pathPrefix: "/bla/",
   method: "POST",
   handler: httpAction(async (_, request) => {

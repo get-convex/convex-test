@@ -8,6 +8,16 @@ test("simple", async () => {
   expect(await response.text()).toEqual("hello");
 });
 
+test("json body", async () => {
+  const t = convexTest(schema);
+  const response = await t.fetch("/buzz", {
+    method: "POST",
+    body: JSON.stringify({ text: "hello" }),
+    headers: { "Content-Type": "application/json" },
+  });
+  expect(await response.text()).toEqual("hello");
+});
+
 test("path prefix", async () => {
   const t = convexTest(schema);
   const response = await t.fetch("/bla/hello", { method: "POST" });
