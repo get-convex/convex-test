@@ -17,6 +17,7 @@ import type {
 import type * as actions from "../actions.js";
 import type * as argumentsValidation from "../argumentsValidation.js";
 import type * as authentication from "../authentication.js";
+import type * as http from "../http.js";
 import type * as messages from "../messages.js";
 import type * as mutations from "../mutations.js";
 import type * as pagination from "../pagination.js";
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   actions: typeof actions;
   argumentsValidation: typeof argumentsValidation;
   authentication: typeof authentication;
+  http: typeof http;
   messages: typeof messages;
   mutations: typeof mutations;
   pagination: typeof pagination;

@@ -9,6 +9,7 @@ import {
   GenericDocument,
   GenericMutationCtx,
   GenericSchema,
+  HttpRouter,
   OptionalRestArgs,
   SchemaDefinition,
   StorageActionWriter,
@@ -16,6 +17,7 @@ import {
   UserIdentity,
   actionGeneric,
   getFunctionName,
+  httpActionGeneric,
   makeFunctionReference,
   mutationGeneric,
   queryGeneric,
@@ -1252,6 +1254,14 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   ) => Promise<Output>;
 
   /**
+   * Call an HTTP action.
+   *
+   * @param path The request URL's path and optional query and fragment.
+   * @param init Standard `fetch` options.
+   */
+  fetch(pathQueryFragment: string, init?: RequestInit): Promise<Response>;
+
+  /**
    * Wait for all scheduled functions currently in the "inProgress" state
    * to either finish successfully or fail.
    *
@@ -1505,6 +1515,38 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       if (func.isAction) {
         return await byType.action(functionReference, args);
       }
+    },
+
+    fetch: async (path: string, init?: RequestInit) => {
+      const router: HttpRouter = (await getModuleCache()("http"))["default"];
+      if (!path.startsWith("/")) {
+        throw new Error(`Path given to \`t.fetch\` must start with a \`/\``);
+      }
+      const url = new URL(`https://some.convex.site${path}`);
+      const found = router.lookup(url.pathname, init?.method ?? ("GET" as any));
+      if (!found) {
+        return new Response(`No HttpAction routed for ${url.pathname}`, {
+          status: 404,
+        });
+      }
+      const [func] = found;
+      const a = httpActionGeneric((ctx: any, a: any) => {
+        const testCtx = {
+          ...ctx,
+          runQuery: byType.query,
+          runMutation: byType.mutation,
+          runAction: byType.action,
+          auth,
+        };
+        // TODO: Remove `any`, it's needed because of a bug in Convex types
+        return func(testCtx, a) as any;
+      });
+      const response = await (
+        a as unknown as {
+          invokeHttpAction: (request: Request) => Promise<Response>;
+        }
+      ).invokeHttpAction(new Request(url, init));
+      return response;
     },
 
     // This is needed because when we execute functions
