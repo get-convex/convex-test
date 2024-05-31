@@ -433,6 +433,15 @@ class DatabaseFake {
             results.push(doc);
           }
         });
+        order = source.order ?? "asc";
+        if (indexName === "by_creation_time") {
+          fieldPathsToSortBy = ["_creationTime"];
+          break;
+        }
+        if (indexName === "by_id") {
+          fieldPathsToSortBy = ["_id"];
+          break;
+        }
         const indexes = this._schema?.tables.get(tableName)?.indexes;
         const index = indexes?.find(
           ({ indexDescriptor }: { indexDescriptor: string }) =>
@@ -445,7 +454,6 @@ class DatabaseFake {
           );
         }
         fieldPathsToSortBy = index.fields;
-        order = source.order ?? "asc";
         break;
       }
       case "Search": {
