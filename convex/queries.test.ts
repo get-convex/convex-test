@@ -1,5 +1,5 @@
-import { expect, test } from "vitest";
-import { convexTest } from "../index";
+import { expect, it, test, vi, describe, beforeEach, afterEach } from "vitest";
+import { TestConvex, convexTest } from "../index";
 import { api } from "./_generated/api";
 import schema from "./schema";
 import { defineSchema, defineTable } from "convex/server";
@@ -51,6 +51,53 @@ test("withIndex with undefined", async () => {
       .collect();
   });
   expect(things).toMatchObject([{}]);
+});
+
+describe("system index", () => {
+  let t: TestConvex<typeof schema>;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    t = convexTest(schema);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("works with by_creation_time", async () => {
+    vi.setSystemTime(new Date("2024-05-31T00:00:00.000Z"));
+    await t.run(async (ctx) => {
+      await ctx.db.insert("messages", { author: "A", body: "A" });
+      await ctx.db.insert("messages", { author: "B", body: "B" });
+    });
+    vi.setSystemTime(new Date("2024-06-02T00:00:00.000Z"));
+    await t.run(async (ctx) => {
+      await ctx.db.insert("messages", { author: "C", body: "C" });
+    });
+
+    const things = await t.run(async (ctx) => {
+      return await ctx.db
+        .query("messages")
+        .withIndex("by_creation_time", (q) =>
+          q.lte(
+            "_creationTime",
+            new Date("2024-06-01T00:00:00.000Z").getTime(),
+          ),
+        )
+        .collect();
+    });
+    expect(things.length).toStrictEqual(2);
+    expect(things.map((t) => t.author)).toEqual(["A", "B"]);
+  });
+
+  it("works with by_id", async () => {
+    const things = await t.run(async (ctx) => {
+      await ctx.db.insert("messages", { author: "A", body: "A" });
+      await ctx.db.insert("messages", { author: "B", body: "B" });
+      return await ctx.db.query("messages").withIndex("by_id").collect();
+    });
+    expect(things.length).toStrictEqual(2);
+  });
 });
 
 test("type ordering", async () => {
