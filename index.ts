@@ -610,12 +610,11 @@ function compareValues(a: Value | undefined, b: Value | undefined) {
 }
 
 function isSimpleObject(value: unknown) {
-  // null has typeof "object" but is not an object
-  if (value === null) {
-    return false;
-  }
   const isObject = typeof value === "object";
-  const prototype = Object.getPrototypeOf(value);
+  let prototype = null;
+  if (value !== null && value !== undefined) {
+    prototype = Object.getPrototypeOf(value); //this function throws if value is null or undefined
+  }
   const isSimple =
     prototype === null ||
     prototype === Object.prototype ||
