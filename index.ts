@@ -145,7 +145,7 @@ class DatabaseFake {
               Object.entries(schema.tables).map(([name, tableSchema]) => [
                 name,
                 (tableSchema as any).export(),
-              ]),
+              ])
             ),
           };
   }
@@ -182,7 +182,7 @@ class DatabaseFake {
       throw new Error(
         `Invalid argument \`id\` for \`db.get\`, expected string but got '${typeof id}': ${
           id as any
-        }`,
+        }`
       );
     }
 
@@ -197,7 +197,7 @@ class DatabaseFake {
   // Note that this is not the format the real backend
   // uses for IDs.
   private _generateId<TableName extends string>(
-    table: TableName,
+    table: TableName
   ): GenericId<TableName> {
     const id = this._nextDocId.toString() + ";" + table;
     this._nextDocId += 1;
@@ -238,7 +238,7 @@ class DatabaseFake {
     if (value._id !== undefined && value._id !== _id) {
       throw new Error(
         `Provided \`_id\` field value "${value._id}" ` +
-          `does not match the document ID "${_id}"`,
+          `does not match the document ID "${_id}"`
       );
     }
     if (
@@ -247,7 +247,7 @@ class DatabaseFake {
     ) {
       throw new Error(
         `Provided \`_creationTime\` field value ${value._creationTime} ` +
-          `does not match the document's creation time ${_creationTime}`,
+          `does not match the document's creation time ${_creationTime}`
       );
     }
     delete value["_id"];
@@ -268,7 +268,7 @@ class DatabaseFake {
     if (value._id !== undefined && value._id !== document._id) {
       throw new Error(
         `Provided \`_id\` field value "${value._id}" ` +
-          `does not match the document ID "${document._id}"`,
+          `does not match the document ID "${document._id}"`
       );
     }
     if (
@@ -277,7 +277,7 @@ class DatabaseFake {
     ) {
       throw new Error(
         `Provided \`_creationTime\` field value ${value._creationTime} ` +
-          `does not match the document's creation time ${document._creationTime}`,
+          `does not match the document's creation time ${document._creationTime}`
       );
     }
     delete value["_id"];
@@ -387,7 +387,7 @@ class DatabaseFake {
 
   private _iterateDocs(
     tableName: string,
-    callback: (doc: GenericDocument) => void,
+    callback: (doc: GenericDocument) => void
   ) {
     for (const write of Object.values(this._writes)) {
       if (write.isInsert) {
@@ -445,12 +445,12 @@ class DatabaseFake {
         const indexes = this._schema?.tables.get(tableName)?.indexes;
         const index = indexes?.find(
           ({ indexDescriptor }: { indexDescriptor: string }) =>
-            indexDescriptor === indexName,
+            indexDescriptor === indexName
         );
         if (index === undefined) {
           throw new Error(
             `Cannot use index "${indexName}" for table "${tableName}" because ` +
-              `it is not declared in the schema.`,
+              `it is not declared in the schema.`
           );
         }
         fieldPathsToSortBy = index.fields;
@@ -471,13 +471,13 @@ class DatabaseFake {
     }
     const filters = query.operators
       .filter(
-        (operator): operator is { filter: FilterJson } => "filter" in operator,
+        (operator): operator is { filter: FilterJson } => "filter" in operator
       )
       .map((operator) => operator.filter);
 
     const limit =
       query.operators.filter(
-        (operator): operator is { limit: number } => "limit" in operator,
+        (operator): operator is { limit: number } => "limit" in operator
       )[0] ?? null;
 
     results = results.filter((v) => filters.every((f) => evaluateFilter(v, f)));
@@ -509,7 +509,7 @@ class DatabaseFake {
     tableAndIndexName: string,
     vector: number[],
     expressions: SerializedRangeExpression[],
-    limit: number,
+    limit: number
   ) {
     const results: GenericDocument[] = [];
     const [tableName, indexName] = tableAndIndexName.split(".");
@@ -521,12 +521,12 @@ class DatabaseFake {
     const vectorIndexes = this._schema?.tables.get(tableName)?.vectorIndexes;
     const vectorIndex = vectorIndexes?.find(
       ({ indexDescriptor }: { indexDescriptor: string }) =>
-        indexDescriptor === indexName,
+        indexDescriptor === indexName
     );
     if (vectorIndex === undefined) {
       throw new Error(
         `Cannot use vector index "${indexName}" for table "${tableName}" because ` +
-          `it is not declared in the schema.`,
+          `it is not declared in the schema.`
       );
     }
     const { vectorField } = vectorIndex;
@@ -610,6 +610,10 @@ function compareValues(a: Value | undefined, b: Value | undefined) {
 }
 
 function isSimpleObject(value: unknown) {
+  // null has typeof "object" but is not an object
+  if (value === null) {
+    return false;
+  }
   const isObject = typeof value === "object";
   const prototype = Object.getPrototypeOf(value);
   const isSimple =
@@ -632,7 +636,7 @@ function evaluateFieldPath(fieldPath: string, document: any) {
 
 function evaluateFilter(
   document: GenericDocument,
-  filter: any,
+  filter: any
 ): Value | undefined {
   if (filter.$eq !== undefined) {
     return (
@@ -720,7 +724,7 @@ function evaluateFilter(
 
 function evaluateRangeFilter(
   document: GenericDocument,
-  expr: SerializedRangeExpression,
+  expr: SerializedRangeExpression
 ) {
   const result = evaluateFieldPath(expr.fieldPath, document);
   const value = evaluateValue(expr.value);
@@ -747,7 +751,7 @@ function evaluateValue(value: JSONValue) {
 
 function evaluateSearchFilter(
   document: GenericDocument,
-  filter: SerializedSearchFilter,
+  filter: SerializedSearchFilter
 ) {
   const result = evaluateFieldPath(filter.fieldPath, document);
   switch (filter.type) {
@@ -810,7 +814,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
     case "number": {
       if (typeof value !== "number") {
         throw new Error(
-          `Validator error: Expected \`number\`, got \`${value}\``,
+          `Validator error: Expected \`number\`, got \`${value}\``
         );
       }
       return;
@@ -818,7 +822,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
     case "bigint": {
       if (typeof value !== "bigint") {
         throw new Error(
-          `Validator error: Expected \`bigint\`, got \`${value}\``,
+          `Validator error: Expected \`bigint\`, got \`${value}\``
         );
       }
       return;
@@ -826,7 +830,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
     case "boolean": {
       if (typeof value !== "boolean") {
         throw new Error(
-          `Validator error: Expected \`boolean\`, got \`${value}\``,
+          `Validator error: Expected \`boolean\`, got \`${value}\``
         );
       }
       return;
@@ -834,7 +838,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
     case "string": {
       if (typeof value !== "string") {
         throw new Error(
-          `Validator error: Expected \`string\`, got \`${value}\``,
+          `Validator error: Expected \`string\`, got \`${value}\``
         );
       }
       return;
@@ -842,7 +846,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
     case "bytes": {
       if (!(value instanceof ArrayBuffer)) {
         throw new Error(
-          `Validator error: Expected \`ArrayBuffer\`, got \`${value}\``,
+          `Validator error: Expected \`ArrayBuffer\`, got \`${value}\``
         );
       }
       return;
@@ -855,7 +859,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
         throw new Error(
           `Validator error: Expected \`${
             validator.value as any
-          }\`, got \`${value}\``,
+          }\`, got \`${value}\``
         );
       }
       return;
@@ -863,12 +867,12 @@ function validateValidator(validator: ValidatorJSON, value: any) {
     case "id": {
       if (typeof value !== "string") {
         throw new Error(
-          `Validator error: Expected \`string\`, got \`${value}\``,
+          `Validator error: Expected \`string\`, got \`${value}\``
         );
       }
       if (tableNameFromId(value) !== validator.tableName) {
         throw new Error(
-          `Validator error: Expected ID for table "${validator.tableName}", got \`${value}\``,
+          `Validator error: Expected ID for table "${validator.tableName}", got \`${value}\``
         );
       }
       return;
@@ -876,7 +880,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
     case "array": {
       if (!Array.isArray(value)) {
         throw new Error(
-          `Validator error: Expected \`Array\`, got \`${value}\``,
+          `Validator error: Expected \`Array\`, got \`${value}\``
         );
       }
       for (const v of value) {
@@ -887,21 +891,21 @@ function validateValidator(validator: ValidatorJSON, value: any) {
     case "object": {
       if (typeof value !== "object") {
         throw new Error(
-          `Validator error: Expected \`object\`, got \`${value}\``,
+          `Validator error: Expected \`object\`, got \`${value}\``
         );
       }
       if (!isSimpleObject(value)) {
         throw new Error(
-          `Validator error: Expected a plain old JavaScript \`object\`, got \`${value}\``,
+          `Validator error: Expected a plain old JavaScript \`object\`, got \`${value}\``
         );
       }
       for (const [k, { fieldType, optional }] of Object.entries(
-        validator.value,
+        validator.value
       )) {
         if (value[k] === undefined) {
           if (!optional) {
             throw new Error(
-              `Validator error: Missing required field \`${k}\` in object`,
+              `Validator error: Missing required field \`${k}\` in object`
             );
           }
         } else {
@@ -911,7 +915,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
       for (const k of Object.keys(value)) {
         if (validator.value[k] === undefined) {
           throw new Error(
-            `Validator error: Unexpected field \`${k}\` in object`,
+            `Validator error: Unexpected field \`${k}\` in object`
           );
         }
       }
@@ -998,27 +1002,24 @@ function asyncSyscallImpl(db: DatabaseFake) {
         const { name, args: queryArgs } = args;
         return JSON.stringify(
           convexToJson(
-            await withAuth().query(makeFunctionReference(name), queryArgs),
-          ),
+            await withAuth().query(makeFunctionReference(name), queryArgs)
+          )
         );
       }
       case "1.0/actions/mutation": {
         const { name, args: mutationArgs } = args;
         return JSON.stringify(
           convexToJson(
-            await withAuth().mutation(
-              makeFunctionReference(name),
-              mutationArgs,
-            ),
-          ),
+            await withAuth().mutation(makeFunctionReference(name), mutationArgs)
+          )
         );
       }
       case "1.0/actions/action": {
         const { name, args: actionArgs } = args;
         return JSON.stringify(
           convexToJson(
-            await withAuth().action(makeFunctionReference(name), actionArgs),
-          ),
+            await withAuth().action(makeFunctionReference(name), actionArgs)
+          )
         );
       }
       case "1.0/actions/schedule": {
@@ -1043,7 +1044,7 @@ function asyncSyscallImpl(db: DatabaseFake) {
               }
               if (job.state.kind !== "pending") {
                 throw new Error(
-                  `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+                  `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`
                 );
               }
             }
@@ -1053,7 +1054,7 @@ function asyncSyscallImpl(db: DatabaseFake) {
             } catch (error) {
               console.error(
                 `Error when running scheduled function ${name}`,
-                error,
+                error
               );
               db.patch(jobId, {
                 state: { kind: "failed" },
@@ -1065,14 +1066,14 @@ function asyncSyscallImpl(db: DatabaseFake) {
               const job = db.get(jobId) as ScheduledFunction;
               if (job.state.kind !== "inProgress") {
                 throw new Error(
-                  `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
+                  `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`
                 );
               }
             }
             db.patch(jobId, { state: { kind: "success" } });
             db.jobFinished(jobId);
           }) as () => void,
-          tsInSecs * 1000 - Date.now(),
+          tsInSecs * 1000 - Date.now()
         );
         return JSON.stringify(convexToJson(jobId));
       }
@@ -1092,7 +1093,7 @@ function asyncSyscallImpl(db: DatabaseFake) {
           // Probably an unintentional implementation in Convex
           // where expressions is only a single expression
           expressions === null ? [] : [expressions],
-          limit,
+          limit
         );
         return JSON.stringify(convexToJson({ results }));
       }
@@ -1130,7 +1131,7 @@ function asyncSyscallImpl(db: DatabaseFake) {
       }
       default: {
         throw new Error(
-          `\`convexTest\` does not support async syscall: "${op}"`,
+          `\`convexTest\` does not support async syscall: "${op}"`
         );
       }
     }
@@ -1184,7 +1185,7 @@ async function blobSha(blob: Blob) {
 async function waitForInProgressScheduledFunctions(): Promise<boolean> {
   const inProgressJobs = (await withAuth().run(async (ctx) => {
     return (await ctx.db.system.query("_scheduled_functions").collect()).filter(
-      (job: ScheduledFunction) => job.state.kind === "inProgress",
+      (job: ScheduledFunction) => job.state.kind === "inProgress"
     );
   })) as ScheduledFunction[];
   let numRemaining = inProgressJobs.length;
@@ -1257,8 +1258,8 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    */
   run: <Output>(
     func: (
-      ctx: GenericMutationCtx<DataModel> & { storage: StorageActionWriter },
-    ) => Promise<Output>,
+      ctx: GenericMutationCtx<DataModel> & { storage: StorageActionWriter }
+    ) => Promise<Output>
   ) => Promise<Output>;
 
   /**
@@ -1297,7 +1298,7 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
 };
 
 export type TestConvexForDataModelAndIdentity<
-  DataModel extends GenericDataModel,
+  DataModel extends GenericDataModel
 > = {
   /**
    * To test functions which depend on the current authenticated user identity
@@ -1308,7 +1309,7 @@ export type TestConvexForDataModelAndIdentity<
    *   generated automatically.
    */
   withIdentity(
-    identity: Partial<UserIdentity>,
+    identity: Partial<UserIdentity>
   ): TestConvexForDataModel<DataModel>;
 } & TestConvexForDataModel<DataModel>;
 
@@ -1331,13 +1332,13 @@ function moduleCache(specifiedModules?: Record<string, () => Promise<any>>) {
   const modules = specifiedModules ?? import.meta.glob("./convex/**/*.*s");
   const prefix = findModulesRoot(
     Object.keys(modules),
-    specifiedModules !== undefined,
+    specifiedModules !== undefined
   );
   const modulesWithoutExtension = Object.fromEntries(
     Object.entries(modules).map(([path, module]) => [
       path.replace(/\.[^.]+$/, ""),
       module,
-    ]),
+    ])
   );
   return async (path: string) => {
     const module = modulesWithoutExtension[prefix + path];
@@ -1350,7 +1351,7 @@ function moduleCache(specifiedModules?: Record<string, () => Promise<any>>) {
 
 function findModulesRoot(modulesPaths: string[], userProvidedModules: boolean) {
   const generatedFilePath = modulesPaths.find((path) =>
-    path.includes("_generated"),
+    path.includes("_generated")
   );
   if (generatedFilePath !== undefined) {
     return generatedFilePath.split("_generated", 2)[0];
@@ -1364,7 +1365,7 @@ function findModulesRoot(modulesPaths: string[], userProvidedModules: boolean) {
           '"_generated" directory'
         : "If your Convex functions aren't defined in a directory " +
           'called "convex" sibling to your node_modules, ' +
-          "provide the second argument to `convexTest`"),
+          "provide the second argument to `convexTest`")
   );
 }
 
@@ -1382,7 +1383,7 @@ function findModulesRoot(modulesPaths: string[], userProvidedModules: boolean) {
 export const convexTest = <Schema extends GenericSchema>(
   schema?: SchemaDefinition<Schema, boolean>,
   // For example `import.meta.glob("./**/*.*s")`
-  modules?: Record<string, () => Promise<any>>,
+  modules?: Record<string, () => Promise<any>>
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
   const db = new DatabaseFake(schema ?? null);
   (global as unknown as { Convex: any }).Convex = {
@@ -1401,7 +1402,7 @@ export const convexTest = <Schema extends GenericSchema>(
       const tokenIdentifier =
         identity.tokenIdentifier ?? `${issuer}|${subject}`;
       return withAuth(
-        new AuthFake({ ...identity, subject, issuer, tokenIdentifier }),
+        new AuthFake({ ...identity, subject, issuer, tokenIdentifier })
       );
     },
     ...withAuth(),
@@ -1412,7 +1413,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
   const runTransaction = async <T>(
     handler: (ctx: any, args: any) => T,
     args: any,
-    extraCtx: any = {},
+    extraCtx: any = {}
   ): Promise<T> => {
     const m = mutationGeneric({
       handler: (ctx: any, a: any) => {
@@ -1457,7 +1458,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     mutation: async (functionReference: any, args: any): Promise<Value> => {
       const func = await getFunctionFromReference(
         functionReference,
-        "mutation",
+        "mutation"
       );
       validateValidator(JSON.parse(func.exportArgs()), args ?? {});
       return await runTransaction(func, args);
@@ -1487,7 +1488,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         }
       ).invokeAction(
         requestId,
-        JSON.stringify(convexToJson([parseArgs(args)])),
+        JSON.stringify(convexToJson([parseArgs(args)]))
       );
       return jsonToConvex(JSON.parse(rawResult));
     },
@@ -1565,7 +1566,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     },
 
     finishAllScheduledFunctions: async (
-      advanceTimers: () => void,
+      advanceTimers: () => void
     ): Promise<void> => {
       let hadScheduledFunctions;
       do {
@@ -1577,7 +1578,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
 }
 
 function parseArgs(
-  args: Record<string, Value> | undefined,
+  args: Record<string, Value> | undefined
 ): Record<string, Value> {
   if (args === undefined) {
     return {};
@@ -1586,7 +1587,7 @@ function parseArgs(
     throw new Error(
       `The arguments to a Convex function must be an object. Received: ${
         args as any
-      }`,
+      }`
     );
   }
   return args;
@@ -1594,14 +1595,14 @@ function parseArgs(
 
 async function getFunctionFromReference(
   functionReference: FunctionReference<any, any, any, any>,
-  type: "query" | "mutation" | "action" | "any",
+  type: "query" | "mutation" | "action" | "any"
 ) {
   return await getFunctionFromName(getFunctionName(functionReference), type);
 }
 
 async function getFunctionFromName(
   functionName: string,
-  type: "query" | "mutation" | "action" | "any",
+  type: "query" | "mutation" | "action" | "any"
 ) {
   // api.foo.bar.default -> `foo/bar`
   const [modulePath, maybeExportName] = functionName.split(":");
@@ -1613,33 +1614,33 @@ async function getFunctionFromName(
   const func = module[exportName];
   if (func === undefined) {
     throw new Error(
-      `Expected a Convex function exported from module "${modulePath}" as \`${exportName}\`, but there is no such export.`,
+      `Expected a Convex function exported from module "${modulePath}" as \`${exportName}\`, but there is no such export.`
     );
   }
   if (typeof func !== "function") {
     throw new Error(
-      `Expected a Convex function exported from module "${modulePath}" as \`${exportName}\`, but got: ${func}`,
+      `Expected a Convex function exported from module "${modulePath}" as \`${exportName}\`, but got: ${func}`
     );
   }
   switch (type) {
     case "query":
       if (!func.isQuery) {
         throw new Error(
-          `Expected a query function, but the function exported from module "${modulePath}" as \`${exportName}\` is not a query.`,
+          `Expected a query function, but the function exported from module "${modulePath}" as \`${exportName}\` is not a query.`
         );
       }
       break;
     case "mutation":
       if (!func.isMutation) {
         throw new Error(
-          `Expected a mutation function, but the function exported from module "${modulePath}" as \`${exportName}\` is not a mutation.`,
+          `Expected a mutation function, but the function exported from module "${modulePath}" as \`${exportName}\` is not a mutation.`
         );
       }
       break;
     case "action":
       if (!func.isAction) {
         throw new Error(
-          `Expected an action function, but the function exported from module "${modulePath}" as \`${exportName}\` is not an action.`,
+          `Expected an action function, but the function exported from module "${modulePath}" as \`${exportName}\` is not an action.`
         );
       }
       break;
