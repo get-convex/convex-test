@@ -93,3 +93,31 @@ test("math operators", async () => {
   });
   expect(result).toMatchObject([{ body: "hi", author: "Alice", score: 42 }]);
 });
+
+test("nested field", async () => {
+  const schema = defineSchema({
+    things: defineTable({
+      field: v.optional(
+        v.object({
+          nested: v.string(),
+        }),
+      ),
+    }).index("fieldNested", ["field.nested"]),
+  });
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    await ctx.db.insert("things", {});
+    await ctx.db.insert("things", { field: { nested: "some" } });
+    const things = await ctx.db
+      .query("things")
+      .filter((q) => q.eq(q.field("field.nested"), "some"))
+      .collect();
+    expect(things).toMatchObject([{ field: { nested: "some" } }]);
+    const thingsByIndex = await ctx.db
+      .query("things")
+      // `as any` because of a bug in Convex index types
+      .withIndex("fieldNested", (q) => q.eq("field.nested", "some" as any))
+      .collect();
+    expect(thingsByIndex).toMatchObject([{ field: { nested: "some" } }]);
+  });
+});
