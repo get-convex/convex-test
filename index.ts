@@ -151,7 +151,7 @@ class DatabaseFake {
   }
 
   async startTransaction() {
-    if (this._waitOnCurrentFunction !== null) {
+    while (this._waitOnCurrentFunction !== null) {
       await this._waitOnCurrentFunction;
     }
     let markTransactionDone: () => void;
