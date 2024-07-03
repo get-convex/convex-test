@@ -112,6 +112,7 @@ test("concurrent append", async () => {
   }
   await Promise.all(concurrentCalls);
   const messages = await t.query(api.mutations.list);
+  // Regression test: if the mutations are not properly serialized, the final
+  // message becomes "hello!!".
   expect(messages).toMatchObject([{ body: "hello!!!!!!!!!!", author: "lee" }]);
 });
-
