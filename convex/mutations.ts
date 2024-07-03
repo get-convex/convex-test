@@ -57,3 +57,11 @@ export const throws = mutation({
     throw new Error("I changed my mind");
   },
 });
+
+export const append = mutation({
+  args: { id: v.id("messages"), suffix: v.string() },
+  handler: async (ctx, { id, suffix }) => {
+    const message = (await ctx.db.get(id))!;
+    await ctx.db.patch(id, { body: message.body + suffix });
+  }
+});

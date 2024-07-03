@@ -99,3 +99,20 @@ test("replace after insert", async () => {
   });
   expect(messages).toMatchObject([{ body: "hi", author: "michal" }]);
 });
+
+test("concurrent append", async () => {
+  const t = convexTest(schema);
+  const id = await t.mutation(api.mutations.insert, {
+    body: "hello",
+    author: "lee",
+  });
+  const concurrentCalls = [];
+  for (let i = 0; i < 10; i++) {
+    concurrentCalls.push(t.mutation(api.mutations.append, { id, suffix: "!" }));
+  }
+  await Promise.all(concurrentCalls);
+  const messages = await t.query(api.mutations.list);
+  // Regression test: if the mutations are not serializable, the final
+  // message becomes "hello!!".
+  expect(messages).toMatchObject([{ body: "hello!!!!!!!!!!", author: "lee" }]);
+});

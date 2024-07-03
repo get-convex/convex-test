@@ -151,7 +151,11 @@ class DatabaseFake {
   }
 
   async startTransaction() {
-    if (this._waitOnCurrentFunction !== null) {
+    // Note the loop is important, as the current promise might resolve and a
+    // new transaction could start before we get woken up.
+    // This is the standard pattern for condition variables:
+    // https://en.wikipedia.org/wiki/Monitor_(synchronization)
+    while (this._waitOnCurrentFunction !== null) {
       await this._waitOnCurrentFunction;
     }
     let markTransactionDone: () => void;
