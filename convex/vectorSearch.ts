@@ -28,13 +28,13 @@ export const vectorSearch = action({
       results.map(async ({ _id, _score }) => {
         const doc: Doc<"messages"> = (await ctx.runQuery(
           internal.vectorSearch.get,
-          { id: _id }
+          { id: _id },
         ))!;
         return {
           ...doc,
           score: _score,
         };
-      })
+      }),
     );
   },
 });

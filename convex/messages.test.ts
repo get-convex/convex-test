@@ -20,7 +20,7 @@ test("ai", async () => {
   const t = convexTest(schema);
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({ text: async () => "I am the overlord" } as Response))
+    vi.fn(async () => ({ text: async () => "I am the overlord" }) as Response),
   );
   await t.action(api.messages.sendAIMessage, { prompt: "hello" });
   const messages = await t.query(api.messages.list);

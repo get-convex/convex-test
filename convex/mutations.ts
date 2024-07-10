@@ -63,5 +63,5 @@ export const append = mutation({
   handler: async (ctx, { id, suffix }) => {
     const message = (await ctx.db.get(id))!;
     await ctx.db.patch(id, { body: message.body + suffix });
-  }
+  },
 });
