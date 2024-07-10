@@ -14,7 +14,7 @@ test("extra fields", async () => {
           body: "hello1",
           extraField: true,
         } as any);
-      })
+      }),
   ).rejects.toThrowError("Validator error");
 });
 
@@ -28,7 +28,7 @@ test("patch", async () => {
           body: "hello",
         });
         await ctx.db.patch(id, { author: false as any });
-      })
+      }),
   ).rejects.toThrowError("Validator error");
 });
 
@@ -42,7 +42,7 @@ test("replace", async () => {
           body: "hello",
         });
         await ctx.db.replace(id, { author: null as any, body: "hey" });
-      })
+      }),
   ).rejects.toThrowError("Validator error");
 });
 
@@ -52,7 +52,7 @@ test("arrays", async () => {
       messages: defineTable({
         values: v.array(v.number()),
       }),
-    })
+    }),
   );
   await expect(
     async () =>
@@ -60,7 +60,7 @@ test("arrays", async () => {
         await ctx.db.insert("messages", {
           values: ["bad" as any],
         });
-      })
+      }),
   ).rejects.toThrowError("Validator error");
 });
 
@@ -70,7 +70,7 @@ test("ids", async () => {
       messages: defineTable({
         author: v.optional(v.id("users")),
       }),
-    })
+    }),
   );
   await expect(
     async () =>
@@ -78,7 +78,7 @@ test("ids", async () => {
         await ctx.db.insert("messages", {
           author: "no bueno" as any,
         });
-      })
+      }),
   ).rejects.toThrowError("Validator error");
   await expect(
     async () =>
@@ -87,7 +87,7 @@ test("ids", async () => {
         await ctx.db.insert("messages", {
           author: messageId as any,
         });
-      })
+      }),
   ).rejects.toThrowError("Validator error");
 });
 
@@ -99,8 +99,8 @@ test("schema validation off", async () => {
           author: v.string(),
         }),
       },
-      { schemaValidation: false }
-    )
+      { schemaValidation: false },
+    ),
   );
   await t.run(async (ctx) => {
     await ctx.db.insert("messages", {

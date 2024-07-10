@@ -32,7 +32,7 @@ export const actionCallingQuery = internalAction({
   handler: async (ctx) => {
     const result: Doc<"messages">[] = await ctx.runQuery(
       internal.actions.list,
-      {}
+      {},
     );
     return result;
   },
@@ -55,7 +55,7 @@ export const actionCallingAction = internalAction({
     if (count > 0) {
       const result: { called: number } = await ctx.runAction(
         internal.actions.actionCallingAction,
-        { count: count - 1 }
+        { count: count - 1 },
       );
       return { called: result.called + 1 };
     }
@@ -71,7 +71,7 @@ export const actionCallingMutationsConcurrently = action({
     await Promise.all(
       authors.map(async (author) => {
         return await ctx.runMutation(api.actions.add, { body, author });
-      })
+      }),
     );
   },
 });
