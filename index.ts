@@ -433,6 +433,34 @@ class DatabaseFake {
       }
       case "IndexRange": {
         const [tableName, indexName] = source.indexName.split(".");
+        order = source.order ?? "asc";
+        let fields;
+        if (indexName === "by_creation_time") {
+          fields = ["_creationTime"];
+        } else if (indexName === "by_id") {
+          fields = ["_id"];
+        } else {
+          const indexes = this._schema?.tables.get(tableName)?.indexes;
+          const index = indexes?.find(
+            ({ indexDescriptor }: { indexDescriptor: string }) =>
+              indexDescriptor === indexName,
+          );
+          if (index === undefined) {
+            throw new Error(
+              `Cannot use index "${indexName}" for table "${tableName}" because ` +
+                `it is not declared in the schema.`,
+            );
+          }
+          fields = index.fields.concat(["_creationTime"]);
+        }
+        fieldPathsToSortBy = fields;
+        source.range.forEach((filter, i) => {
+          if (filter.fieldPath !== fields[i]) {
+            throw new Error(
+              `Incorrect field used with index, expected ${fields[i]}, got ${filter.fieldPath}`,
+            );
+          }
+        });
         this._iterateDocs(tableName, (doc) => {
           if (
             source.range.every((filter) => evaluateRangeFilter(doc, filter))
@@ -440,27 +468,6 @@ class DatabaseFake {
             results.push(doc);
           }
         });
-        order = source.order ?? "asc";
-        if (indexName === "by_creation_time") {
-          fieldPathsToSortBy = ["_creationTime"];
-          break;
-        }
-        if (indexName === "by_id") {
-          fieldPathsToSortBy = ["_id"];
-          break;
-        }
-        const indexes = this._schema?.tables.get(tableName)?.indexes;
-        const index = indexes?.find(
-          ({ indexDescriptor }: { indexDescriptor: string }) =>
-            indexDescriptor === indexName,
-        );
-        if (index === undefined) {
-          throw new Error(
-            `Cannot use index "${indexName}" for table "${tableName}" because ` +
-              `it is not declared in the schema.`,
-          );
-        }
-        fieldPathsToSortBy = index.fields.concat(["_creationTime"]);
         break;
       }
       case "Search": {
