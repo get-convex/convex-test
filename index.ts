@@ -416,8 +416,8 @@ class DatabaseFake {
   private _evaluateQuery(query: SerializedQuery): Array<GenericDocument> {
     const source = query.source;
     let results: GenericDocument[] = [];
-    let fieldPathsToSortBy = ["_creationTime"];
-    let order = "asc";
+    let fieldPathsToSortBy: string[];
+    let order: "asc" | "desc";
     switch (source.type) {
       case "FullTableScan": {
         const tableName = source.tableName;
@@ -425,6 +425,7 @@ class DatabaseFake {
           results.push(doc);
         });
         order = source.order ?? "asc";
+        fieldPathsToSortBy = ["_creationTime"];
 
         break;
       }
@@ -443,7 +444,7 @@ class DatabaseFake {
           break;
         }
         if (indexName === "by_id") {
-          fieldPathsToSortBy = ["_id"];
+          fieldPathsToSortBy = ["_id", "_creationTime"];
           break;
         }
         const indexes = this._schema?.tables.get(tableName)?.indexes;
@@ -457,7 +458,7 @@ class DatabaseFake {
               `it is not declared in the schema.`,
           );
         }
-        fieldPathsToSortBy = index.fields;
+        fieldPathsToSortBy = index.fields.concat(["_creationTime"]);
         break;
       }
       case "Search": {
@@ -469,6 +470,7 @@ class DatabaseFake {
             results.push(doc);
           }
         });
+        fieldPathsToSortBy = [];
         order = "asc";
         break;
       }

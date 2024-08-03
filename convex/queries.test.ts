@@ -169,6 +169,20 @@ test("order", async () => {
   ]);
 });
 
+test("index order", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello3" });
+    await ctx.db.insert("messages", { author: "sarah", body: "hello4" });
+    const messages = await ctx.db
+      .query("messages")
+      .withIndex("author", (q) => q.eq("author", "sarah"))
+      .order("desc")
+      .collect();
+    expect(messages).toMatchObject([{ body: "hello4" }, { body: "hello3" }]);
+  });
+});
+
 test("normalizeId", async () => {
   const t = convexTest(schema);
   await t.run(async (ctx) => {
