@@ -45,3 +45,21 @@ test("index must use only its fields, by_creation_time", async () => {
     ).rejects.toThrow();
   });
 });
+
+// TypeScript won't let you do this because we wanted
+// to keep the types simple, but it is runtime-wise correct.
+test("_id is always last indexed field", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    // do not throw
+    await ctx.db
+      .query("messages")
+      .withIndex("author", (q) =>
+        (q.eq("author", "sarah").gt("_creationTime", 3) as any).gt(
+          "_id",
+          "someId",
+        ),
+      )
+      .collect();
+  });
+});

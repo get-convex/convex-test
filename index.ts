@@ -436,7 +436,7 @@ class DatabaseFake {
         order = source.order ?? "asc";
         let fields;
         if (indexName === "by_creation_time") {
-          fields = ["_creationTime"];
+          fields = ["_creationTime", "_id"];
         } else if (indexName === "by_id") {
           fields = ["_id"];
         } else {
@@ -451,7 +451,7 @@ class DatabaseFake {
                 `it is not declared in the schema.`,
             );
           }
-          fields = index.fields.concat(["_creationTime"]);
+          fields = index.fields.concat(["_creationTime", "_id"]);
         }
         fieldPathsToSortBy = fields;
         source.range.forEach((filter, i) => {
