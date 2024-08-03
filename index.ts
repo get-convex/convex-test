@@ -148,6 +148,8 @@ class DatabaseFake {
               ]),
             ),
           };
+
+    this.validateSchema();
   }
 
   async startTransaction() {
@@ -543,6 +545,26 @@ class DatabaseFake {
     idsAndScores.sort((a, b) => b._score - a._score);
     return idsAndScores.slice(0, limit);
   }
+
+  validateSchema() {
+    this._schema?.tables.forEach((table, tableName) => {
+      if (!isValidIdentifier(tableName)) {
+        throw new Error(
+          `Table names must be valid identifiers, got "${tableName}"`,
+        );
+      }
+
+      validateFieldNames(table.documentType);
+
+      table.indexes.forEach(({ indexDescriptor }) => {
+        if (!isValidIdentifier(indexDescriptor)) {
+          throw new Error(
+            `Index names must be valid identifiers, got "${indexDescriptor}"`,
+          );
+        }
+      });
+    });
+  }
 }
 
 function tableNameFromId(id: string) {
@@ -785,6 +807,22 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
   } else {
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
   }
+}
+
+function validateFieldNames(validator: ValidatorJSON) {
+  validator.type === "object" &&
+    Object.keys(validator.value).forEach((fieldName) => {
+      if (!isValidIdentifier(fieldName)) {
+        throw new Error(
+          `Field names must be valid identifiers, got "${fieldName}"`,
+        );
+      }
+    });
+  validator.type === "union" && validator.value.forEach(validateFieldNames);
+}
+
+function isValidIdentifier(name: string) {
+  return /^[a-zA-Z][a-zA-Z0-9_]*$/.test(name);
 }
 
 type ObjectFieldType = { fieldType: ValidatorJSON; optional: boolean };
