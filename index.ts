@@ -444,7 +444,7 @@ class DatabaseFake {
           break;
         }
         if (indexName === "by_id") {
-          fieldPathsToSortBy = ["_id", "_creationTime"];
+          fieldPathsToSortBy = ["_id"];
           break;
         }
         const indexes = this._schema?.tables.get(tableName)?.indexes;
