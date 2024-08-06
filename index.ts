@@ -923,7 +923,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
   }
 }
 
-function syscallImpl(db: DatabaseFake) {
+function syscallImpl(db: DatabaseFake, componentArgs: Record<string, any>) {
   return (op: string, jsonArgs: string) => {
     const args = JSON.parse(jsonArgs);
     switch (op) {
@@ -941,6 +941,10 @@ function syscallImpl(db: DatabaseFake) {
         return JSON.stringify({
           id: isInTable ? idString : null,
         });
+      }
+      case "1.0/componentArgument": {
+        const { name } = args;
+        return JSON.stringify({ value: componentArgs[name] });
       }
       default: {
         throw new Error(`\`convexTest\` does not support syscall: "${op}"`);
@@ -1382,11 +1386,12 @@ function findModulesRoot(modulesPaths: string[], userProvidedModules: boolean) {
 export const convexTest = <Schema extends GenericSchema>(
   schema?: SchemaDefinition<Schema, boolean>,
   // For example `import.meta.glob("./**/*.*s")`
-  modules?: Record<string, () => Promise<any>>
+  modules?: Record<string, () => Promise<any>>,
+  componentArgs: Record<string, any> = {},
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
   const db = new DatabaseFake(schema ?? null);
   (global as unknown as { Convex: any }).Convex = {
-    syscall: syscallImpl(db),
+    syscall: syscallImpl(db, componentArgs),
     asyncSyscall: asyncSyscallImpl(db),
     jsSyscall: jsSyscallImpl(db),
     db,
