@@ -461,15 +461,43 @@ class DatabaseFake {
         // [Optionally] A lower bound expression defined with .gt or .gte.
         // [Optionally] An upper bound expression defined with .lt or .lte.
         let fieldIdx = 0;
-        for (const [i, filter] of source.range.entries()) {
-          // Allow to operate on same field (again)
-          if (i > 0 && filter.fieldPath === source.range[i - 1].fieldPath) {
-            continue;
+        let state: "eq" | "gt" | "lt" | "done" = "eq";
+        for (const filter of source.range) {
+          if (state === "done") {
+            throw new Error("Cannot add more clauses after gt/lt");
           }
-          // Allow to operate on the current indexed field
-          if (filter.fieldPath === fields[fieldIdx]) {
-            fieldIdx += 1;
-            continue;
+
+          let filterType: "eq" | "gt" | "lt" =
+            filter.type == "Gt" || filter.type == "Gte"
+              ? "gt"
+              : filter.type == "Lt" || filter.type == "Lte"
+                ? "lt"
+                : "eq";
+
+          switch (`${state}|${filterType}`) {
+            // Allow to operate on the current indexed field
+            case "eq|eq":
+            case "eq|gt":
+            case "eq|lt":
+              if (filter.fieldPath === fields[fieldIdx]) {
+                fieldIdx += 1;
+                state = filterType;
+                continue;
+              }
+              break;
+
+            // Allow to operate on the previous field (gt and lt must operate on same field)
+            case "lt|gt":
+            case "gt|lt":
+              if (fieldIdx > 0 && filter.fieldPath === fields[fieldIdx - 1]) {
+                state = "done";
+                continue;
+              }
+              throw new Error(
+                `gt and lt must operate on same field in withIndex`,
+              );
+
+            // everything else disallowed
           }
 
           throw new Error(
