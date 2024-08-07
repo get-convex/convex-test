@@ -454,13 +454,28 @@ class DatabaseFake {
           fields = index.fields.concat(["_creationTime", "_id"]);
         }
         fieldPathsToSortBy = fields;
-        source.range.forEach((filter, i) => {
-          if (filter.fieldPath !== fields[i]) {
-            throw new Error(
-              `Incorrect field used with index, expected ${fields[i]}, got ${filter.fieldPath}`,
-            );
+
+        // An index range expression is always a chained list of:
+        //
+        // 0 or more equality expressions defined with .eq.
+        // [Optionally] A lower bound expression defined with .gt or .gte.
+        // [Optionally] An upper bound expression defined with .lt or .lte.
+        let fieldIdx = 0;
+        for (const [i, filter] of source.range.entries()) {
+          // Allow to operate on same field (again)
+          if (i > 0 && filter.fieldPath === source.range[i - 1].fieldPath) {
+            continue;
           }
-        });
+          // Allow to operate on the current indexed field
+          if (filter.fieldPath === fields[fieldIdx]) {
+            fieldIdx += 1;
+            continue;
+          }
+
+          throw new Error(
+            `Incorrect field used in withIndex, expected ${fields[fieldIdx]}, got ${JSON.stringify(filter)}`,
+          );
+        }
         this._iterateDocs(tableName, (doc) => {
           if (
             source.range.every((filter) => evaluateRangeFilter(doc, filter))

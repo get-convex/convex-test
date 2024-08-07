@@ -48,7 +48,7 @@ test("index must use only its fields, by_creation_time", async () => {
 
 // TypeScript won't let you do this because we wanted
 // to keep the types simple, but it is runtime-wise correct.
-test("_id is always last indexed field", async () => {
+test("_id is always last indexed field gt gt", async () => {
   const t = convexTest(schema);
   await t.run(async (ctx) => {
     // do not throw
@@ -59,6 +59,88 @@ test("_id is always last indexed field", async () => {
           "_id",
           "someId",
         ),
+      )
+      .collect();
+  });
+});
+
+// TypeScript won't let you do this because we wanted
+// to keep the types simple, but it is runtime-wise correct.
+test("_id is always last indexed field lt lt", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    // do not throw
+    await ctx.db
+      .query("messages")
+      .withIndex("author", (q) =>
+        (q.eq("author", "sarah").lt("_creationTime", 3) as any).lt(
+          "_id",
+          "someId",
+        ),
+      )
+      .collect();
+  });
+});
+
+// TypeScript won't let you do this because we wanted
+// to keep the types simple, but it is runtime-wise correct.
+test("_id is always last indexed field lt gt", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    // do not throw
+    await ctx.db
+      .query("messages")
+      .withIndex("author", (q) =>
+        (q.eq("author", "sarah").lt("_creationTime", 3) as any).gt(
+          "_id",
+          "someId",
+        ),
+      )
+      .collect();
+  });
+});
+
+// TypeScript won't let you do this because we wanted
+// to keep the types simple, but it is runtime-wise correct.
+test("_id is always last indexed field gt lt", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    // do not throw
+    await ctx.db
+      .query("messages")
+      .withIndex("author", (q) =>
+        (q.eq("author", "sarah").gt("_creationTime", 3) as any).lt(
+          "_id",
+          "someId",
+        ),
+      )
+      .collect();
+  });
+});
+
+test("gt,lt in range of indexed field", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    // do not throw
+    await ctx.db
+      .query("messages")
+      .withIndex("author", (q) =>
+        q.gt("author", "nipunn").lt("author", "sarah"),
+      )
+      .collect();
+  });
+});
+
+// TypeScript won't let you do this because we wanted
+// to keep the types simple, but it is runtime-wise correct.
+test("lt,gt in range of indexed field", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    // do not throw
+    await ctx.db
+      .query("messages")
+      .withIndex("author", (q) =>
+        (q.lt("author", "nipunn") as any).gt("author", "sarah"),
       )
       .collect();
   });
