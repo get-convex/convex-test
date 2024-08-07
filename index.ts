@@ -461,7 +461,7 @@ class DatabaseFake {
         // [Optionally] A lower bound expression defined with .gt or .gte.
         // [Optionally] An upper bound expression defined with .lt or .lte.
         let fieldIdx = 0;
-        let state: "empty" | "eq" | "gt" | "lt" | "done" = "empty";
+        let state: "eq" | "gt" | "lt" | "done" = "eq";
         for (const filter of source.range) {
           if (state === "done") {
             throw new Error("Cannot add more clauses after gt/lt");
@@ -476,9 +476,6 @@ class DatabaseFake {
 
           switch (`${state}|${filterType}`) {
             // Allow to operate on the current indexed field
-            case "empty|eq":
-            case "empty|gt":
-            case "empty|lt":
             case "eq|eq":
             case "eq|gt":
             case "eq|lt":
