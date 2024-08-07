@@ -455,55 +455,8 @@ class DatabaseFake {
         }
         fieldPathsToSortBy = fields;
 
-        // An index range expression is always a chained list of:
-        //
-        // 0 or more equality expressions defined with .eq.
-        // [Optionally] A lower bound expression defined with .gt or .gte.
-        // [Optionally] An upper bound expression defined with .lt or .lte.
-        let fieldIdx = 0;
-        let state: "eq" | "gt" | "lt" | "done" = "eq";
-        for (const filter of source.range) {
-          if (state === "done") {
-            throw new Error("Cannot add more clauses after gt/lt");
-          }
+        validateIndexRangeExpression(source, fields);
 
-          let filterType: "eq" | "gt" | "lt" =
-            filter.type == "Gt" || filter.type == "Gte"
-              ? "gt"
-              : filter.type == "Lt" || filter.type == "Lte"
-                ? "lt"
-                : "eq";
-
-          switch (`${state}|${filterType}`) {
-            // Allow to operate on the current indexed field
-            case "eq|eq":
-            case "eq|gt":
-            case "eq|lt":
-              if (filter.fieldPath === fields[fieldIdx]) {
-                fieldIdx += 1;
-                state = filterType;
-                continue;
-              }
-              break;
-
-            // Allow to operate on the previous field (gt and lt must operate on same field)
-            case "lt|gt":
-            case "gt|lt":
-              if (fieldIdx > 0 && filter.fieldPath === fields[fieldIdx - 1]) {
-                state = "done";
-                continue;
-              }
-              throw new Error(
-                `gt and lt must operate on same field in withIndex`,
-              );
-
-            // everything else disallowed
-          }
-
-          throw new Error(
-            `Incorrect field used in withIndex, expected ${fields[fieldIdx]}, got ${JSON.stringify(filter)}`,
-          );
-        }
         this._iterateDocs(tableName, (doc) => {
           if (
             source.range.every((filter) => evaluateRangeFilter(doc, filter))
@@ -857,6 +810,75 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
   } else {
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
   }
+}
+
+// An index range expression is always a chained list of:
+//
+// 0 or more equality expressions defined with .eq.
+// [Optionally] A lower bound expression defined with .gt or .gte.
+// [Optionally] An upper bound expression defined with .lt or .lte.
+function validateIndexRangeExpression(
+  source: Source & { type: "IndexRange" },
+  fields: string[],
+) {
+  let fieldIndex = 0;
+  let state: "eq" | "gt" | "lt" | "done" = "eq";
+  for (const [filterIndex, filter] of source.range.entries()) {
+    if (state === "done") {
+      throw new Error(
+        `Incorrect operator used in \`withIndex\`, cannot chain ` +
+          `more operators after both \`.gt\` and \`.lt\` were already used, ` +
+          `got \`${printIndexOperator(filter)}\`.`,
+      );
+    }
+
+    const filterType: "eq" | "gt" | "lt" =
+      filter.type == "Gt" || filter.type == "Gte"
+        ? "gt"
+        : filter.type == "Lt" || filter.type == "Lte"
+          ? "lt"
+          : "eq";
+
+    switch (`${state}|${filterType}`) {
+      // Allow to operate on the current indexed field
+      case "eq|eq":
+      case "eq|gt":
+      case "eq|lt":
+        if (filter.fieldPath === fields[fieldIndex]) {
+          fieldIndex += 1;
+          state = filterType;
+          continue;
+        }
+        throw new Error(
+          `Incorrect field used in \`withIndex\`, ` +
+            `expected "${fields[fieldIndex]}", got "${filter.fieldPath}"`,
+        );
+
+      // Allow to operate on the previous field (gt and lt must operate on same field)
+      case "lt|gt":
+      case "gt|lt":
+        if (fieldIndex > 0 && filter.fieldPath === fields[fieldIndex - 1]) {
+          state = "done";
+          continue;
+        }
+        throw new Error(
+          `Incorrect field used in \`withIndex\`, ` +
+            `\`.gt\` and \`.lt\` must operate on the same field, ` +
+            `expected "${fields[fieldIndex - 1]}", got "${filter.fieldPath}"`,
+        );
+
+      default:
+        throw new Error(
+          `Incorrect operator used in \`withIndex\`, ` +
+            `cannot chain \`.${filter.type.toLowerCase()}()\` ` +
+            `after \`.${source.range[filterIndex - 1].type.toLowerCase()}()\``,
+        );
+    }
+  }
+}
+
+function printIndexOperator(filter: SerializedRangeExpression) {
+  return `.${filter.type.toLowerCase()}(${filter.fieldPath}, ${JSON.stringify(filter.value)})`;
 }
 
 function validateFieldNames(validator: ValidatorJSON) {

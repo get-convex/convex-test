@@ -112,7 +112,7 @@ test("_id is always last indexed field gt lt", async () => {
         await ctx.db
           .query("messages")
           .withIndex("author", (q) =>
-            (q.eq("author", "sarah").gt("_creationTime", 3) as any).lt(
+            (q.eq("author", "sarah").lt("_creationTime", 3) as any).eq(
               "_id",
               "someId",
             ),
@@ -166,6 +166,8 @@ test("gt,lt,lt in range of indexed field", async () => {
             ),
           )
           .collect(),
-    ).rejects.toThrow("Cannot add more clauses after gt/lt");
+    ).rejects.toThrow(
+      "cannot chain more operators after both `.gt` and `.lt` were already used",
+    );
   });
 });
