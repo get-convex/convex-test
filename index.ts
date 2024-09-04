@@ -371,6 +371,7 @@ class DatabaseFake {
       const { value, done } = this.queryNext(queryId);
       if (done) {
         isDone = true;
+        continueCursor = "_end_cursor";
         break;
       }
       if (isInPage) {
@@ -387,7 +388,7 @@ class DatabaseFake {
     return {
       page,
       isDone,
-      continueCursor,
+      continueCursor: continueCursor!,
     };
   }
 
