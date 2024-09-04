@@ -390,7 +390,7 @@ class DatabaseFake {
     return {
       page,
       isDone,
-      continueCursor: continueCursor!,
+      continueCursor,
     };
   }
 
