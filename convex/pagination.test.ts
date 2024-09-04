@@ -26,7 +26,7 @@ test("paginate", async () => {
     { author: "sarah", body: "hello2" },
   ]);
   expect(isDone).toEqual(false);
-  const { isDone: isDone2, page: page2 } = await t.query(api.pagination.list, {
+  const { continueCursor: continueCursor2, isDone: isDone2, page: page2 } = await t.query(api.pagination.list, {
     author: "sarah",
     paginationOptions: {
       cursor: continueCursor,
@@ -39,4 +39,15 @@ test("paginate", async () => {
     { author: "sarah", body: "hello5" },
   ]);
   expect(isDone2).toEqual(true);
+
+  // Querying after done should return nothing.
+  const { isDone: isDone3, page: page3 } = await t.query(api.pagination.list, {
+    author: "sarah",
+    paginationOptions: {
+      cursor: continueCursor2,
+      numItems: 4,
+    },
+  });
+  expect(page3).toMatchObject([]);
+  expect(isDone3).toEqual(true);
 });
