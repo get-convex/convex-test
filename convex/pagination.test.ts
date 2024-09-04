@@ -38,7 +38,6 @@ test("paginate", async () => {
     { author: "sarah", body: "hello4" },
     { author: "sarah", body: "hello5" },
   ]);
-  expect(continueCursor2).toEqual("_end_cursor");
   expect(isDone2).toEqual(true);
 
   // Querying after done should return nothing.

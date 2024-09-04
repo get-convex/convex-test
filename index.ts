@@ -371,6 +371,8 @@ class DatabaseFake {
       const { value, done } = this.queryNext(queryId);
       if (done) {
         isDone = true;
+        // We have reached the end of the query. Return a cursor that indicates
+        // "end query", which we can do with any string that isn't a valid _id.
         continueCursor = "_end_cursor";
         break;
       }
