@@ -12,6 +12,7 @@
   "bugs": "https://github.com/get-convex/convex-test/issues",
   "repository": "https://github.com/get-convex/convex-test",
   "main": "dist/index.js",
+  "type": "module",
   "files": [
     "dist/*.js",
     "dist/*.ts",
