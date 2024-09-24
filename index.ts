@@ -258,6 +258,11 @@ class DatabaseFake {
     }
     delete value["_id"];
     delete value["_creationTime"];
+    for (const [key, v] of Object.entries(value)) {
+      if (v['$undefined'] === null) {
+        value[key] = undefined;
+      }
+    }
     const merged = { ...fields, ...value };
     this._validate(tableNameFromId(_id as string)!, merged);
     this._writes[id] = {

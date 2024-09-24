@@ -87,6 +87,26 @@ test("patch after insert", async () => {
   expect(messages).toMatchObject([{ body: "hi", author: "sarah" }]);
 });
 
+test("patch undefined", async () => {
+  const t = convexTest(schema);
+  const messages = await t.run(async (ctx) => {
+    const id = await ctx.db.insert("messages", {
+      body: "hello",
+      author: "sarah",
+      embedding: [1, 1, 1],
+    });
+    await ctx.db.patch(id, { body: "hi", embedding: undefined });
+    return ctx.db.query("messages").collect();
+  });
+  expect(messages).toHaveLength(1);
+  // NOTE can't use toMatchObject because missing field is significant.
+  const { body, author, embedding } = messages[0];
+  expect(body).toStrictEqual("hi");
+  expect(author).toStrictEqual("sarah");
+  expect(embedding).toBeUndefined();
+});
+
+
 test("replace after insert", async () => {
   const t = convexTest(schema);
   const messages = await t.run(async (ctx) => {
