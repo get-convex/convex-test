@@ -261,11 +261,7 @@ class DatabaseFake {
     delete value["_creationTime"];
     const convexValue: any = {};
     for (const [key, v] of Object.entries(value)) {
-      if (v !== null && v['$undefined'] === null) {
-        convexValue[key] = undefined;
-      } else {
-        convexValue[key] = jsonToConvex(v);
-      }
+      convexValue[key] = evaluateValue(v);
     }
     const merged = { ...fields, ...convexValue };
     this._validate(tableNameFromId(_id as string)!, merged);
@@ -299,7 +295,7 @@ class DatabaseFake {
     delete value["_creationTime"];
     const convexValue: any = {};
     for (const [key, v] of Object.entries(value)) {
-      convexValue[key] = jsonToConvex(v);
+      convexValue[key] = evaluateValue(v);
     }
     this._validate(tableNameFromId(document._id as string)!, convexValue);
     this._writes[id] = {
