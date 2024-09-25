@@ -57,6 +57,12 @@ test("all types serde", async () => {
         .unique();
       expect(byIndex).not.toBeNull();
       expectBodiesEq(byIndex!.body, body);
+      // Filtered db.query
+      const byFilter = await ctx.db.query("messages")
+        .filter(q=>q.eq(q.field("body"), body))
+        .unique();
+      expect(byFilter).not.toBeNull();
+      expectBodiesEq(byFilter!.body, body);
       // Patch
       await ctx.db.patch(id, { body });
       expectBodiesEq((await ctx.db.get(id))!.body, body);
@@ -74,16 +80,16 @@ test("all types serde", async () => {
     await testBody(undefined);
     await testBody(true);
     await testBody(35);
-    // await testBody(BigInt(34));
-    // await testBody(null);
-    // await testBody(["a"]);
-    // await testBody([BigInt(34)]);
-    // await testBody({ a: 1 });
-    // await testBody({ a: BigInt(34) });
-    // await testBody(new ArrayBuffer(8));
-    // await testBody(Number.POSITIVE_INFINITY);
-    // await testBody(Number.NEGATIVE_INFINITY);
-    // await testBody(-0.0);
-    // await testBody(NaN);
+    await testBody(BigInt(34));
+    await testBody(null);
+    await testBody(["a"]);
+    await testBody([BigInt(34)]);
+    await testBody({ a: 1 });
+    await testBody({ a: BigInt(34) });
+    await testBody(new ArrayBuffer(8));
+    await testBody(Number.POSITIVE_INFINITY);
+    await testBody(Number.NEGATIVE_INFINITY);
+    await testBody(-0.0);
+    await testBody(NaN);
   });
 });
