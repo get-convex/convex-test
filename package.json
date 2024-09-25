@@ -1,6 +1,6 @@
 {
   "name": "convex-test",
-  "version": "0.0.29",
+  "version": "0.0.30",
   "description": "A JS mock of the Convex backend for testing your Convex functions.",
   "keywords": [
     "test",
@@ -12,6 +12,7 @@
   "bugs": "https://github.com/get-convex/convex-test/issues",
   "repository": "https://github.com/get-convex/convex-test",
   "main": "dist/index.js",
+  "type": "module",
   "files": [
     "dist/*.js",
     "dist/*.ts",
