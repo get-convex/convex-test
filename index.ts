@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 
+import { getFunctionAddress } from "convex/server";
 import {
   DataModelFromSchemaDefinition,
   DocumentByName,
@@ -16,7 +17,6 @@ import {
   SystemDataModel,
   UserIdentity,
   actionGeneric,
-  getFunctionName,
   httpActionGeneric,
   makeFunctionReference,
   mutationGeneric,
@@ -103,6 +103,7 @@ type TableName = string;
 type DocumentId = GenericId<TableName>;
 
 class DatabaseFake {
+  private _componentPath: string;
   private _documents: Record<DocumentId, StoredDocument> = {};
   private _storage: Record<DocumentId, Blob> = {};
   private _nextQueryId: QueryId = 1;
@@ -135,7 +136,10 @@ class DatabaseFake {
     >;
   } | null;
 
-  constructor(schema: SchemaDefinition<GenericSchema, boolean> | null) {
+  constructor(
+    schema: SchemaDefinition<GenericSchema, boolean> | null,
+    componentPath: string,
+  ) {
     this._schema =
       schema === null
         ? null
@@ -148,6 +152,7 @@ class DatabaseFake {
               ]),
             ),
           };
+    this._componentPath = componentPath;
 
     this.validateSchema();
   }
@@ -222,6 +227,7 @@ class DatabaseFake {
   }
 
   insert<Table extends TableName>(table: Table, value: any) {
+    console.log("insert", table, value, this._componentPath);
     this._validate(table, value);
     const _id = this._generateId(table);
     const now = Date.now();
@@ -232,6 +238,7 @@ class DatabaseFake {
       newValue: { ...value, _id, _creationTime },
       isInsert: true,
     };
+    console.log("insert", this._writes);
     return _id;
   }
 
@@ -259,7 +266,7 @@ class DatabaseFake {
     delete value["_id"];
     delete value["_creationTime"];
     for (const [key, v] of Object.entries(value)) {
-      if (v['$undefined'] === null) {
+      if (v["$undefined"] === null) {
         value[key] = undefined;
       }
     }
@@ -313,6 +320,13 @@ class DatabaseFake {
   }
 
   commit() {
+    console.log(
+      "commit",
+      this._writes,
+      this._componentPath,
+      this._writes,
+      this._documents,
+    );
     for (const [id, { newValue }] of Object.entries(this._writes)) {
       if (newValue === null) {
         delete this._documents[id as DocumentId];
@@ -320,6 +334,7 @@ class DatabaseFake {
         this._documents[id as DocumentId] = newValue;
       }
     }
+    console.log("commit", this._documents);
     this.resetWrites();
   }
 
@@ -575,6 +590,10 @@ class DatabaseFake {
         }
       });
     });
+  }
+
+  get componentPath() {
+    return this._componentPath;
   }
 }
 
@@ -1047,9 +1066,10 @@ function validateValidator(validator: ValidatorJSON, value: any) {
   }
 }
 
-function syscallImpl(db: DatabaseFake) {
+function syscallImpl() {
   return (op: string, jsonArgs: string) => {
     const args = JSON.parse(jsonArgs);
+    const db = getDb();
     switch (op) {
       case "1.0/queryStream": {
         const { query } = args;
@@ -1081,9 +1101,10 @@ class AuthFake {
   }
 }
 
-function asyncSyscallImpl(db: DatabaseFake) {
+function asyncSyscallImpl() {
   return async (op: string, jsonArgs: string): Promise<string> => {
     const args = JSON.parse(jsonArgs);
+    const db = getDb();
     switch (op) {
       case "1.0/get": {
         const doc = db.get(args.id);
@@ -1148,6 +1169,43 @@ function asyncSyscallImpl(db: DatabaseFake) {
           ),
         );
       }
+      case "1.0/runUdf": {
+        const {
+          udfType,
+          name,
+          reference,
+          functionHandle,
+          args: udfArgs,
+        } = args;
+        const functionPath = getFunctionPathFromAddress({
+          name,
+          reference,
+          functionHandle,
+        });
+        if (udfType === "query") {
+          return JSON.stringify(
+            convexToJson(await withAuth().queryFromPath(functionPath, udfArgs)),
+          );
+        }
+        if (udfType === "mutation") {
+          return JSON.stringify(
+            convexToJson(
+              await withAuth().mutationFromPath(functionPath, udfArgs),
+            ),
+          );
+        }
+        if (udfType === "action") {
+          return JSON.stringify(
+            convexToJson(
+              await withAuth().actionFromPath(functionPath, udfArgs),
+            ),
+          );
+        }
+        throw new Error(
+          `\`convexTest\` does not support udf type: "${udfType}"`,
+        );
+      }
+
       case "1.0/actions/schedule": {
         return await withAuth().run(async () => {
           return await getSyscalls().asyncSyscall("1.0/schedule", jsonArgs);
@@ -1264,8 +1322,9 @@ function asyncSyscallImpl(db: DatabaseFake) {
   };
 }
 
-function jsSyscallImpl(db: DatabaseFake) {
+function jsSyscallImpl() {
   return async (op: string, args: Record<string, any>): Promise<any> => {
+    const db = getDb();
     switch (op) {
       case "storage/storeBlob": {
         const { blob } = args as { blob: Blob };
@@ -1437,10 +1496,36 @@ export type TestConvexForDataModelAndIdentity<
   withIdentity(
     identity: Partial<UserIdentity>,
   ): TestConvexForDataModel<DataModel>;
+  registerComponent: (
+    componentPath: string,
+    schema: SchemaDefinition<GenericSchema, boolean>,
+    glob: Record<string, () => Promise<any>>,
+  ) => void;
 } & TestConvexForDataModel<DataModel>;
 
+function getDbForComponent(componentPath: string) {
+  const convex = getConvexGlobal();
+  return convex.components[componentPath].db;
+}
+
 function getDb() {
-  return (global as any).Convex.db as DatabaseFake;
+  return getDbForComponent(getCurrentComponentPath());
+}
+
+function getCurrentComponentPath() {
+  const convex = getConvexGlobal();
+  const currentFunctionPath =
+    convex.functionStack[convex.functionStack.length - 1];
+  return currentFunctionPath?.componentPath ?? "root";
+}
+
+function getModules() {
+  return getModulesForComponent(getCurrentComponentPath());
+}
+
+function getModulesForComponent(componentPath: string) {
+  const convex = getConvexGlobal();
+  return convex.components[componentPath].modules;
 }
 
 function getSyscalls() {
@@ -1448,10 +1533,6 @@ function getSyscalls() {
     syscall: ReturnType<typeof syscallImpl>;
     asyncSyscall: ReturnType<typeof asyncSyscallImpl>;
   };
-}
-
-function getModuleCache() {
-  return (global as any).Convex.modules as ReturnType<typeof moduleCache>;
 }
 
 function moduleCache(specifiedModules?: Record<string, () => Promise<any>>) {
@@ -1495,6 +1576,79 @@ function findModulesRoot(modulesPaths: string[], userProvidedModules: boolean) {
   );
 }
 
+/*
+Convex.db = DatabaseFake
+Convex.modules = moduleCache
+Convex.syscall = syscallImpl
+Convex.asyncSyscall = asyncSyscallImpl
+Convex.jsSyscall = jsSyscallImpl
+
+
+transaction commit on root only, resetWrites on all bc subtransactions
+
+Convex.functionStack = [{
+  component: "root",
+  udfPath: "messages:list"
+}
+]
+Convex.components = {
+  "root": {
+  },
+  "aggregate": {
+    components: 
+  }
+  "aggregate/ratelimiter"
+}
+
+t.registerComponent("aggregate", schema, glob for files with functions)
+t.registerComponentFake("aggregate", AggregateFake)
+
+subtransaction -- two functions where second errors (and is caught), we don't commit either because we reset writes
+
+*/
+
+type ComponentInfo = {
+  db: DatabaseFake;
+  modules: ReturnType<typeof moduleCache>;
+};
+
+type FunctionPath = {
+  // e.g. "aggregate"
+  componentPath: string;
+  // e.g. "messages:list"
+  udfPath: string;
+};
+
+type ConvexGlobal = {
+  components: Record<string, ComponentInfo>;
+  functionStack: FunctionPath[];
+  syscall: (op: string, args: any) => any;
+  asyncSyscall: (op: string, args: any) => Promise<any>;
+  jsSyscall: (op: string, args: any) => Promise<any>;
+};
+
+function getConvexGlobal(): ConvexGlobal {
+  return (global as unknown as { Convex: ConvexGlobal }).Convex;
+}
+
+function setConvexGlobal(convex: ConvexGlobal) {
+  (global as unknown as { Convex: ConvexGlobal }).Convex = convex;
+}
+
+function commitTransaction() {
+  const convex = getConvexGlobal();
+  const db = getDb();
+  if (db.componentPath !== "root") {
+    throw new Error(
+      "Commit transaction should only be called on the root component",
+    );
+  }
+  for (const component of Object.keys(convex.components)) {
+    console.log("commit", component);
+    convex.components[component].db.commit();
+  }
+}
+
 /**
  * Call this function at the start of each of your tests.
  *
@@ -1511,14 +1665,19 @@ export const convexTest = <Schema extends GenericSchema>(
   // For example `import.meta.glob("./**/*.*s")`
   modules?: Record<string, () => Promise<any>>,
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
-  const db = new DatabaseFake(schema ?? null);
-  (global as unknown as { Convex: any }).Convex = {
-    syscall: syscallImpl(db),
-    asyncSyscall: asyncSyscallImpl(db),
-    jsSyscall: jsSyscallImpl(db),
-    db,
-    modules: moduleCache(modules),
-  };
+  const rootDb = new DatabaseFake(schema ?? null, "root");
+  setConvexGlobal({
+    components: {
+      root: {
+        db: rootDb,
+        modules: moduleCache(modules),
+      },
+    },
+    functionStack: [],
+    syscall: syscallImpl(),
+    asyncSyscall: asyncSyscallImpl(),
+    jsSyscall: jsSyscallImpl(),
+  });
 
   return {
     withIdentity(identity: Partial<UserIdentity>) {
@@ -1532,6 +1691,17 @@ export const convexTest = <Schema extends GenericSchema>(
       );
     },
     ...withAuth(),
+    registerComponent(
+      componentPath: string,
+      schema: SchemaDefinition<GenericSchema, boolean>,
+      glob: Record<string, () => Promise<any>>,
+    ) {
+      const componentInfo = {
+        db: new DatabaseFake(schema, componentPath),
+        modules: moduleCache(glob),
+      };
+      getConvexGlobal().components[componentPath] = componentInfo;
+    },
   } as any;
 };
 
@@ -1540,6 +1710,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     handler: (ctx: any, args: any) => T,
     args: any,
     extraCtx: any = {},
+    functionPath: FunctionPath,
   ): Promise<T> => {
     const m = mutationGeneric({
       handler: (ctx: any, a: any) => {
@@ -1547,22 +1718,31 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         return handler(testCtx, a);
       },
     });
-    const markTransactionDone = await getDb().startTransaction();
+    const convex = getConvexGlobal();
+    const db = getDbForComponent(functionPath.componentPath);
+    const markTransactionDone = await db.startTransaction();
+    convex.functionStack.push(functionPath);
     try {
       const rawResult = await (
         m as unknown as { invokeMutation: (args: string) => Promise<string> }
       ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
-      getDb().commit();
+      if (db.componentPath === "root") {
+        db.resetWrites();
+        commitTransaction();
+      }
       return jsonToConvex(JSON.parse(rawResult)) as T;
+    } catch (e) {
+      db.resetWrites();
     } finally {
-      getDb().resetWrites();
-      getDb().endTransaction(markTransactionDone);
+      db.endTransaction(markTransactionDone);
+      convex.functionStack.pop();
     }
   };
 
-  const byType = {
-    query: async (functionReference: any, args: any) => {
-      const func = await getFunctionFromReference(functionReference, "query");
+  const byTypeWithPath = {
+    queryFromPath: async (functionPath: FunctionPath, args: any) => {
+      const db = getDbForComponent(functionPath.componentPath);
+      const func = await getFunctionFromPath(functionPath, "query");
       validateValidator(JSON.parse(func.exportArgs()), args ?? {});
       const q = queryGeneric({
         handler: (ctx: any, a: any) => {
@@ -1570,7 +1750,9 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           return func(testCtx, a);
         },
       });
-      const markTransactionDone = await getDb().startTransaction();
+      const convex = getConvexGlobal();
+      const markTransactionDone = await db.startTransaction();
+      convex.functionStack.push(functionPath);
       try {
         const rawResult = await (
           q as unknown as { invokeQuery: (args: string) => Promise<string> }
@@ -1578,20 +1760,23 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         return jsonToConvex(JSON.parse(rawResult));
       } finally {
         getDb().endTransaction(markTransactionDone);
+        convex.functionStack.pop();
       }
     },
 
-    mutation: async (functionReference: any, args: any): Promise<Value> => {
-      const func = await getFunctionFromReference(
-        functionReference,
-        "mutation",
-      );
+    mutationFromPath: async (
+      functionPath: FunctionPath,
+      args: any,
+    ): Promise<Value> => {
+      console.log("mutationFromPath", functionPath, args);
+      const func = await getFunctionFromPath(functionPath, "mutation");
       validateValidator(JSON.parse(func.exportArgs()), args ?? {});
-      return await runTransaction(func, args);
+
+      return await runTransaction(func, args, {}, functionPath);
     },
 
-    action: async (functionReference: any, args: any) => {
-      const func = await getFunctionFromReference(functionReference, "action");
+    actionFromPath: async (functionPath: FunctionPath, args: any) => {
+      const func = await getFunctionFromPath(functionPath, "action");
       validateValidator(JSON.parse(func.exportArgs()), args ?? {});
 
       const a = actionGeneric({
@@ -1619,14 +1804,41 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       return jsonToConvex(JSON.parse(rawResult));
     },
   };
+
+  const byType = {
+    query: async (functionReference: any, args: any) => {
+      const functionPath = getFunctionPathFromReference(functionReference);
+      return await byTypeWithPath.queryFromPath(functionPath, args);
+    },
+
+    mutation: async (functionReference: any, args: any): Promise<Value> => {
+      const functionPath = getFunctionPathFromReference(functionReference);
+      return await byTypeWithPath.mutationFromPath(functionPath, args);
+    },
+
+    action: async (functionReference: any, args: any) => {
+      const functionPath = getFunctionPathFromReference(functionReference);
+      return await byTypeWithPath.actionFromPath(functionPath, args);
+    },
+  };
   return {
     ...byType,
+    ...byTypeWithPath,
 
     run: async <T>(handler: (ctx: any) => T): Promise<T> => {
       // Grab StorageActionWriter from action ctx
       const a = actionGeneric({
         handler: async ({ storage }: any) => {
-          return await runTransaction(handler, {}, { storage });
+          return await runTransaction(
+            handler,
+            {},
+            { storage },
+            // xcxc is this ok?
+            {
+              componentPath: "root",
+              udfPath: "root",
+            },
+          );
         },
       });
       // Real backend uses different ID format
@@ -1653,7 +1865,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     },
 
     fetch: async (path: string, init?: RequestInit) => {
-      const router: HttpRouter = (await getModuleCache()("http"))["default"];
+      const router: HttpRouter = (await getModules()("http"))["default"];
       if (!path.startsWith("/")) {
         throw new Error(`Path given to \`t.fetch\` must start with a \`/\``);
       }
@@ -1719,23 +1931,70 @@ function parseArgs(
   return args;
 }
 
+function getFunctionPathFromAddress(
+  functionAddress:
+    | { name: string; reference: undefined; functionHandle: undefined }
+    | { reference: string; name: undefined; functionHandle: undefined }
+    | { functionHandle: string; name: undefined; reference: undefined },
+): FunctionPath {
+  if (functionAddress.functionHandle !== undefined) {
+    throw new Error("Function handle not supported");
+  }
+  if (functionAddress.name !== undefined) {
+    return {
+      udfPath: functionAddress.name,
+      componentPath: getCurrentComponentPath(),
+    };
+  }
+  if (functionAddress.reference !== undefined) {
+    // "_reference/childComponent/aggregate/path/to/file/functionName" -> "aggregate/path/to/file"
+    const childComponentName = functionAddress.reference.split("/")[2];
+    const componentPath = getCurrentComponentPath() + "/" + childComponentName;
+    // "_reference/childComponent/aggregate/path/to/file/functionName" -> "path/to/file/functionName"
+    const functionNameWithSlashes = functionAddress.reference
+      .split("/")
+      .slice(3)
+      .join("/");
+    // "path/to/file/functionName" -> "path/to/file:functionName"
+    const filepath = functionNameWithSlashes.split("/").slice(0, -1).join("/");
+    const functionName = functionNameWithSlashes.split("/").pop();
+    return {
+      udfPath: `${filepath}:${functionName}`,
+      componentPath,
+    };
+  }
+}
+
+function getFunctionPathFromReference(
+  functionReference: FunctionReference<any, any, any, any>,
+) {
+  // { name: "messages:list" }
+  // { reference: "_reference/childComponent/aggregate/path/to/file/functionName" }
+  // { functionHandle: "function://<id>/<path>" }
+  const functionAddress = getFunctionAddress(functionReference);
+  return getFunctionPathFromAddress(functionAddress);
+}
+
 async function getFunctionFromReference(
   functionReference: FunctionReference<any, any, any, any>,
   type: "query" | "mutation" | "action" | "any",
 ) {
-  return await getFunctionFromName(getFunctionName(functionReference), type);
+  const functionPath = getFunctionPathFromReference(functionReference);
+  return await getFunctionFromPath(functionPath, type);
 }
 
-async function getFunctionFromName(
-  functionName: string,
+async function getFunctionFromPath(
+  functionPath: FunctionPath,
   type: "query" | "mutation" | "action" | "any",
 ) {
-  // api.foo.bar.default -> `foo/bar`
-  const [modulePath, maybeExportName] = functionName.split(":");
+  // "queries/messages:list" -> ["queries/messages", "list"]
+  const [modulePath, maybeExportName] = functionPath.udfPath.split(":");
   const exportName =
     maybeExportName === undefined ? "default" : maybeExportName;
 
-  const module = await getModuleCache()(modulePath);
+  const module = await getModulesForComponent(functionPath.componentPath)(
+    modulePath,
+  );
 
   const func = module[exportName];
   if (func === undefined) {
