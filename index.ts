@@ -1176,7 +1176,10 @@ function asyncSyscallImpl() {
             }
             db.patch(jobId, { state: { kind: "inProgress" } });
             try {
-              await withAuth().fun(makeFunctionReference(name), fnArgs);
+              await withAuth().fun({
+                componentPath: db.componentPath,
+                udfPath: name,
+              }, fnArgs);
             } catch (error) {
               console.error(
                 `Error when running scheduled function ${name}`,
@@ -1799,16 +1802,16 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       return jsonToConvex(JSON.parse(rawResult)) as T;
     },
 
-    fun: async (functionReference: any, args: any) => {
-      const func = await getFunctionFromReference(functionReference, "any");
+    fun: async (functionPath: FunctionPath, args: any) => {
+      const func = await getFunctionFromPath(functionPath, "any");
       if (func.isQuery) {
-        return await byType.query(functionReference, args);
+        return await byTypeWithPath.queryFromPath(functionPath, args);
       }
       if (func.isMutation) {
-        return await byType.mutation(functionReference, args);
+        return await byTypeWithPath.mutationFromPath(functionPath, args);
       }
       if (func.isAction) {
-        return await byType.action(functionReference, args);
+        return await byTypeWithPath.actionFromPath(functionPath, args);
       }
     },
 
@@ -1925,14 +1928,6 @@ function getFunctionPathFromReference(
   // { functionHandle: "function://<id>/<path>" }
   const functionAddress = getFunctionAddress(functionReference);
   return getFunctionPathFromAddress(functionAddress);
-}
-
-async function getFunctionFromReference(
-  functionReference: FunctionReference<any, any, any, any>,
-  type: "query" | "mutation" | "action" | "any",
-) {
-  const functionPath = getFunctionPathFromReference(functionReference);
-  return await getFunctionFromPath(functionPath, type);
 }
 
 async function getFunctionFromPath(

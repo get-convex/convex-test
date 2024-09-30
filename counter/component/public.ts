@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { api } from "./_generated/api";
 
 export const add = mutation({
   args: {
@@ -37,5 +38,15 @@ export const count = query({
       .withIndex("name", (q) => q.eq("name", args.name))
       .collect();
     return counters.reduce((sum, counter) => sum + counter.value, 0);
+  },
+});
+
+export const schedule = mutation({
+  args: { name: v.string() },
+  handler: async (ctx, args) => {
+    await ctx.scheduler.runAfter(0, api.public.add, {
+      name: args.name,
+      count: 1,
+    });
   },
 });

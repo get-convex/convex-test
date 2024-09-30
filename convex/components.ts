@@ -29,3 +29,10 @@ export const directCall2 = internalQuery({
     return count;
   },
 });
+
+export const schedule = internalMutation({
+  args: {},
+  handler: async (ctx, _args) => {
+    await ctx.runMutation(components.counter.public.schedule, { name: "beans" });
+  },
+});
