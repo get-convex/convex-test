@@ -9,7 +9,7 @@ import counterSchema from "../counter/component/schema";
 test("generated attributes", async () => {
   const t = convexTest(schema);
   t.registerComponent(
-    "root/counter",
+    "counter",
     counterSchema,
     import.meta.glob("../counter/component/**/*.ts"),
   );

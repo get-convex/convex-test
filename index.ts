@@ -1465,7 +1465,7 @@ function getCurrentComponentPath() {
   const convex = getConvexGlobal();
   const currentFunctionPath =
     convex.functionStack[convex.functionStack.length - 1];
-  return currentFunctionPath?.componentPath ?? "root";
+  return currentFunctionPath?.componentPath ?? "";
 }
 
 function getModules() {
@@ -1535,12 +1535,12 @@ Convex.jsSyscall = jsSyscallImpl
 transaction commit on root only, resetWrites on all bc subtransactions
 
 Convex.functionStack = [{
-  component: "root",
+  component: "",
   udfPath: "messages:list"
 }
 ]
 Convex.components = {
-  "root": {
+  "": {
   },
   "aggregate": {
     components: 
@@ -1586,7 +1586,7 @@ function setConvexGlobal(convex: ConvexGlobal) {
 function commitTransaction() {
   const convex = getConvexGlobal();
   const db = getDb();
-  if (db.componentPath !== "root") {
+  if (db.componentPath !== "") {
     throw new Error(
       "Commit transaction should only be called on the root component",
     );
@@ -1613,10 +1613,10 @@ export const convexTest = <Schema extends GenericSchema>(
   // For example `import.meta.glob("./**/*.*s")`
   modules?: Record<string, () => Promise<any>>,
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
-  const rootDb = new DatabaseFake(schema ?? null, "root");
+  const rootDb = new DatabaseFake(schema ?? null, "");
   setConvexGlobal({
     components: {
-      root: {
+      "": {
         db: rootDb,
         modules: moduleCache(modules),
       },
@@ -1674,7 +1674,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       const rawResult = await (
         m as unknown as { invokeMutation: (args: string) => Promise<string> }
       ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
-      if (db.componentPath === "root") {
+      if (db.componentPath === "") {
         commitTransaction();
       }
       return jsonToConvex(JSON.parse(rawResult)) as T;
@@ -1783,7 +1783,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
             { storage },
             // xcxc is this ok?
             {
-              componentPath: "root",
+              componentPath: "",
               udfPath: "root",
             },
           );
@@ -1897,7 +1897,10 @@ function getFunctionPathFromAddress(
   if (functionAddress.reference !== undefined) {
     // "_reference/childComponent/aggregate/path/to/file/functionName" -> "aggregate/path/to/file"
     const childComponentName = functionAddress.reference.split("/")[2];
-    const componentPath = getCurrentComponentPath() + "/" + childComponentName;
+    let componentPath = childComponentName;
+    if (getCurrentComponentPath().length > 0) {
+      componentPath = `${getCurrentComponentPath()}/${componentPath}`;
+    }
     // "_reference/childComponent/aggregate/path/to/file/functionName" -> "path/to/file/functionName"
     const functionNameWithSlashes = functionAddress.reference
       .split("/")
