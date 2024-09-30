@@ -418,10 +418,10 @@ class DatabaseFake {
     for (const document of Object.values(this._documents)) {
       if (tableNameFromId(document._id) === tableName) {
         const write = this._writes[document._id];
-        if (write !== undefined && !write.isInsert && write.newValue !== null) {
-          callback(write.newValue);
-        } else {
+        if (write === undefined) {
           callback(document);
+        } else if (!write.isInsert && write.newValue !== null) {
+          callback(write.newValue);
         }
       }
     }
