@@ -30,7 +30,7 @@ import {
   jsonToConvex,
 } from "convex/values";
 import { createHash } from "crypto";
-import { compareValues } from "./compare";
+import { compareValues } from "./compare.js";
 
 type FilterJson =
   | { $eq: [FilterJson, FilterJson] }
