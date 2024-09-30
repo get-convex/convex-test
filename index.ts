@@ -1669,12 +1669,12 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         m as unknown as { invokeMutation: (args: string) => Promise<string> }
       ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
       if (db.componentPath === "root") {
-        db.resetWrites();
         commitTransaction();
       }
       return jsonToConvex(JSON.parse(rawResult)) as T;
     } catch (e) {
       db.resetWrites();
+      throw e;
     } finally {
       db.endTransaction(markTransactionDone);
       convex.functionStack.pop();
@@ -1905,6 +1905,7 @@ function getFunctionPathFromAddress(
       componentPath,
     };
   }
+  throw new Error("Function address not supported");
 }
 
 function getFunctionPathFromReference(
