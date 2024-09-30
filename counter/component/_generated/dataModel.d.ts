@@ -1,6 +1,5 @@
 /* prettier-ignore-start */
 
-/* eslint-disable */
 /**
  * Generated data model types.
  *

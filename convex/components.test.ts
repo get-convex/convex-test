@@ -3,7 +3,7 @@
 import { expect, test } from "vitest";
 import { convexTest } from "../index";
 import schema from "./schema";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import counterSchema from "../counter/component/schema";
 
 test("generated attributes", async () => {
