@@ -21,6 +21,6 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["./index.ts"],
+  "include": ["./*.ts"],
   "exclude": ["convex"]
 }

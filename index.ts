@@ -30,6 +30,7 @@ import {
   jsonToConvex,
 } from "convex/values";
 import { createHash } from "crypto";
+import { compareValues } from "./compare";
 
 type FilterJson =
   | { $eq: [FilterJson, FilterJson] }
@@ -258,12 +259,11 @@ class DatabaseFake {
     }
     delete value["_id"];
     delete value["_creationTime"];
+    const convexValue: any = {};
     for (const [key, v] of Object.entries(value)) {
-      if (v['$undefined'] === null) {
-        value[key] = undefined;
-      }
+      convexValue[key] = evaluateValue(v);
     }
-    const merged = { ...fields, ...value };
+    const merged = { ...fields, ...convexValue };
     this._validate(tableNameFromId(_id as string)!, merged);
     this._writes[id] = {
       newValue: { _id, _creationTime, ...merged },
@@ -293,10 +293,14 @@ class DatabaseFake {
     }
     delete value["_id"];
     delete value["_creationTime"];
-    this._validate(tableNameFromId(document._id as string)!, value);
+    const convexValue: any = {};
+    for (const [key, v] of Object.entries(value)) {
+      convexValue[key] = evaluateValue(v);
+    }
+    this._validate(tableNameFromId(document._id as string)!, convexValue);
     this._writes[id] = {
       newValue: {
-        ...value,
+        ...convexValue,
         _id: document._id,
         _creationTime: document._creationTime,
       },
@@ -586,68 +590,6 @@ function tableNameFromId(id: string) {
   return id.split(";")[1];
 }
 
-function compareValues(a: Value | undefined, b: Value | undefined) {
-  if (a === b) {
-    return 0;
-  }
-  if (a === undefined) {
-    return -1;
-  }
-  if (b === undefined) {
-    return 1;
-  }
-  if (a === null) {
-    return -1;
-  }
-  if (b === null) {
-    return 1;
-  }
-  const aType = typeof a;
-  const bType = typeof b;
-  if (aType !== bType) {
-    if (aType === "bigint") {
-      return -1;
-    }
-    if (bType === "bigint") {
-      return 1;
-    }
-    if (aType === "number") {
-      return -1;
-    }
-    if (bType === "number") {
-      return 1;
-    }
-    if (aType === "boolean") {
-      return -1;
-    }
-    if (bType === "boolean") {
-      return 1;
-    }
-    if (aType === "string") {
-      return -1;
-    }
-    if (bType === "string") {
-      return 1;
-    }
-  }
-  if (aType === "object") {
-    if (a instanceof ArrayBuffer && !(b instanceof ArrayBuffer)) {
-      return -1;
-    }
-    if (b instanceof ArrayBuffer && !(a instanceof ArrayBuffer)) {
-      return 1;
-    }
-    if (Array.isArray(a) && !Array.isArray(b)) {
-      return -1;
-    }
-    if (Array.isArray(b) && !Array.isArray(a)) {
-      return 1;
-    }
-  }
-
-  return a < b ? -1 : 1;
-}
-
 function isSimpleObject(value: unknown) {
   const isObject = typeof value === "object";
   const prototype = Object.getPrototypeOf(value);
@@ -677,16 +619,16 @@ function evaluateFilter(
   filter: any,
 ): Value | undefined {
   if (filter.$eq !== undefined) {
-    return (
-      evaluateFilter(document, filter.$eq[0]) ===
+    return compareValues(
+      evaluateFilter(document, filter.$eq[0]),
       evaluateFilter(document, filter.$eq[1])
-    );
+    ) === 0;
   }
   if (filter.$neq !== undefined) {
-    return (
-      evaluateFilter(document, filter.$neq[0]) !==
+    return compareValues(
+      evaluateFilter(document, filter.$neq[0]),
       evaluateFilter(document, filter.$neq[1])
-    );
+    ) !== 0;
   }
   if (filter.$and !== undefined) {
     return filter.$and.every((child: any) => evaluateFilter(document, child));
@@ -768,15 +710,15 @@ function evaluateRangeFilter(
   const value = evaluateValue(expr.value);
   switch (expr.type) {
     case "Eq":
-      return result === value;
+      return compareValues(result, value) === 0;
     case "Gt":
-      return (result as any) > (value as any);
+      return compareValues(result, value) > 0;
     case "Gte":
-      return (result as any) >= (value as any);
+      return compareValues(result, value) >= 0;
     case "Lt":
-      return (result as any) < (value as any);
+      return compareValues(result, value) < 0;
     case "Lte":
-      return (result as any) <= (value as any);
+      return compareValues(result, value) <= 0;
   }
 }
 
@@ -784,7 +726,7 @@ function evaluateValue(value: JSONValue) {
   if (typeof value === "object" && value !== null && "$undefined" in value) {
     return undefined;
   }
-  return value;
+  return jsonToConvex(value);
 }
 
 function evaluateSearchFilter(
@@ -794,7 +736,7 @@ function evaluateSearchFilter(
   const result = evaluateFieldPath(filter.fieldPath, document);
   switch (filter.type) {
     case "Eq":
-      return result === filter.value;
+      return compareValues(result, filter.value) === 0;
     case "Search":
       return (result as string)
         .split(/\s/)
