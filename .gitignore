@@ -4,3 +4,4 @@ dist
 .npm
 coverage
 .env.local
+*.tgz
