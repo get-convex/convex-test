@@ -136,3 +136,17 @@ test("concurrent append", async () => {
   // message becomes "hello!!".
   expect(messages).toMatchObject([{ body: "hello!!!!!!!!!!", author: "lee" }]);
 });
+
+test("delete is visible in transaction", async () => {
+  const t = convexTest(schema);
+  const id = await t.run(async (ctx) => {
+    return await ctx.db.insert("messages", { body: "hello", author: "sarah" });
+  });
+  await t.run(async (ctx) => {
+    await ctx.db.delete(id);
+    expect(await ctx.db.get(id)).toBeNull();
+    const first = await ctx.db.query("messages").first();
+    // Regression test: this used to still exist even after delete.
+    expect(first).toBeNull();
+  });
+});
