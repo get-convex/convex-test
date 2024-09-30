@@ -1445,9 +1445,16 @@ export type TestConvexForDataModelAndIdentity<
   ) => void;
 } & TestConvexForDataModel<DataModel>;
 
-function getDbForComponent(componentPath: string) {
+function getComponentInfo(componentPath: string): ComponentInfo {
   const convex = getConvexGlobal();
-  return convex.components[componentPath].db;
+  if (convex.components[componentPath] === undefined) {
+    throw new Error(`Component "${componentPath}" is not registered. Call "t.registerComponent".`);
+  }
+  return convex.components[componentPath];
+}
+
+function getDbForComponent(componentPath: string) {
+  return getComponentInfo(componentPath).db;
 }
 
 function getDb() {
@@ -1466,8 +1473,7 @@ function getModules() {
 }
 
 function getModulesForComponent(componentPath: string) {
-  const convex = getConvexGlobal();
-  return convex.components[componentPath].modules;
+  return getComponentInfo(componentPath).modules;
 }
 
 function getSyscalls() {
