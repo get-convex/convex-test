@@ -1050,12 +1050,12 @@ function asyncSyscallImpl(db: DatabaseFake) {
       }
       case "1.0/shallowMerge": {
         const { id, value } = args;
-        db.patch(id, value);
+        db.patch(id, jsonToConvex(value));
         return JSON.stringify({});
       }
       case "1.0/replace": {
         const { id, value } = args;
-        db.replace(id, value);
+        db.replace(id, jsonToConvex(value));
         return JSON.stringify({});
       }
       case "1.0/remove": {
