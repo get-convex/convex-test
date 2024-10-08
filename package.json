@@ -32,7 +32,7 @@
   "author": "Sarah Shader & Michal Srb <srb@convex.dev>",
   "license": "Apache-2.0",
   "peerDependencies": {
-    "convex": "file:../convex/npm-packages/convex/convex-1.16.3.tgz"
+    "convex": "^1.16.4"
   },
   "devDependencies": {
     "@edge-runtime/vm": "^3.2.0",
