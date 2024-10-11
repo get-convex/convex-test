@@ -37,6 +37,36 @@ test("mutation scheduling action", async () => {
   vi.useRealTimers();
 });
 
+test("mutation scheduling action then mutation fails", async () => {
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  await t.mutation(api.scheduler.mutationSchedulingAction, {
+    delayMs: 10000,
+    body: "through scheduler",
+  });
+  vi.runAllTimers();
+  await t.finishInProgressScheduledFunctions();
+  {
+    const jobs = await t.query(internal.scheduler.jobs);
+    expect(jobs).toMatchObject([{ state: { kind: "success" } }]);
+  }
+  // An unrelated mutation throws an error.
+  // This does not affect the scheduled functions which have already run and
+  // committed.
+  // This is a regression test: previously the error would cause the scheduled
+  // function to go back to "inProgress".
+  try {
+    await t.mutation(api.scheduler.add, { body: "FAIL THIS", author: "AI" });
+  } catch (e: any) {
+    expect(e.message).toBe("failed as intended");
+  }
+  {
+    const jobs = await t.query(internal.scheduler.jobs);
+    expect(jobs).toMatchObject([{ state: { kind: "success" } }]);
+  }
+  vi.useRealTimers();
+});
+
 test("cancel mutation", async () => {
   vi.useFakeTimers();
   const t = convexTest(schema);
