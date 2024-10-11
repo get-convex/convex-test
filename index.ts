@@ -113,17 +113,24 @@ class DatabaseFake {
   private _queryResults: Record<QueryId, Array<GenericDocument>> = {};
   // TODO: Make this more robust and cleaner
   jobListener: (jobId: string) => void = () => {};
+  // Pending writes for each level of transaction nesting.
+  // Whenever a child mutation begins, a new level is created for all
+  // components. When a child mutation commits, the writes are merged up one
+  // level. When the top-level mutation commits, the writes are applied to the
+  // database. When a mutation is rolled back, last level of writes is
+  // discarded.
   private _writes: Record<
     DocumentId,
     | { newValue: StoredDocument; isInsert: true }
     | { newValue: StoredDocument | null; isInsert: false }
-  > = {};
+  >[] = [];
   // The DatabaseFake is used in the Convex global,
   // and so it restricts `convexTest` to run one function
   // at a time.
   // We force sequential execution to make sure actions
   // can run mutations in parallel.
   private _waitOnCurrentFunction: Promise<void> | null = null;
+  private _markTransactionDone: (() => void) | null = null;
 
   private _schema: {
     schemaValidation: boolean;
@@ -166,15 +173,15 @@ class DatabaseFake {
     while (this._waitOnCurrentFunction !== null) {
       await this._waitOnCurrentFunction;
     }
-    let markTransactionDone: () => void;
     this._waitOnCurrentFunction = new Promise((resolve) => {
-      markTransactionDone = resolve;
+      this._markTransactionDone = resolve;
     });
-    return markTransactionDone!;
+    this._writes.push({});
   }
 
-  endTransaction(token: () => void) {
-    token();
+  endTransaction() {
+    this._markTransactionDone!();
+    this._markTransactionDone = null;
     this._waitOnCurrentFunction = null;
   }
 
@@ -198,9 +205,11 @@ class DatabaseFake {
       );
     }
 
-    const write = this._writes[id];
-    if (write !== undefined) {
-      return { document: write.newValue, isInsert: write.isInsert };
+    for (let i = this._writes.length - 1; i >= 0; i--) {
+      const write = this._writes[i][id];
+      if (write !== undefined) {
+        return { document: write.newValue, isInsert: write.isInsert };
+      }
     }
 
     return { document: this._documents[id] ?? null, isInsert: false };
@@ -235,7 +244,7 @@ class DatabaseFake {
     const _creationTime =
       now <= this._lastCreationTime ? this._lastCreationTime + 0.001 : now;
     this._lastCreationTime = _creationTime;
-    this._writes[_id] = {
+    this._writes[this._writes.length - 1][_id] = {
       newValue: { ...value, _id, _creationTime },
       isInsert: true,
     };
@@ -272,7 +281,7 @@ class DatabaseFake {
     }
     const merged = { ...fields, ...convexValue };
     this._validate(tableNameFromId(_id as string)!, merged);
-    this._writes[id] = {
+    this._writes[this._writes.length - 1][id] = {
       newValue: { _id, _creationTime, ...merged },
       isInsert,
     };
@@ -305,7 +314,7 @@ class DatabaseFake {
       convexValue[key] = evaluateValue(v);
     }
     this._validate(tableNameFromId(document._id as string)!, convexValue);
-    this._writes[id] = {
+    this._writes[this._writes.length - 1][id] = {
       newValue: {
         ...convexValue,
         _id: document._id,
@@ -320,7 +329,7 @@ class DatabaseFake {
     if (document === null) {
       throw new Error("Delete on non-existent doc");
     }
-    this._writes[id] = { newValue: null, isInsert: false };
+    this._writes[this._writes.length - 1][id] = { newValue: null, isInsert: false };
   }
 
   commit() {
@@ -331,19 +340,30 @@ class DatabaseFake {
       this._writes,
       this._documents,
     );
-    for (const [id, { newValue }] of Object.entries(this._writes)) {
-      if (newValue === null) {
-        delete this._documents[id as DocumentId];
+    const lastWrites = this._writes.pop();
+    if (!lastWrites) {
+      throw new Error("Transaction already committed or rolled back");
+    }
+    for (const [id, write] of Object.entries(lastWrites)) {
+      const _id = id as DocumentId;
+      if (this._writes.length === 0) {
+        const { newValue } = write;
+        if (newValue === null) {
+          delete this._documents[_id];
+        } else {
+          this._documents[_id] = newValue;
+        }
       } else {
-        this._documents[id as DocumentId] = newValue;
+        this._writes[this._writes.length - 1][_id] = write;
       }
     }
+    this.endTransaction();
     console.log("commit", this._documents);
-    this.resetWrites();
   }
 
-  resetWrites() {
-    this._writes = {};
+  rollbackWrites() {
+    this._writes.pop();
+    this.endTransaction();
   }
 
   _validate(tableName: string, doc: GenericDocument) {
@@ -422,17 +442,22 @@ class DatabaseFake {
     tableName: string,
     callback: (doc: GenericDocument) => void,
   ) {
-    for (const write of Object.values(this._writes)) {
-      if (write.isInsert) {
-        const document = write.newValue;
-        if (tableNameFromId(document._id) === tableName) {
-          callback(document);
+    for (let i = 0; i < this._writes.length; i++) {
+      for (const write of Object.values(this._writes[i])) {
+        if (write.isInsert) {
+          const document = write.newValue;
+          if (tableNameFromId(document._id) === tableName) {
+            callback(document);
+          }
         }
       }
     }
     for (const document of Object.values(this._documents)) {
       if (tableNameFromId(document._id) === tableName) {
-        const write = this._writes[document._id];
+        let write = undefined;
+        for (let i = 0; i < this._writes.length; i++) {
+          write = write ?? this._writes[i][document._id];
+        }
         if (write === undefined) {
           callback(document);
         } else if (!write.isInsert && write.newValue !== null) {
@@ -1163,18 +1188,22 @@ function asyncSyscallImpl() {
         });
         setTimeout(
           (async () => {
-            {
+            const canceled = await withAuth().run(async () => {
               const job = db.get(jobId) as ScheduledFunction;
               if (job.state.kind === "canceled") {
-                return;
+                return true;
               }
               if (job.state.kind !== "pending") {
                 throw new Error(
                   `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
                 );
               }
+              db.patch(jobId, { state: { kind: "inProgress" } });
+              return false;
+            });
+            if (canceled) {
+              return;
             }
-            db.patch(jobId, { state: { kind: "inProgress" } });
             try {
               await withAuth().fun({
                 componentPath: db.componentPath,
@@ -1185,21 +1214,23 @@ function asyncSyscallImpl() {
                 `Error when running scheduled function ${name}`,
                 error,
               );
-              db.patch(jobId, {
-                state: { kind: "failed" },
-                completedTime: Date.now(),
+              await withAuth().run(async () => {
+                db.patch(jobId, {
+                  state: { kind: "failed" },
+                  completedTime: Date.now(),
+                });
               });
               db.jobFinished(jobId);
             }
-            {
+            await withAuth().run(async () => {
               const job = db.get(jobId) as ScheduledFunction;
               if (job.state.kind !== "inProgress") {
                 throw new Error(
                   `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
                 );
               }
-            }
-            db.patch(jobId, { state: { kind: "success" } });
+              db.patch(jobId, { state: { kind: "success" } });
+            });
             db.jobFinished(jobId);
           }) as () => void,
           tsInSecs * 1000 - Date.now(),
@@ -1588,15 +1619,22 @@ function setConvexGlobal(convex: ConvexGlobal) {
 
 function commitTransaction() {
   const convex = getConvexGlobal();
-  const db = getDb();
-  if (db.componentPath !== "") {
-    throw new Error(
-      "Commit transaction should only be called on the root component",
-    );
+  for (const component of Object.values(convex.components)) {
+    component.db.commit();
   }
-  for (const component of Object.keys(convex.components)) {
-    console.log("commit", component);
-    convex.components[component].db.commit();
+}
+
+function rollbackTransaction() {
+  const convex = getConvexGlobal();
+  for (const component of Object.values(convex.components)) {
+    component.db.rollbackWrites();
+  }
+}
+
+async function startTransaction() {
+  const convex = getConvexGlobal();
+  for (const component of Object.values(convex.components)) {
+    await component.db.startTransaction();
   }
 }
 
@@ -1670,29 +1708,24 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       },
     });
     const convex = getConvexGlobal();
-    const db = getDbForComponent(functionPath.componentPath);
-    const markTransactionDone = await db.startTransaction();
+    await startTransaction();
     convex.functionStack.push(functionPath);
     try {
       const rawResult = await (
         m as unknown as { invokeMutation: (args: string) => Promise<string> }
       ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
-      if (db.componentPath === "") {
-        commitTransaction();
-      }
+      commitTransaction();
       return jsonToConvex(JSON.parse(rawResult)) as T;
     } catch (e) {
-      db.resetWrites();
+      rollbackTransaction();
       throw e;
     } finally {
-      db.endTransaction(markTransactionDone);
       convex.functionStack.pop();
     }
   };
 
   const byTypeWithPath = {
     queryFromPath: async (functionPath: FunctionPath, args: any) => {
-      const db = getDbForComponent(functionPath.componentPath);
       const func = await getFunctionFromPath(functionPath, "query");
       validateValidator(JSON.parse(func.exportArgs()), args ?? {});
       const q = queryGeneric({
@@ -1702,7 +1735,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         },
       });
       const convex = getConvexGlobal();
-      const markTransactionDone = await db.startTransaction();
+      await startTransaction();
       convex.functionStack.push(functionPath);
       try {
         const rawResult = await (
@@ -1710,7 +1743,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
         return jsonToConvex(JSON.parse(rawResult));
       } finally {
-        getDb().endTransaction(markTransactionDone);
+        rollbackTransaction();
         convex.functionStack.pop();
       }
     },
