@@ -1105,18 +1105,22 @@ function asyncSyscallImpl(db: DatabaseFake) {
         });
         setTimeout(
           (async () => {
-            {
+            const canceled = await withAuth().run(async () => {
               const job = db.get(jobId) as ScheduledFunction;
               if (job.state.kind === "canceled") {
-                return;
+                return true;
               }
               if (job.state.kind !== "pending") {
                 throw new Error(
                   `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
                 );
               }
+              db.patch(jobId, { state: { kind: "inProgress" } });
+              return false;
+            });
+            if (canceled) {
+              return;
             }
-            db.patch(jobId, { state: { kind: "inProgress" } });
             try {
               await withAuth().fun(makeFunctionReference(name), fnArgs);
             } catch (error) {
@@ -1124,9 +1128,11 @@ function asyncSyscallImpl(db: DatabaseFake) {
                 `Error when running scheduled function ${name}`,
                 error,
               );
-              db.patch(jobId, {
-                state: { kind: "failed" },
-                completedTime: Date.now(),
+              await withAuth().run(async () => {
+                db.patch(jobId, {
+                  state: { kind: "failed" },
+                  completedTime: Date.now(),
+                });
               });
               db.jobFinished(jobId);
             }
