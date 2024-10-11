@@ -124,13 +124,6 @@ class DatabaseFake {
     | { newValue: StoredDocument; isInsert: true }
     | { newValue: StoredDocument | null; isInsert: false }
   >[] = [];
-  // The DatabaseFake is used in the Convex global,
-  // and so it restricts `convexTest` to run one function
-  // at a time.
-  // We force sequential execution to make sure actions
-  // can run mutations in parallel.
-  private _waitOnCurrentFunction: Promise<void> | null = null;
-  private _markTransactionDone: (() => void) | null = null;
 
   private _schema: {
     schemaValidation: boolean;
@@ -165,30 +158,8 @@ class DatabaseFake {
     this.validateSchema();
   }
 
-  async startTransaction() {
-    // Note the loop is important, as the current promise might resolve and a
-    // new transaction could start before we get woken up.
-    // This is the standard pattern for condition variables:
-    // https://en.wikipedia.org/wiki/Monitor_(synchronization)
-    while (this._waitOnCurrentFunction !== null) {
-      await this._waitOnCurrentFunction;
-    }
-    this._waitOnCurrentFunction = new Promise((resolve) => {
-      this._markTransactionDone = resolve;
-    });
+  startTransaction() {
     this._writes.push({});
-  }
-
-  endTransaction() {
-    this._markTransactionDone!();
-    this._markTransactionDone = null;
-    this._waitOnCurrentFunction = null;
-  }
-
-  // Used to distinguish between mutation and action execution
-  // environment.
-  isInTransaction() {
-    return this._waitOnCurrentFunction !== null;
   }
 
   get(id: GenericId<string>) {
@@ -237,7 +208,6 @@ class DatabaseFake {
   }
 
   insert<Table extends TableName>(table: Table, value: any) {
-    console.log("insert", table, value, this._componentPath);
     this._validate(table, value);
     const _id = this._generateId(table);
     const now = Date.now();
@@ -248,7 +218,6 @@ class DatabaseFake {
       newValue: { ...value, _id, _creationTime },
       isInsert: true,
     };
-    console.log("insert", this._writes);
     return _id;
   }
 
@@ -333,13 +302,6 @@ class DatabaseFake {
   }
 
   commit() {
-    console.log(
-      "commit",
-      this._writes,
-      this._componentPath,
-      this._writes,
-      this._documents,
-    );
     const lastWrites = this._writes.pop();
     if (!lastWrites) {
       throw new Error("Transaction already committed or rolled back");
@@ -357,13 +319,10 @@ class DatabaseFake {
         this._writes[this._writes.length - 1][_id] = write;
       }
     }
-    this.endTransaction();
-    console.log("commit", this._documents);
   }
 
   rollbackWrites() {
     this._writes.pop();
-    this.endTransaction();
   }
 
   _validate(tableName: string, doc: GenericDocument) {
@@ -1151,13 +1110,13 @@ function asyncSyscallImpl() {
         });
         if (udfType === "query") {
           return JSON.stringify(
-            convexToJson(await withAuth().queryFromPath(functionPath, udfArgs)),
+            convexToJson(await withAuth().queryFromPath(functionPath, true, udfArgs)),
           );
         }
         if (udfType === "mutation") {
           return JSON.stringify(
             convexToJson(
-              await withAuth().mutationFromPath(functionPath, udfArgs),
+              await withAuth().mutationFromPath(functionPath, true, udfArgs),
             ),
           );
         }
@@ -1328,7 +1287,7 @@ function jsSyscallImpl() {
 // If we're in action, wrap the write in a transaction.
 async function writeToDatabase<T>(impl: (db: DatabaseFake) => Promise<T>) {
   const db = getDb();
-  if (!db.isInTransaction()) {
+  if (!getTransactionManager().isInTransaction()) {
     return await withAuth().run(async () => {
       return await impl(db);
     });
@@ -1496,10 +1455,14 @@ function getDb() {
   return getDbForComponent(getCurrentComponentPath());
 }
 
+function getTransactionManager() {
+  return getConvexGlobal().transactionManager;
+}
+
 function getCurrentComponentPath() {
-  const convex = getConvexGlobal();
+  const functionStack = getTransactionManager().functionStack;
   const currentFunctionPath =
-    convex.functionStack[convex.functionStack.length - 1];
+    functionStack[functionStack.length - 1];
   return currentFunctionPath?.componentPath ?? "";
 }
 
@@ -1604,7 +1567,7 @@ type FunctionPath = {
 
 type ConvexGlobal = {
   components: Record<string, ComponentInfo>;
-  functionStack: FunctionPath[];
+  transactionManager: TransactionManager;
   syscall: (op: string, args: any) => any;
   asyncSyscall: (op: string, args: any) => Promise<any>;
   jsSyscall: (op: string, args: any) => Promise<any>;
@@ -1618,24 +1581,78 @@ function setConvexGlobal(convex: ConvexGlobal) {
   (global as unknown as { Convex: ConvexGlobal }).Convex = convex;
 }
 
-function commitTransaction() {
-  const convex = getConvexGlobal();
-  for (const component of Object.values(convex.components)) {
-    component.db.commit();
-  }
-}
+class TransactionManager {
+  // The DatabaseFake is used in the Convex global,
+  // and so it restricts `convexTest` to run one function
+  // at a time.
+  // We force sequential execution to make sure actions
+  // can run mutations in parallel.
+  private _waitOnCurrentFunction: Promise<void> | null = null;
+  private _markTransactionDone: (() => void) | null = null;
+  public functionStack: FunctionPath[] = [];
 
-function rollbackTransaction() {
-  const convex = getConvexGlobal();
-  for (const component of Object.values(convex.components)) {
-    component.db.rollbackWrites();
+  async begin(
+    functionPath: FunctionPath,
+    isNested: boolean,
+  ) {
+    if (!isNested) {
+      // Note the loop is important, as the current promise might resolve and a
+      // new transaction could start before we get woken up.
+      // This is the standard pattern for condition variables:
+      // https://en.wikipedia.org/wiki/Monitor_(synchronization)
+      while (this._waitOnCurrentFunction !== null) {
+        await this._waitOnCurrentFunction;
+      }
+      this._waitOnCurrentFunction = new Promise((resolve) => {
+        this._markTransactionDone = resolve;
+      });
+    }
+    this.functionStack.push(functionPath);
+    const convex = getConvexGlobal();
+    for (const component of Object.values(convex.components)) {
+      component.db.startTransaction();
+    }
   }
-}
 
-async function startTransaction() {
-  const convex = getConvexGlobal();
-  for (const component of Object.values(convex.components)) {
-    await component.db.startTransaction();
+  beginSubtransaction() {
+    const convex = getConvexGlobal();
+    for (const component of Object.values(convex.components)) {
+      component.db.startTransaction();
+    }
+  }
+
+  // Used to distinguish between mutation and action execution
+  // environment.
+  isInTransaction() {
+    return this._waitOnCurrentFunction !== null;
+  }
+
+  commit(isNested: boolean) {
+    const convex = getConvexGlobal();
+    for (const component of Object.values(convex.components)) {
+      component.db.commit();
+    }
+    this._endTransaction(isNested);
+  }
+
+  rollback(isNested: boolean) {
+    const convex = getConvexGlobal();
+    for (const component of Object.values(convex.components)) {
+      component.db.rollbackWrites();
+    }
+    this._endTransaction(isNested);
+  }
+
+  _endTransaction(isNested: boolean) {
+    if (this._markTransactionDone === null) {
+      throw new Error("Transaction not started");
+    }
+    this.functionStack.pop();
+    if (!isNested) {
+      this._waitOnCurrentFunction = null;
+      this._markTransactionDone();
+      this._markTransactionDone = null;
+    }
   }
 }
 
@@ -1663,7 +1680,7 @@ export const convexTest = <Schema extends GenericSchema>(
         modules: moduleCache(modules),
       },
     },
-    functionStack: [],
+    transactionManager: new TransactionManager(),
     syscall: syscallImpl(),
     asyncSyscall: asyncSyscallImpl(),
     jsSyscall: jsSyscallImpl(),
@@ -1701,6 +1718,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     args: any,
     extraCtx: any = {},
     functionPath: FunctionPath,
+    isNested: boolean,
   ): Promise<T> => {
     const m = mutationGeneric({
       handler: (ctx: any, a: any) => {
@@ -1708,25 +1726,22 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         return handler(testCtx, a);
       },
     });
-    const convex = getConvexGlobal();
-    await startTransaction();
-    convex.functionStack.push(functionPath);
+    const transactionManager = getTransactionManager();
+    await transactionManager.begin(functionPath, isNested);
     try {
       const rawResult = await (
         m as unknown as { invokeMutation: (args: string) => Promise<string> }
       ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
-      commitTransaction();
+      transactionManager.commit(isNested);
       return jsonToConvex(JSON.parse(rawResult)) as T;
     } catch (e) {
-      rollbackTransaction();
+      transactionManager.rollback(isNested);
       throw e;
-    } finally {
-      convex.functionStack.pop();
     }
   };
 
   const byTypeWithPath = {
-    queryFromPath: async (functionPath: FunctionPath, args: any) => {
+    queryFromPath: async (functionPath: FunctionPath, isNested: boolean, args: any) => {
       const func = await getFunctionFromPath(functionPath, "query");
       validateValidator(JSON.parse(func.exportArgs()), args ?? {});
       const q = queryGeneric({
@@ -1735,29 +1750,28 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           return func(testCtx, a);
         },
       });
-      const convex = getConvexGlobal();
-      await startTransaction();
-      convex.functionStack.push(functionPath);
+      const transactionManager = getTransactionManager();
+      await transactionManager.begin(functionPath, isNested);
       try {
         const rawResult = await (
           q as unknown as { invokeQuery: (args: string) => Promise<string> }
         ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
         return jsonToConvex(JSON.parse(rawResult));
       } finally {
-        rollbackTransaction();
-        convex.functionStack.pop();
+        transactionManager.rollback(isNested);
+        transactionManager.functionStack.pop();
       }
     },
 
     mutationFromPath: async (
       functionPath: FunctionPath,
+      isNested: boolean,
       args: any,
     ): Promise<Value> => {
-      console.log("mutationFromPath", functionPath, args);
       const func = await getFunctionFromPath(functionPath, "mutation");
       validateValidator(JSON.parse(func.exportArgs()), args ?? {});
 
-      return await runTransaction(func, args, {}, functionPath);
+      return await runTransaction(func, args, {}, functionPath, isNested);
     },
 
     actionFromPath: async (functionPath: FunctionPath, args: any) => {
@@ -1793,12 +1807,12 @@ function withAuth(auth: AuthFake = new AuthFake()) {
   const byType = {
     query: async (functionReference: any, args: any) => {
       const functionPath = getFunctionPathFromReference(functionReference);
-      return await byTypeWithPath.queryFromPath(functionPath, args);
+      return await byTypeWithPath.queryFromPath(functionPath, false, args);
     },
 
     mutation: async (functionReference: any, args: any): Promise<Value> => {
       const functionPath = getFunctionPathFromReference(functionReference);
-      return await byTypeWithPath.mutationFromPath(functionPath, args);
+      return await byTypeWithPath.mutationFromPath(functionPath, false, args);
     },
 
     action: async (functionReference: any, args: any) => {
@@ -1818,11 +1832,12 @@ function withAuth(auth: AuthFake = new AuthFake()) {
             handler,
             {},
             { storage },
-            // xcxc is this ok?
+            // Fake mutation path.
             {
               componentPath: "",
               udfPath: "root",
             },
+            false,
           );
         },
       });
@@ -1839,10 +1854,10 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     fun: async (functionPath: FunctionPath, args: any) => {
       const func = await getFunctionFromPath(functionPath, "any");
       if (func.isQuery) {
-        return await byTypeWithPath.queryFromPath(functionPath, args);
+        return await byTypeWithPath.queryFromPath(functionPath, false, args);
       }
       if (func.isMutation) {
-        return await byTypeWithPath.mutationFromPath(functionPath, args);
+        return await byTypeWithPath.mutationFromPath(functionPath, false, args);
       }
       if (func.isAction) {
         return await byTypeWithPath.actionFromPath(functionPath, args);
