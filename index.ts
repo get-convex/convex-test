@@ -1221,6 +1221,7 @@ function asyncSyscallImpl() {
                 });
               });
               db.jobFinished(jobId);
+              return;
             }
             await withAuth().run(async () => {
               const job = db.get(jobId) as ScheduledFunction;

@@ -13,6 +13,9 @@ export const list = internalQuery({
 export const add = mutation({
   args: { body: v.string(), author: v.string() },
   handler: async (ctx, { body, author }) => {
+    if (body === "FAIL THIS") {
+      throw new Error("failed as intended");
+    }
     const message = { body, author };
     await ctx.db.insert("messages", message);
   },
