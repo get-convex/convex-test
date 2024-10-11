@@ -156,6 +156,8 @@ test("failed scheduled function", async () => {
   });
   vi.runAllTimers();
   await t.finishInProgressScheduledFunctions();
+  // Regression test: previously this would throw an error that the scheduled
+  // function state is "failed" while it should be "inProgress".
   const jobs = await t.query(internal.scheduler.jobs);
   expect(jobs).toMatchObject([
     { state: { kind: "failed" }, args: [{ body: "FAIL THIS" }] },
