@@ -116,3 +116,19 @@ test("cancel action", async () => {
   expect(result).toMatchObject([]);
   vi.useRealTimers();
 });
+
+test("failed scheduled function", async () => {
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  await t.mutation(api.scheduler.mutationSchedulingAction, {
+    delayMs: 0,
+    body: "FAIL THIS",
+  });
+  vi.runAllTimers();
+  await t.finishInProgressScheduledFunctions();
+  const jobs = await t.query(internal.scheduler.jobs);
+  expect(jobs).toMatchObject([
+    { state: { kind: "failed" }, args: [{ body: "FAIL THIS" }] },
+  ]);
+  vi.useRealTimers();
+});

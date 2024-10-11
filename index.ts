@@ -1135,16 +1135,17 @@ function asyncSyscallImpl(db: DatabaseFake) {
                 });
               });
               db.jobFinished(jobId);
+              return;
             }
-            {
+            await withAuth().run(async () => {
               const job = db.get(jobId) as ScheduledFunction;
               if (job.state.kind !== "inProgress") {
                 throw new Error(
                   `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
                 );
               }
-            }
-            db.patch(jobId, { state: { kind: "success" } });
+              db.patch(jobId, { state: { kind: "success" } });
+            });
             db.jobFinished(jobId);
           }) as () => void,
           tsInSecs * 1000 - Date.now(),
