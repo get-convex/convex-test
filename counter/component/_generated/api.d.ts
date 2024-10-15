@@ -37,6 +37,7 @@ export type Mounts = {
       null
     >;
     count: FunctionReference<"query", "public", { name: string }, number>;
+    schedule: FunctionReference<"mutation", "public", { name: string }, any>;
   };
 };
 // For now fullApiWithMounts is only fullApi which provides

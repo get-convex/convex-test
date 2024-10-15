@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { convexTest } from "../index";
 import schema from "./schema";
 import { internal } from "./_generated/api";
@@ -8,24 +8,46 @@ import counterSchema from "../counter/component/schema";
 
 const counterModules = import.meta.glob("../counter/component/**/*.ts");
 
-test("generated attributes", async () => {
+function testWithCounter() {
   const t = convexTest(schema);
   t.registerComponent(
     "counter",
     counterSchema,
     counterModules
   );
-  const x = await t.mutation(internal.components.directCall);
+  return t;
+}
+
+test("generated attributes", async () => {
+  const t = testWithCounter();
+  const x = await t.mutation(internal.component.directCall);
   // const x = await t.query(internal.components.directCall2);
   expect(x).toEqual(3);
 });
 
 test("component scheduler", async () => {
-  const t = convexTest(schema);
-  t.registerComponent(
-    "counter",
-    counterSchema,
-    counterModules
-  );
-  await t.mutation(internal.components.schedule);
+  vi.useFakeTimers();
+  const t = testWithCounter();
+  await t.mutation(internal.component.schedule);
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  vi.useRealTimers();
+});
+
+test("function handle", async () => {
+  const t = testWithCounter();
+  const handle = await t.mutation(internal.component.getFunctionHandle);
+  await t.mutation(internal.component.callHandle, { handle });
+  const x = await t.query(internal.component.directCall2);
+  expect(x).toEqual(3);
+});
+
+test("function handle scheduler", async () => {
+  vi.useFakeTimers();
+  const t = testWithCounter();
+  const handle = await t.mutation(internal.component.getFunctionHandle);
+  await t.mutation(internal.component.scheduleHandle, { handle });
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  const x = await t.query(internal.component.directCall2);
+  expect(x).toEqual(3);
+  vi.useRealTimers();
 });

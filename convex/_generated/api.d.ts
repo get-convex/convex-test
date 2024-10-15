@@ -13,7 +13,7 @@
 import type * as actions from "../actions.js";
 import type * as argumentsValidation from "../argumentsValidation.js";
 import type * as authentication from "../authentication.js";
-import type * as components from "../components.js";
+import type * as component from "../component.js";
 import type * as http from "../http.js";
 import type * as messages from "../messages.js";
 import type * as mutations from "../mutations.js";
@@ -41,7 +41,7 @@ declare const fullApi: ApiFromModules<{
   actions: typeof actions;
   argumentsValidation: typeof argumentsValidation;
   authentication: typeof authentication;
-  components: typeof components;
+  component: typeof component;
   http: typeof http;
   messages: typeof messages;
   mutations: typeof mutations;
@@ -73,6 +73,12 @@ export declare const components: {
         null
       >;
       count: FunctionReference<"query", "internal", { name: string }, number>;
+      schedule: FunctionReference<
+        "mutation",
+        "internal",
+        { name: string },
+        any
+      >;
     };
   };
 };

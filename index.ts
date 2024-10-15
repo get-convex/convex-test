@@ -214,6 +214,9 @@ class DatabaseFake {
     const _creationTime =
       now <= this._lastCreationTime ? this._lastCreationTime + 0.001 : now;
     this._lastCreationTime = _creationTime;
+    if (!this._writes.length) {
+      throw new Error(`Insert outside of transaction ${_id}`);
+    }
     this._writes[this._writes.length - 1][_id] = {
       newValue: { ...value, _id, _creationTime },
       isInsert: true,
@@ -250,6 +253,9 @@ class DatabaseFake {
     }
     const merged = { ...fields, ...convexValue };
     this._validate(tableNameFromId(_id as string)!, merged);
+    if (!this._writes.length) {
+      throw new Error(`Patch outside of transaction ${id}`);
+    }
     this._writes[this._writes.length - 1][id] = {
       newValue: { _id, _creationTime, ...merged },
       isInsert,
@@ -1103,7 +1109,7 @@ function asyncSyscallImpl() {
           functionHandle,
           args: udfArgs,
         } = args;
-        const functionPath = getFunctionPathFromAddress({
+        const functionPath = await getFunctionPathFromAddress({
           name,
           reference,
           functionHandle,
@@ -1131,6 +1137,24 @@ function asyncSyscallImpl() {
           `\`convexTest\` does not support udf type: "${udfType}"`,
         );
       }
+      case "1.0/createFunctionHandle": {
+        const {
+          name,
+          reference,
+          functionHandle,
+        } = args;
+        const functionPath = await getFunctionPathFromAddress({
+          name,
+          reference,
+          functionHandle,
+        });
+        const id = await writeToDatabase(async (db) => {
+          return db.insert("_function_handles", {
+            functionPath,
+          });
+        });
+        return JSON.stringify("function://" + id);
+      }
 
       case "1.0/actions/schedule": {
         return await withAuth().run(async () => {
@@ -1138,16 +1162,28 @@ function asyncSyscallImpl() {
         });
       }
       case "1.0/schedule": {
-        const { name, args: fnArgs, ts: tsInSecs } = args;
+        const {
+          name,
+          reference,
+          functionHandle,
+          args: fnArgs,
+          ts: tsInSecs,
+        } = args;
+        const functionPath = await getFunctionPathFromAddress({
+          name,
+          reference,
+          functionHandle,
+        });
         const jobId = db.insert("_scheduled_functions", {
           args: [fnArgs],
-          name,
+          name: functionPath.udfPath,
           scheduledTime: tsInSecs * 1000,
           state: { kind: "pending" },
         });
+        const componentPath = getCurrentComponentPath();
         setTimeout(
           (async () => {
-            const canceled = await withAuth().run(async () => {
+            const canceled = await withAuth().runInComponent(componentPath, async () => {
               const job = db.get(jobId) as ScheduledFunction;
               if (job.state.kind === "canceled") {
                 return true;
@@ -1164,16 +1200,13 @@ function asyncSyscallImpl() {
               return;
             }
             try {
-              await withAuth().fun({
-                componentPath: db.componentPath,
-                udfPath: name,
-              }, fnArgs);
+              await withAuth().fun(functionPath, fnArgs);
             } catch (error) {
               console.error(
                 `Error when running scheduled function ${name}`,
                 error,
               );
-              await withAuth().run(async () => {
+              await withAuth().runInComponent(componentPath, async () => {
                 db.patch(jobId, {
                   state: { kind: "failed" },
                   completedTime: Date.now(),
@@ -1182,7 +1215,7 @@ function asyncSyscallImpl() {
               db.jobFinished(jobId);
               return;
             }
-            await withAuth().run(async () => {
+            await withAuth().runInComponent(componentPath, async () => {
               const job = db.get(jobId) as ScheduledFunction;
               if (job.state.kind !== "inProgress") {
                 throw new Error(
@@ -1304,25 +1337,29 @@ async function blobSha(blob: Blob) {
 }
 
 async function waitForInProgressScheduledFunctions(): Promise<boolean> {
-  const inProgressJobs = (await withAuth().run(async (ctx) => {
-    return (await ctx.db.system.query("_scheduled_functions").collect()).filter(
-      (job: ScheduledFunction) => job.state.kind === "inProgress",
-    );
-  })) as ScheduledFunction[];
-  let numRemaining = inProgressJobs.length;
-  if (numRemaining === 0) {
-    return false;
-  }
+  let hadScheduledFunctions = false;
+  for (const componentPath of Object.keys(getConvexGlobal().components)) {
+    const inProgressJobs = (await withAuth().runInComponent(componentPath, async (ctx) => {
+      return (await ctx.db.system.query("_scheduled_functions").collect()).filter(
+        (job: ScheduledFunction) => job.state.kind === "inProgress",
+      );
+    })) as ScheduledFunction[];
+    let numRemaining = inProgressJobs.length;
+    if (numRemaining === 0) {
+      continue;
+    }
+    hadScheduledFunctions = true;
 
-  await new Promise<void>((resolve) => {
-    getDb().jobListener = () => {
-      numRemaining -= 1;
-      if (numRemaining === 0) {
-        resolve();
-      }
-    };
-  });
-  return true;
+    await new Promise<void>((resolve) => {
+      getDbForComponent(componentPath).jobListener = () => {
+        numRemaining -= 1;
+        if (numRemaining === 0) {
+          resolve();
+        }
+      };
+    });
+  }
+  return hadScheduledFunctions;
 }
 
 export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
@@ -1614,11 +1651,12 @@ class TransactionManager {
     }
   }
 
-  beginSubtransaction() {
-    const convex = getConvexGlobal();
-    for (const component of Object.values(convex.components)) {
-      component.db.startTransaction();
-    }
+  beginAction(functionPath: FunctionPath) {
+    this.functionStack.push(functionPath);
+  }
+
+  finishAction() {
+    this.functionStack.pop();
   }
 
   // Used to distinguish between mutation and action execution
@@ -1790,6 +1828,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           return func(testCtx, a);
         },
       });
+      getTransactionManager().beginAction(functionPath);
       // Real backend uses different ID format
       const requestId = "" + Math.random();
       const rawResult = await (
@@ -1800,55 +1839,60 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         requestId,
         JSON.stringify(convexToJson([parseArgs(args)])),
       );
+      getTransactionManager().finishAction();
       return jsonToConvex(JSON.parse(rawResult));
     },
   };
 
   const byType = {
     query: async (functionReference: any, args: any) => {
-      const functionPath = getFunctionPathFromReference(functionReference);
+      const functionPath = await getFunctionPathFromReference(functionReference);
       return await byTypeWithPath.queryFromPath(functionPath, false, args);
     },
 
     mutation: async (functionReference: any, args: any): Promise<Value> => {
-      const functionPath = getFunctionPathFromReference(functionReference);
+      const functionPath = await getFunctionPathFromReference(functionReference);
       return await byTypeWithPath.mutationFromPath(functionPath, false, args);
     },
 
     action: async (functionReference: any, args: any) => {
-      const functionPath = getFunctionPathFromReference(functionReference);
+      const functionPath = await getFunctionPathFromReference(functionReference);
       return await byTypeWithPath.actionFromPath(functionPath, args);
     },
+  };
+  const run = async <T>(componentPath: string, handler: (ctx: any) => T): Promise<T> => {
+    // Grab StorageActionWriter from action ctx
+    const a = actionGeneric({
+      handler: async ({ storage }: any) => {
+        return await runTransaction(
+          handler,
+          {},
+          { storage },
+          // Fake mutation path.
+          {
+            componentPath,
+            udfPath: "custom",
+          },
+          false,
+        );
+      },
+    });
+    // Real backend uses different ID format
+    const requestId = "" + Math.random();
+    const rawResult = await (
+      a as unknown as {
+        invokeAction: (requestId: string, args: string) => Promise<string>;
+      }
+    ).invokeAction(requestId, JSON.stringify(convexToJson([{}])));
+    return jsonToConvex(JSON.parse(rawResult)) as T;
   };
   return {
     ...byType,
     ...byTypeWithPath,
 
-    run: async <T>(handler: (ctx: any) => T): Promise<T> => {
-      // Grab StorageActionWriter from action ctx
-      const a = actionGeneric({
-        handler: async ({ storage }: any) => {
-          return await runTransaction(
-            handler,
-            {},
-            { storage },
-            // Fake mutation path.
-            {
-              componentPath: "",
-              udfPath: "root",
-            },
-            false,
-          );
-        },
-      });
-      // Real backend uses different ID format
-      const requestId = "" + Math.random();
-      const rawResult = await (
-        a as unknown as {
-          invokeAction: (requestId: string, args: string) => Promise<string>;
-        }
-      ).invokeAction(requestId, JSON.stringify(convexToJson([{}])));
-      return jsonToConvex(JSON.parse(rawResult)) as T;
+    runInComponent: run,
+    run: async <T>(handler: (ctx: any) => T) => {
+      return await run(getCurrentComponentPath(), handler);
     },
 
     fun: async (functionPath: FunctionPath, args: any) => {
@@ -1931,14 +1975,22 @@ function parseArgs(
   return args;
 }
 
-function getFunctionPathFromAddress(
+async function getFunctionPathFromAddress(
   functionAddress:
     | { name: string; reference: undefined; functionHandle: undefined }
     | { reference: string; name: undefined; functionHandle: undefined }
     | { functionHandle: string; name: undefined; reference: undefined },
-): FunctionPath {
+): Promise<FunctionPath> {
   if (functionAddress.functionHandle !== undefined) {
-    throw new Error("Function handle not supported");
+    const id = functionAddress.functionHandle.split("function://")[1];
+    const { functionPath } = await writeToDatabase(async (db) => {
+      const doc = db.get(id as GenericId<"_function_handles">);
+      if (doc === null) {
+        throw new Error(`function handle not found: ${id}`);
+      }
+      return doc as any as { functionPath: FunctionPath };
+    });
+    return functionPath;
   }
   if (functionAddress.name !== undefined) {
     return {
@@ -1969,14 +2021,14 @@ function getFunctionPathFromAddress(
   throw new Error("Function address not supported");
 }
 
-function getFunctionPathFromReference(
+async function getFunctionPathFromReference(
   functionReference: FunctionReference<any, any, any, any>,
 ) {
   // { name: "messages:list" }
   // { reference: "_reference/childComponent/aggregate/path/to/file/functionName" }
   // { functionHandle: "function://<id>/<path>" }
   const functionAddress = getFunctionAddress(functionReference);
-  return getFunctionPathFromAddress(functionAddress);
+  return await getFunctionPathFromAddress(functionAddress);
 }
 
 async function getFunctionFromPath(
