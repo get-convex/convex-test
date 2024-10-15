@@ -1148,12 +1148,8 @@ function asyncSyscallImpl() {
           reference,
           functionHandle,
         });
-        const id = await writeToDatabase(async (db) => {
-          return db.insert("_function_handles", {
-            functionPath,
-          });
-        });
-        return JSON.stringify("function://" + id);
+        const handle = `function://${functionPath.componentPath};${functionPath.udfPath}`;
+        return JSON.stringify(handle);
       }
 
       case "1.0/actions/schedule": {
@@ -1615,6 +1611,11 @@ function getConvexGlobal(): ConvexGlobal {
 }
 
 function setConvexGlobal(convex: ConvexGlobal) {
+  if (getConvexGlobal()) {
+    if (getTransactionManager().isInTransaction()) {
+      throw new Error("test began while previous transaction was still open");
+    }
+  }
   (global as unknown as { Convex: ConvexGlobal }).Convex = convex;
 }
 
@@ -1982,15 +1983,8 @@ async function getFunctionPathFromAddress(
     | { functionHandle: string; name: undefined; reference: undefined },
 ): Promise<FunctionPath> {
   if (functionAddress.functionHandle !== undefined) {
-    const id = functionAddress.functionHandle.split("function://")[1];
-    const { functionPath } = await writeToDatabase(async (db) => {
-      const doc = db.get(id as GenericId<"_function_handles">);
-      if (doc === null) {
-        throw new Error(`function handle not found: ${id}`);
-      }
-      return doc as any as { functionPath: FunctionPath };
-    });
-    return functionPath;
+    const [componentPath, udfPath] = functionAddress.functionHandle.split("function://")[1].split(";");
+    return { componentPath, udfPath };
   }
   if (functionAddress.name !== undefined) {
     return {

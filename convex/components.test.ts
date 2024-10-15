@@ -35,7 +35,7 @@ test("component scheduler", async () => {
 
 test("function handle", async () => {
   const t = testWithCounter();
-  const handle = await t.mutation(internal.component.getFunctionHandle);
+  const handle = await t.query(internal.component.getFunctionHandle);
   await t.mutation(internal.component.callHandle, { handle });
   const x = await t.query(internal.component.directCall2);
   expect(x).toEqual(3);
@@ -44,7 +44,7 @@ test("function handle", async () => {
 test("function handle scheduler", async () => {
   vi.useFakeTimers();
   const t = testWithCounter();
-  const handle = await t.mutation(internal.component.getFunctionHandle);
+  const handle = await t.query(internal.component.getFunctionHandle);
   await t.mutation(internal.component.scheduleHandle, { handle });
   await t.finishAllScheduledFunctions(vi.runAllTimers);
   const x = await t.query(internal.component.directCall2);

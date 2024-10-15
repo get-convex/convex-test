@@ -43,7 +43,7 @@ export const schedule = internalMutation({
 // database, and we need to commit it.
 // In a real Convex app, the function handle is automatically created on push,
 // so it does work in queries.
-export const getFunctionHandle = internalMutation({
+export const getFunctionHandle = internalQuery({
   args: {},
   returns: v.string(),
   handler: async () => {
