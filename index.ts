@@ -103,6 +103,8 @@ type TableName = string;
 
 type DocumentId = GenericId<TableName>;
 
+const ROOT_COMPONENT_PATH = "";
+
 class DatabaseFake {
   private _componentPath: string;
   private _documents: Record<DocumentId, StoredDocument> = {};
@@ -1644,8 +1646,6 @@ class TransactionManager {
   }
 }
 
-const ROOT_COMPONENT_PATH = "";
-
 /**
  * Call this function at the start of each of your tests.
  *
@@ -1665,7 +1665,7 @@ export const convexTest = <Schema extends GenericSchema>(
   const rootDb = new DatabaseFake(schema ?? null, ROOT_COMPONENT_PATH);
   setConvexGlobal({
     components: {
-      ROOT_COMPONENT_PATH: {
+      [ROOT_COMPONENT_PATH]: {
         db: rootDb,
         modules: moduleCache(modules),
       },
