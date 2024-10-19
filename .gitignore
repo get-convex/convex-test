@@ -3,3 +3,5 @@ dist
 *.tsbuildinfo
 .npm
 coverage
+.env.local
+*.tgz
