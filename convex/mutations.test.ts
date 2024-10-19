@@ -150,3 +150,31 @@ test("delete is visible in transaction", async () => {
     expect(first).toBeNull();
   });
 });
+
+test("rollback subtransaction", async () => {
+  const t = convexTest(schema);
+  const result = await t.mutation(api.mutations.rolledBackSubtransaction, {});
+  expect(result).toStrictEqual(2);
+});
+
+test("subtransaction commit then rollback parent", async () => {
+  const t = convexTest(schema);
+  await expect(async () => {
+    await t.mutation(api.mutations.subtransactionCommitThenRollbackParent, {});
+  }).rejects.toThrowError("I changed my mind");
+  const docs = await t.query(api.mutations.list);
+  expect(docs.length).toStrictEqual(0);
+});
+
+// Regression test, making sure we merge writes in the correct order.
+test("insert then patch in subtransaction", async () => {
+  const t = convexTest(schema);
+  const result = await t.mutation(api.mutations.insertThenPatchInSubtransaction, {});
+  expect(result).toEqual(["hi"]);
+});
+
+test("insert then delete in subtransaction", async () => {
+  const t = convexTest(schema);
+  const result = await t.mutation(api.mutations.insertThenDeleteInSubtransaction, {});
+  expect(result).toEqual([]);
+});

@@ -115,15 +115,16 @@ class DatabaseFake {
   jobListener: (jobId: string) => void = () => {};
   // Pending writes for each level of transaction nesting.
   // Whenever a child mutation begins, a new level is created for all
-  // components. When a child mutation commits, the writes are merged up one
-  // level. When the top-level mutation commits, the writes are applied to the
-  // database. When a mutation is rolled back, last level of writes is
-  // discarded.
-  private _writes: Record<
-    DocumentId,
-    | { newValue: StoredDocument; isInsert: true }
-    | { newValue: StoredDocument | null; isInsert: false }
-  >[] = [];
+  // components.
+  // - When a mutation performs updates, they are staged in the last
+  //   level of writes for the mutation's component.
+  // - When a child mutation commits, the writes are merged up one level.
+  // - When the top-level mutation commits, the writes are applied to the
+  //   database.
+  // - When a mutation is rolled back, last level of writes is discarded.
+  private _writes: Array<
+    Record<DocumentId, StoredDocument | null>
+  > = [];
 
   private _schema: {
     schemaValidation: boolean;
@@ -158,16 +159,12 @@ class DatabaseFake {
     this.validateSchema();
   }
 
+  // Called by TransactionManager.begin.
   startTransaction() {
     this._writes.push({});
   }
 
   get(id: GenericId<string>) {
-    const { document } = this.getForWrite(id);
-    return document;
-  }
-
-  getForWrite(id: GenericId<string>) {
     if (typeof id !== "string") {
       throw new Error(
         `Invalid argument \`id\` for \`db.get\`, expected string but got '${typeof id}': ${
@@ -179,11 +176,11 @@ class DatabaseFake {
     for (let i = this._writes.length - 1; i >= 0; i--) {
       const write = this._writes[i][id];
       if (write !== undefined) {
-        return { document: write.newValue, isInsert: write.isInsert };
+        return write;
       }
     }
 
-    return { document: this._documents[id] ?? null, isInsert: false };
+    return this._documents[id] ?? null;
   }
 
   // Note that this is not the format the real backend
@@ -207,6 +204,16 @@ class DatabaseFake {
     return this._storage[storageId];
   }
 
+  private _addWrite(
+    id: DocumentId,
+    newValue: StoredDocument | null,
+  ) {
+    if (this._writes.length === 0) {
+      throw new Error(`Write outside of transaction ${id}`);
+    }
+    this._writes[this._writes.length - 1][id] = newValue;
+  }
+
   insert<Table extends TableName>(table: Table, value: any) {
     this._validate(table, value);
     const _id = this._generateId(table);
@@ -214,18 +221,12 @@ class DatabaseFake {
     const _creationTime =
       now <= this._lastCreationTime ? this._lastCreationTime + 0.001 : now;
     this._lastCreationTime = _creationTime;
-    if (!this._writes.length) {
-      throw new Error(`Insert outside of transaction ${_id}`);
-    }
-    this._writes[this._writes.length - 1][_id] = {
-      newValue: { ...value, _id, _creationTime },
-      isInsert: true,
-    };
+    this._addWrite(_id, { ...value, _id, _creationTime });
     return _id;
   }
 
   patch(id: DocumentId, value: Record<string, any>) {
-    const { document, isInsert } = this.getForWrite(id);
+    const document = this.get(id);
     if (document === null) {
       throw new Error(`Patch on non-existent document with ID "${id}"`);
     }
@@ -253,17 +254,11 @@ class DatabaseFake {
     }
     const merged = { ...fields, ...convexValue };
     this._validate(tableNameFromId(_id as string)!, merged);
-    if (!this._writes.length) {
-      throw new Error(`Patch outside of transaction ${id}`);
-    }
-    this._writes[this._writes.length - 1][id] = {
-      newValue: { _id, _creationTime, ...merged },
-      isInsert,
-    };
+    this._addWrite(id, { _id, _creationTime, ...merged });
   }
 
   replace(id: DocumentId, value: Record<string, any>) {
-    const { document, isInsert } = this.getForWrite(id);
+    const document = this.get(id);
     if (document === null) {
       throw new Error(`Replace on non-existent document with ID "${id}"`);
     }
@@ -289,14 +284,11 @@ class DatabaseFake {
       convexValue[key] = evaluateValue(v);
     }
     this._validate(tableNameFromId(document._id as string)!, convexValue);
-    this._writes[this._writes.length - 1][id] = {
-      newValue: {
-        ...convexValue,
-        _id: document._id,
-        _creationTime: document._creationTime,
-      },
-      isInsert,
-    };
+    this._addWrite(id, {
+      ...convexValue,
+      _id: document._id,
+      _creationTime: document._creationTime,
+    });
   }
 
   delete(id: DocumentId) {
@@ -304,7 +296,7 @@ class DatabaseFake {
     if (document === null) {
       throw new Error("Delete on non-existent doc");
     }
-    this._writes[this._writes.length - 1][id] = { newValue: null, isInsert: false };
+    this._addWrite(id, null);
   }
 
   commit() {
@@ -315,19 +307,21 @@ class DatabaseFake {
     for (const [id, write] of Object.entries(lastWrites)) {
       const _id = id as DocumentId;
       if (this._writes.length === 0) {
-        const { newValue } = write;
-        if (newValue === null) {
+        if (write === null) {
           delete this._documents[_id];
         } else {
-          this._documents[_id] = newValue;
+          this._documents[_id] = write;
         }
       } else {
-        this._writes[this._writes.length - 1][_id] = write;
+        this._addWrite(_id, write);
       }
     }
   }
 
   rollbackWrites() {
+    if (this._writes.length === 0) {
+      throw new Error("Transaction already committed or rolled back");
+    }
     this._writes.pop();
   }
 
@@ -407,27 +401,17 @@ class DatabaseFake {
     tableName: string,
     callback: (doc: GenericDocument) => void,
   ) {
+    const isInTable = (id: string) => tableNameFromId(id) === tableName;
+    const ids = new Set(Object.keys(this._documents).filter(isInTable));
     for (let i = 0; i < this._writes.length; i++) {
-      for (const write of Object.values(this._writes[i])) {
-        if (write.isInsert) {
-          const document = write.newValue;
-          if (tableNameFromId(document._id) === tableName) {
-            callback(document);
-          }
-        }
+      for (const id of Object.keys(this._writes[i]).filter(isInTable)) {
+        ids.add(id);
       }
     }
-    for (const document of Object.values(this._documents)) {
-      if (tableNameFromId(document._id) === tableName) {
-        let write = undefined;
-        for (let i = 0; i < this._writes.length; i++) {
-          write = write ?? this._writes[i][document._id];
-        }
-        if (write === undefined) {
-          callback(document);
-        } else if (!write.isInsert && write.newValue !== null) {
-          callback(write.newValue);
-        }
+    for (const id of ids) {
+      const document = this.get(id as DocumentId);
+      if (document !== null) {
+        callback(document);
       }
     }
   }
@@ -1116,20 +1100,13 @@ function asyncSyscallImpl() {
         });
         if (udfType === "query") {
           return JSON.stringify(
-            convexToJson(await withAuth().queryFromPath(functionPath, true, udfArgs)),
+            convexToJson(await withAuth().queryFromPath(functionPath, /* isNested */ true, udfArgs)),
           );
         }
         if (udfType === "mutation") {
           return JSON.stringify(
             convexToJson(
-              await withAuth().mutationFromPath(functionPath, true, udfArgs),
-            ),
-          );
-        }
-        if (udfType === "action") {
-          return JSON.stringify(
-            convexToJson(
-              await withAuth().actionFromPath(functionPath, udfArgs),
+              await withAuth().mutationFromPath(functionPath, /* isNested */ true, udfArgs),
             ),
           );
         }
@@ -1148,7 +1125,7 @@ function asyncSyscallImpl() {
           reference,
           functionHandle,
         });
-        const handle = `function://${functionPath.componentPath};${functionPath.udfPath}`;
+        const handle = createFunctionHandle(functionPath);
         return JSON.stringify(handle);
       }
 
@@ -1496,7 +1473,7 @@ function getCurrentComponentPath() {
   const functionStack = getTransactionManager().functionStack;
   const currentFunctionPath =
     functionStack[functionStack.length - 1];
-  return currentFunctionPath?.componentPath ?? "";
+  return currentFunctionPath?.componentPath ?? ROOT_COMPONENT_PATH;
 }
 
 function getModules() {
@@ -1555,37 +1532,6 @@ function findModulesRoot(modulesPaths: string[], userProvidedModules: boolean) {
   );
 }
 
-/*
-Convex.db = DatabaseFake
-Convex.modules = moduleCache
-Convex.syscall = syscallImpl
-Convex.asyncSyscall = asyncSyscallImpl
-Convex.jsSyscall = jsSyscallImpl
-
-
-transaction commit on root only, resetWrites on all bc subtransactions
-
-Convex.functionStack = [{
-  component: "",
-  udfPath: "messages:list"
-}
-]
-Convex.components = {
-  "": {
-  },
-  "aggregate": {
-    components: 
-  }
-  "aggregate/ratelimiter"
-}
-
-t.registerComponent("aggregate", schema, glob for files with functions)
-t.registerComponentFake("aggregate", AggregateFake)
-
-subtransaction -- two functions where second errors (and is caught), we don't commit either because we reset writes
-
-*/
-
 type ComponentInfo = {
   db: DatabaseFake;
   modules: ReturnType<typeof moduleCache>;
@@ -1633,6 +1579,9 @@ class TransactionManager {
     functionPath: FunctionPath,
     isNested: boolean,
   ) {
+    // Take a lock only for the top-level of each transaction.
+    // Nested transactions are not isolated so if you `Promise.all` on multiple
+    // `ctx.runMutation` or `ctx.runQuery` calls, they won't be serialized.
     if (!isNested) {
       // Note the loop is important, as the current promise might resolve and a
       // new transaction could start before we get woken up.
@@ -1695,6 +1644,8 @@ class TransactionManager {
   }
 }
 
+const ROOT_COMPONENT_PATH = "";
+
 /**
  * Call this function at the start of each of your tests.
  *
@@ -1711,10 +1662,10 @@ export const convexTest = <Schema extends GenericSchema>(
   // For example `import.meta.glob("./**/*.*s")`
   modules?: Record<string, () => Promise<any>>,
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
-  const rootDb = new DatabaseFake(schema ?? null, "");
+  const rootDb = new DatabaseFake(schema ?? null, ROOT_COMPONENT_PATH);
   setConvexGlobal({
     components: {
-      "": {
+      ROOT_COMPONENT_PATH: {
         db: rootDb,
         modules: moduleCache(modules),
       },
@@ -1848,12 +1799,12 @@ function withAuth(auth: AuthFake = new AuthFake()) {
   const byType = {
     query: async (functionReference: any, args: any) => {
       const functionPath = await getFunctionPathFromReference(functionReference);
-      return await byTypeWithPath.queryFromPath(functionPath, false, args);
+      return await byTypeWithPath.queryFromPath(functionPath, /* isNested */ false, args);
     },
 
     mutation: async (functionReference: any, args: any): Promise<Value> => {
       const functionPath = await getFunctionPathFromReference(functionReference);
-      return await byTypeWithPath.mutationFromPath(functionPath, false, args);
+      return await byTypeWithPath.mutationFromPath(functionPath, /* isNested */ false, args);
     },
 
     action: async (functionReference: any, args: any) => {
@@ -1899,10 +1850,10 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     fun: async (functionPath: FunctionPath, args: any) => {
       const func = await getFunctionFromPath(functionPath, "any");
       if (func.isQuery) {
-        return await byTypeWithPath.queryFromPath(functionPath, false, args);
+        return await byTypeWithPath.queryFromPath(functionPath, /* isNested */ false, args);
       }
       if (func.isMutation) {
-        return await byTypeWithPath.mutationFromPath(functionPath, false, args);
+        return await byTypeWithPath.mutationFromPath(functionPath, /* isNested */ false, args);
       }
       if (func.isAction) {
         return await byTypeWithPath.actionFromPath(functionPath, args);
@@ -1976,6 +1927,15 @@ function parseArgs(
   return args;
 }
 
+function createFunctionHandle(functionPath: FunctionPath) {
+  return `function://${functionPath.componentPath};${functionPath.udfPath}`;
+}
+
+function parseFunctionHandle(handle: string) {
+  const [componentPath, udfPath] = handle.split("function://")[1].split(";");
+  return { componentPath, udfPath };
+}
+
 async function getFunctionPathFromAddress(
   functionAddress:
     | { name: string; reference: undefined; functionHandle: undefined }
@@ -1983,8 +1943,7 @@ async function getFunctionPathFromAddress(
     | { functionHandle: string; name: undefined; reference: undefined },
 ): Promise<FunctionPath> {
   if (functionAddress.functionHandle !== undefined) {
-    const [componentPath, udfPath] = functionAddress.functionHandle.split("function://")[1].split(";");
-    return { componentPath, udfPath };
+    return parseFunctionHandle(functionAddress.functionHandle);
   }
   if (functionAddress.name !== undefined) {
     return {

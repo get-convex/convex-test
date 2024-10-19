@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { api } from "./_generated/api";
 
 /// helpers
 
@@ -63,5 +64,60 @@ export const append = mutation({
   handler: async (ctx, { id, suffix }) => {
     const message = (await ctx.db.get(id))!;
     await ctx.db.patch(id, { body: message.body + suffix });
+  },
+});
+
+export const rolledBackSubtransaction = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await ctx.db.insert("messages", { body: "hello", author: "sarah" });
+    try {
+      await ctx.runMutation(api.mutations.throws, { body: "hello", author: "lee" });
+    } catch (e) {
+      // ignore
+    }
+    await ctx.db.insert("messages", { body: "world", author: "sarah" });
+    const docs = await ctx.db.query("messages").collect();
+    return docs.length;
+  },
+});
+
+export const subtransactionCommitThenRollbackParent = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await ctx.runMutation(api.mutations.insert, { body: "hello", author: "sarah" });
+    await ctx.runMutation(api.mutations.throws, { body: "hello", author: "lee" });
+  },
+});
+
+export const patchAndRead = mutation({
+  args: { id: v.id("messages"), body: v.string() },
+  handler: async (ctx, { id, body }): Promise<string[]> => {
+    await ctx.db.patch(id, { body });
+    return (await ctx.db.query("messages").collect()).map(({ body }) => body);
+  }
+});
+
+export const insertThenPatchInSubtransaction = mutation({
+  args: {},
+  handler: async (ctx): Promise<string[]> => {
+    const id = await ctx.db.insert("messages", { body: "hello", author: "sarah" });
+    return await ctx.runMutation(api.mutations.patchAndRead, { id, body: "hi" });
+  },
+});
+
+export const deleteAndRead = mutation({
+  args: { id: v.id("messages") },
+  handler: async (ctx, { id }): Promise<string[]> => {
+    await ctx.db.delete(id);
+    return (await ctx.db.query("messages").collect()).map(({ body }) => body);
+  }
+});
+
+export const insertThenDeleteInSubtransaction = mutation({
+  args: {},
+  handler: async (ctx): Promise<string[]> => {
+    const id = await ctx.db.insert("messages", { body: "hello", author: "sarah" });
+    return await ctx.runMutation(api.mutations.deleteAndRead, { id });
   },
 });
