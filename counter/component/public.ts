@@ -50,3 +50,16 @@ export const schedule = mutation({
     });
   },
 });
+
+// Regression test: if a nested query isn't accounted for correctly, the
+// function stack can get messed up and the `ctx.db.get` might try to look in
+// the wrong component.
+export const mutationWithNestedQuery = mutation({
+  args: {},
+  handler: async (ctx, _args) => {
+    const id = await ctx.db.insert("counters", { name: "beans", value: 3, shard: 0 });
+    await ctx.runQuery(api.public.count, { name: "beans" });
+    const doc = await ctx.db.get(id);
+    return doc!.value;
+  },
+});

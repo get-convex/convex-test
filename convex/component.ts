@@ -22,6 +22,13 @@ export const directCall = internalMutation({
   },
 });
 
+export const mutationWithNestedQuery = internalMutation({
+  args: {},
+  handler: async (ctx, _args): Promise<number> => {
+    return await ctx.runMutation(components.counter.public.mutationWithNestedQuery);
+  },
+});
+
 export const directCall2 = internalQuery({
   args: {},
   handler: async (ctx, _args) => {

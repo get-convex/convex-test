@@ -73,6 +73,12 @@ export declare const components: {
         null
       >;
       count: FunctionReference<"query", "internal", { name: string }, number>;
+      mutationWithNestedQuery: FunctionReference<
+        "mutation",
+        "internal",
+        {},
+        any
+      >;
       schedule: FunctionReference<
         "mutation",
         "internal",
