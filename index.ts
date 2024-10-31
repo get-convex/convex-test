@@ -1749,7 +1749,6 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         return jsonToConvex(JSON.parse(rawResult));
       } finally {
         transactionManager.rollback(isNested);
-        transactionManager.functionStack.pop();
       }
     },
 

@@ -51,3 +51,9 @@ test("function handle scheduler", async () => {
   expect(x).toEqual(3);
   vi.useRealTimers();
 });
+
+test("component nested query", async () => {
+  const t = testWithCounter();
+  const x = await t.mutation(internal.component.mutationWithNestedQuery);
+  expect(x).toEqual(3);
+});
