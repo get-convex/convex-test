@@ -99,3 +99,10 @@ export const actionSchedulingActionNTimes = action({
     }
   },
 });
+
+export const selfSchedulingMutation = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await ctx.scheduler.runAfter(1000, api.scheduler.selfSchedulingMutation, {});
+  },
+});
