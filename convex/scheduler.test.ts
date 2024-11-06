@@ -164,3 +164,15 @@ test("failed scheduled function", async () => {
   ]);
   vi.useRealTimers();
 });
+
+test("self-scheduling mutation", async () => {
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  await t.mutation(api.scheduler.selfSchedulingMutation, {});
+
+  await expect(t.finishAllScheduledFunctions(vi.runAllTimers))
+    .rejects
+    .toThrowError(/Check for infinitely recursive scheduled functions/);
+
+  vi.useRealTimers();
+});

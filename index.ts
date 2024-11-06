@@ -1900,12 +1900,21 @@ function withAuth(auth: AuthFake = new AuthFake()) {
 
     finishAllScheduledFunctions: async (
       advanceTimers: () => void,
+      maxIterations: number = 100,
     ): Promise<void> => {
-      let hadScheduledFunctions;
-      do {
+      // Wait for all scheduled functions to finish, advancing time in between
+      // each function.
+      // Stop after a fixed number of iterations to avoid infinite loops.
+      for (let i = 0; i < maxIterations; i++) {
         advanceTimers();
-        hadScheduledFunctions = await waitForInProgressScheduledFunctions();
-      } while (hadScheduledFunctions);
+        const hadScheduledFunctions = await waitForInProgressScheduledFunctions();
+        if (!hadScheduledFunctions) {
+          return;
+        }
+      }
+      throw new Error("finishAllScheduledFunctions: too many iterations. "
+        + "Check for infinitely recursive scheduled functions, "
+        + "or increase maxIterations.");
     },
   };
 }
