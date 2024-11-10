@@ -1093,8 +1093,9 @@ function asyncSyscallImpl() {
           name,
           reference,
           functionHandle,
-          args: udfArgs,
+          args: udfArgsJson,
         } = args;
+        const udfArgs = jsonToConvex(udfArgsJson);
         const functionPath = await getFunctionPathFromAddress({
           name,
           reference,

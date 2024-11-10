@@ -38,6 +38,12 @@ export type Mounts = {
     >;
     count: FunctionReference<"query", "public", { name: string }, number>;
     mutationWithNestedQuery: FunctionReference<"mutation", "public", {}, any>;
+    mutationWithNumberArg: FunctionReference<
+      "mutation",
+      "public",
+      { a: number },
+      any
+    >;
     schedule: FunctionReference<"mutation", "public", { name: string }, any>;
   };
 };

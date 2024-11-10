@@ -63,3 +63,10 @@ export const mutationWithNestedQuery = mutation({
     return doc!.value;
   },
 });
+
+export const mutationWithNumberArg = mutation({
+  args: { a: v.number() },
+  handler: async (_ctx, args) => {
+    return args.a;
+  },
+});
