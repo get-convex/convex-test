@@ -79,6 +79,12 @@ export declare const components: {
         {},
         any
       >;
+      mutationWithNumberArg: FunctionReference<
+        "mutation",
+        "internal",
+        { a: number },
+        any
+      >;
       schedule: FunctionReference<
         "mutation",
         "internal",
