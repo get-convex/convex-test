@@ -1,7 +1,6 @@
 /// <reference types="vite/client" />
 
 import {
-  actionGeneric,
   DataModelFromSchemaDefinition,
   DefaultFunctionArgs,
   DocumentByName,
@@ -12,14 +11,9 @@ import {
   GenericDocument,
   GenericMutationCtx,
   GenericSchema,
-  getFunctionAddress,
   HttpRouter,
-  httpActionGeneric,
-  makeFunctionReference,
-  mutationGeneric,
   OptionalRestArgs,
   PublicHttpAction,
-  queryGeneric,
   RegisteredAction,
   RegisteredMutation,
   RegisteredQuery,
@@ -27,6 +21,12 @@ import {
   StorageActionWriter,
   SystemDataModel,
   UserIdentity,
+  actionGeneric,
+  getFunctionAddress,
+  httpActionGeneric,
+  makeFunctionReference,
+  mutationGeneric,
+  queryGeneric,
 } from "convex/server";
 import {
   convexToJson,
