@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { action, mutation, query } from "./_generated/server";
+import { components } from "./_generated/api";
 
 export const queryWithArgs = query({
   args: {
@@ -40,5 +41,15 @@ export const queryWithOptionalArgs = query({
   },
   handler: () => {
     return "ok";
+  },
+});
+
+export const componentMutationWithNumberArg = mutation({
+  args: { a: v.any() },
+  handler: (ctx, args) => {
+    const result = ctx.runMutation(components.counter.public.mutationWithNumberArg, {
+      a: args.a,
+    });
+    return result;
   },
 });
