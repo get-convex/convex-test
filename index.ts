@@ -1,33 +1,39 @@
 /// <reference types="vite/client" />
 
-import { getFunctionAddress } from "convex/server";
 import {
+  actionGeneric,
   DataModelFromSchemaDefinition,
+  DefaultFunctionArgs,
   DocumentByName,
   FunctionReference,
   FunctionReturnType,
+  GenericActionCtx,
   GenericDataModel,
   GenericDocument,
   GenericMutationCtx,
   GenericSchema,
+  getFunctionAddress,
   HttpRouter,
+  httpActionGeneric,
+  makeFunctionReference,
+  mutationGeneric,
   OptionalRestArgs,
+  PublicHttpAction,
+  queryGeneric,
+  RegisteredAction,
+  RegisteredMutation,
+  RegisteredQuery,
   SchemaDefinition,
   StorageActionWriter,
   SystemDataModel,
   UserIdentity,
-  actionGeneric,
-  httpActionGeneric,
-  makeFunctionReference,
-  mutationGeneric,
-  queryGeneric,
 } from "convex/server";
 import {
+  convexToJson,
   GenericId,
+  jsonToConvex,
   JSONValue,
   Value,
-  convexToJson,
-  jsonToConvex,
 } from "convex/values";
 import { createHash } from "crypto";
 import { compareValues } from "./compare.js";
@@ -1733,11 +1739,11 @@ function withAuth(auth: AuthFake = new AuthFake()) {
   const byTypeWithPath = {
     queryFromPath: async (functionPath: FunctionPath, isNested: boolean, args: any) => {
       const func = await getFunctionFromPath(functionPath, "query");
-      validateValidator(JSON.parse(func.exportArgs()), args ?? {});
+      validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
       const q = queryGeneric({
         handler: (ctx: any, a: any) => {
           const testCtx = { ...ctx, auth };
-          return func(testCtx, a);
+          return getHandler(func)(testCtx, a);
         },
       });
       const transactionManager = getTransactionManager();
@@ -1758,14 +1764,14 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       args: any,
     ): Promise<Value> => {
       const func = await getFunctionFromPath(functionPath, "mutation");
-      validateValidator(JSON.parse(func.exportArgs()), args ?? {});
+      validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
 
-      return await runTransaction(func, args, {}, functionPath, isNested);
+      return await runTransaction(getHandler(func), args, {}, functionPath, isNested);
     },
 
     actionFromPath: async (functionPath: FunctionPath, args: any) => {
       const func = await getFunctionFromPath(functionPath, "action");
-      validateValidator(JSON.parse(func.exportArgs()), args ?? {});
+      validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
 
       const a = actionGeneric({
         handler: (ctx: any, a: any) => {
@@ -1776,7 +1782,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
             runAction: byType.action,
             auth,
           };
-          return func(testCtx, a);
+          return getHandler(func)(testCtx, a);
         },
       });
       getTransactionManager().beginAction(functionPath);
@@ -1880,8 +1886,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           runAction: byType.action,
           auth,
         };
-        // TODO: Remove `any`, it's needed because of a bug in Convex types
-        return func(testCtx, a) as any;
+        return getHandler(func)(testCtx, a);
       });
       const response = await (
         a as unknown as {
@@ -1992,6 +1997,26 @@ async function getFunctionPathFromReference(
   return await getFunctionPathFromAddress(functionAddress);
 }
 
+function getHandler<Args extends DefaultFunctionArgs, Returns>(
+  func: RegisteredAction<any, Args, Returns>
+): (ctx: GenericActionCtx<any>, args: Args) => Promise<Returns>;
+function getHandler<Args extends DefaultFunctionArgs, Returns>(
+  func: RegisteredMutation<any, Args, Returns>
+): (ctx: GenericActionCtx<any>, args: Args) => Promise<Returns>;
+function getHandler<Args extends DefaultFunctionArgs, Returns>(
+  func: RegisteredQuery<any, Args, Returns>
+): (ctx: GenericActionCtx<any>, args: Args) => Promise<Returns>;
+function getHandler(
+  func: PublicHttpAction
+): (ctx: GenericActionCtx<any>, args: Request) => Promise<Response>;
+function getHandler(func: any): (ctx: any, args: any) => any {
+  return '_handler' in func ? func["_handler"] : func;
+}
+
+async function getFunctionFromPath(functionPath: FunctionPath, type: "query"): Promise<RegisteredQuery<any, any, Value>>;
+async function getFunctionFromPath(functionPath: FunctionPath, type: "mutation"): Promise<RegisteredMutation<any, any, Value>>;
+async function getFunctionFromPath(functionPath: FunctionPath, type: "action"): Promise<RegisteredAction<any, any, any>>;
+async function getFunctionFromPath(functionPath: FunctionPath, type: "any"): Promise<any>;
 async function getFunctionFromPath(
   functionPath: FunctionPath,
   type: "query" | "mutation" | "action" | "any",
@@ -2011,7 +2036,7 @@ async function getFunctionFromPath(
       `Expected a Convex function exported from module "${modulePath}" as \`${exportName}\`, but there is no such export.`,
     );
   }
-  if (typeof func !== "function") {
+  if (typeof getHandler(func) !== "function") {
     throw new Error(
       `Expected a Convex function exported from module "${modulePath}" as \`${exportName}\`, but got: ${func}`,
     );
