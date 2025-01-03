@@ -106,7 +106,6 @@ test("patch undefined", async () => {
   expect(embedding).toBeUndefined();
 });
 
-
 test("replace after insert", async () => {
   const t = convexTest(schema);
   const messages = await t.run(async (ctx) => {
@@ -169,12 +168,18 @@ test("subtransaction commit then rollback parent", async () => {
 // Regression test, making sure we merge writes in the correct order.
 test("insert then patch in subtransaction", async () => {
   const t = convexTest(schema);
-  const result = await t.mutation(api.mutations.insertThenPatchInSubtransaction, {});
+  const result = await t.mutation(
+    api.mutations.insertThenPatchInSubtransaction,
+    {},
+  );
   expect(result).toEqual(["hi"]);
 });
 
 test("insert then delete in subtransaction", async () => {
   const t = convexTest(schema);
-  const result = await t.mutation(api.mutations.insertThenDeleteInSubtransaction, {});
+  const result = await t.mutation(
+    api.mutations.insertThenDeleteInSubtransaction,
+    {},
+  );
   expect(result).toEqual([]);
 });

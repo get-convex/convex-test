@@ -72,7 +72,10 @@ export const rolledBackSubtransaction = mutation({
   handler: async (ctx) => {
     await ctx.db.insert("messages", { body: "hello", author: "sarah" });
     try {
-      await ctx.runMutation(api.mutations.throws, { body: "hello", author: "lee" });
+      await ctx.runMutation(api.mutations.throws, {
+        body: "hello",
+        author: "lee",
+      });
     } catch (e) {
       // ignore
     }
@@ -85,8 +88,14 @@ export const rolledBackSubtransaction = mutation({
 export const subtransactionCommitThenRollbackParent = mutation({
   args: {},
   handler: async (ctx) => {
-    await ctx.runMutation(api.mutations.insert, { body: "hello", author: "sarah" });
-    await ctx.runMutation(api.mutations.throws, { body: "hello", author: "lee" });
+    await ctx.runMutation(api.mutations.insert, {
+      body: "hello",
+      author: "sarah",
+    });
+    await ctx.runMutation(api.mutations.throws, {
+      body: "hello",
+      author: "lee",
+    });
   },
 });
 
@@ -95,14 +104,20 @@ export const patchAndRead = mutation({
   handler: async (ctx, { id, body }): Promise<string[]> => {
     await ctx.db.patch(id, { body });
     return (await ctx.db.query("messages").collect()).map(({ body }) => body);
-  }
+  },
 });
 
 export const insertThenPatchInSubtransaction = mutation({
   args: {},
   handler: async (ctx): Promise<string[]> => {
-    const id = await ctx.db.insert("messages", { body: "hello", author: "sarah" });
-    return await ctx.runMutation(api.mutations.patchAndRead, { id, body: "hi" });
+    const id = await ctx.db.insert("messages", {
+      body: "hello",
+      author: "sarah",
+    });
+    return await ctx.runMutation(api.mutations.patchAndRead, {
+      id,
+      body: "hi",
+    });
   },
 });
 
@@ -111,13 +126,16 @@ export const deleteAndRead = mutation({
   handler: async (ctx, { id }): Promise<string[]> => {
     await ctx.db.delete(id);
     return (await ctx.db.query("messages").collect()).map(({ body }) => body);
-  }
+  },
 });
 
 export const insertThenDeleteInSubtransaction = mutation({
   args: {},
   handler: async (ctx): Promise<string[]> => {
-    const id = await ctx.db.insert("messages", { body: "hello", author: "sarah" });
+    const id = await ctx.db.insert("messages", {
+      body: "hello",
+      author: "sarah",
+    });
     return await ctx.runMutation(api.mutations.deleteAndRead, { id });
   },
 });

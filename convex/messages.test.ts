@@ -52,14 +52,16 @@ test("all types serde", async () => {
       expect(byGet).not.toBeNull();
       expectBodiesEq(byGet!.body, body);
       // Indexed db.query
-      const byIndex = await ctx.db.query("messages")
-        .withIndex("body", q=>q.eq("body", body))
+      const byIndex = await ctx.db
+        .query("messages")
+        .withIndex("body", (q) => q.eq("body", body))
         .unique();
       expect(byIndex).not.toBeNull();
       expectBodiesEq(byIndex!.body, body);
       // Filtered db.query
-      const byFilter = await ctx.db.query("messages")
-        .filter(q=>q.eq(q.field("body"), body))
+      const byFilter = await ctx.db
+        .query("messages")
+        .filter((q) => q.eq(q.field("body"), body))
         .unique();
       expect(byFilter).not.toBeNull();
       expectBodiesEq(byFilter!.body, body);

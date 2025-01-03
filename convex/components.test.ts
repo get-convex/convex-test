@@ -10,11 +10,7 @@ const counterModules = import.meta.glob("../counter/component/**/*.ts");
 
 function testWithCounter() {
   const t = convexTest(schema);
-  t.registerComponent(
-    "counter",
-    counterSchema,
-    counterModules
-  );
+  t.registerComponent("counter", counterSchema, counterModules);
   return t;
 }
 

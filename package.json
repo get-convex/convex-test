@@ -19,9 +19,10 @@
     "dist/*.map"
   ],
   "scripts": {
+    "format": "prettier --write .",
     "prebuild": "npm run lint && npm run test:once",
     "build": "tsc && replace-in-file '\"./convex/**/*.*s\"' '\"../../../convex/**/*.*s\"' ./dist/index.js",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0 && prettier --check .",
     "test": "vitest",
     "test:once": "vitest run",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",

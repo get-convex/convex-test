@@ -170,9 +170,9 @@ test("self-scheduling mutation", async () => {
   const t = convexTest(schema);
   await t.mutation(api.scheduler.selfSchedulingMutation, {});
 
-  await expect(t.finishAllScheduledFunctions(vi.runAllTimers))
-    .rejects
-    .toThrowError(/Check for infinitely recursive scheduled functions/);
+  await expect(
+    t.finishAllScheduledFunctions(vi.runAllTimers),
+  ).rejects.toThrowError(/Check for infinitely recursive scheduled functions/);
 
   vi.useRealTimers();
 });
