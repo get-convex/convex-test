@@ -26,7 +26,11 @@ test("paginate", async () => {
     { author: "sarah", body: "hello2" },
   ]);
   expect(isDone).toEqual(false);
-  const { continueCursor: continueCursor2, isDone: isDone2, page: page2 } = await t.query(api.pagination.list, {
+  const {
+    continueCursor: continueCursor2,
+    isDone: isDone2,
+    page: page2,
+  } = await t.query(api.pagination.list, {
     author: "sarah",
     paginationOptions: {
       cursor: continueCursor,

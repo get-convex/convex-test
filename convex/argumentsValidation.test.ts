@@ -6,7 +6,6 @@ import counterSchema from "../counter/component/schema";
 
 const counterModules = import.meta.glob("../counter/component/**/*.ts");
 
-
 test("query arguments validation", async () => {
   const t = convexTest(schema);
   await expect(
@@ -50,25 +49,24 @@ test("optional fields", async () => {
 
 function testWithCounter() {
   const t = convexTest(schema);
-  t.registerComponent(
-    "counter",
-    counterSchema,
-    counterModules
-  );
+  t.registerComponent("counter", counterSchema, counterModules);
   return t;
 }
 
 test("component mutation arguments validation", async () => {
   const t = testWithCounter();
   expect(
-    await t.mutation(api.argumentsValidation.componentMutationWithNumberArg, { a: 42 })
+    await t.mutation(api.argumentsValidation.componentMutationWithNumberArg, {
+      a: 42,
+    }),
   ).toEqual(42);
   await expect(
     t.mutation(api.argumentsValidation.componentMutationWithNumberArg, {
       a: "bad" as any,
     }),
   ).rejects.toThrowError(/Validator error/);
-  expect(await t.mutation(api.argumentsValidation.componentMutationWithNumberArg, {
+  expect(
+    await t.mutation(api.argumentsValidation.componentMutationWithNumberArg, {
       a: Number.POSITIVE_INFINITY,
     }),
   ).toEqual(Number.POSITIVE_INFINITY);

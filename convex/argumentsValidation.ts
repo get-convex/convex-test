@@ -47,9 +47,12 @@ export const queryWithOptionalArgs = query({
 export const componentMutationWithNumberArg = mutation({
   args: { a: v.any() },
   handler: (ctx, args) => {
-    const result = ctx.runMutation(components.counter.public.mutationWithNumberArg, {
-      a: args.a,
-    });
+    const result = ctx.runMutation(
+      components.counter.public.mutationWithNumberArg,
+      {
+        a: args.a,
+      },
+    );
     return result;
   },
 });
