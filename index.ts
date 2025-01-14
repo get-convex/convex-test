@@ -1320,7 +1320,7 @@ async function writeToDatabase<T>(impl: (db: DatabaseFake) => Promise<T>) {
 
 async function blobSha(blob: Blob) {
   const arrayBuffer = await blob.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
   const hashArray = new Uint8Array(hashBuffer);
   return btoa(String.fromCharCode(...hashArray));
 }
