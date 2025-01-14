@@ -1321,9 +1321,9 @@ async function writeToDatabase<T>(impl: (db: DatabaseFake) => Promise<T>) {
 
 async function blobSha(blob: Blob) {
   const arrayBuffer = await blob.arrayBuffer();
-  const sha256 = createHash("sha256");
-  sha256.update(Buffer.from(arrayBuffer));
-  return sha256.digest("base64");
+  const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+  const hashArray = new Uint8Array(hashBuffer);
+  return btoa(String.fromCharCode(...hashArray));
 }
 
 async function waitForInProgressScheduledFunctions(): Promise<boolean> {
