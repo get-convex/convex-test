@@ -1160,8 +1160,10 @@ function asyncSyscallImpl() {
           reference,
           functionHandle,
         });
+        // Convert args to a Convex value before storing them or passing them to the function
+        const parsedArgs = jsonToConvex(fnArgs);
         const jobId = db.insert("_scheduled_functions", {
-          args: [fnArgs],
+          args: [parsedArgs],
           name: functionPath.udfPath,
           scheduledTime: tsInSecs * 1000,
           state: { kind: "pending" },
@@ -1189,7 +1191,7 @@ function asyncSyscallImpl() {
               return;
             }
             try {
-              await withAuth().fun(functionPath, fnArgs);
+              await withAuth().fun(functionPath, parsedArgs);
             } catch (error) {
               console.error(
                 `Error when running scheduled function ${name}`,
