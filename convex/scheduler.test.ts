@@ -176,3 +176,42 @@ test("self-scheduling mutation", async () => {
 
   vi.useRealTimers();
 });
+
+test("argument serialization", async () => {
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  await t.mutation(api.scheduler.mutationSchedulingAction, {
+    delayMs: 10000,
+    body: "through scheduler",
+    bigint: BigInt(1),
+  });
+  {
+    const jobs = await t.query(internal.scheduler.jobs);
+    expect(jobs).toMatchObject([
+      {
+        state: { kind: "pending" },
+        args: [{ body: "through scheduler", bigint: BigInt(1) }],
+      },
+    ]);
+  }
+
+  vi.advanceTimersByTime(5000);
+
+  {
+    const jobs = await t.query(internal.scheduler.jobs);
+    expect(jobs).toMatchObject([{ state: { kind: "pending" } }]);
+  }
+
+  vi.runAllTimers();
+
+  await t.finishInProgressScheduledFunctions();
+
+  const result = await t.query(internal.scheduler.list);
+  expect(result).toMatchObject([{ body: "through scheduler", author: "AI" }]);
+  {
+    const jobs = await t.query(internal.scheduler.jobs);
+    console.log(jobs);
+    expect(jobs).toMatchObject([{ state: { kind: "success" } }]);
+  }
+  vi.useRealTimers();
+});
