@@ -843,7 +843,7 @@ function validateFieldNames(validator: ValidatorJSON) {
 }
 
 function isValidIdentifier(name: string) {
-  return /^[a-zA-Z][a-zA-Z0-9_]*$/.test(name);
+  return /(^_(id|creationTime)$)|^[a-zA-Z][a-zA-Z0-9_]*$/.test(name);
 }
 
 type ObjectFieldType = { fieldType: ValidatorJSON; optional: boolean };

@@ -25,6 +25,13 @@ test("field names must be identifiers", async () => {
   expect(() => convexTest(schema)).toThrow();
 });
 
+test("accepts _id and _creationTime", async () => {
+  const schema = defineSchema({
+    a: defineTable({ _id: v.string(), _creationTime: v.number() }),
+  });
+  expect(() => convexTest(schema)).not.toThrow();
+});
+
 test("field names must be identifiers union", async () => {
   const schema = defineSchema({
     a: defineTable(
