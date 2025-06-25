@@ -56,3 +56,12 @@ export const componentMutationWithNumberArg = mutation({
     return result;
   },
 });
+
+export const queryWithUnionArg = query({
+  args: {
+    a: v.union(v.number(), v.string()),
+  },
+  handler: () => {
+    return "ok";
+  },
+});
