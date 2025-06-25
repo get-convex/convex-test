@@ -965,7 +965,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
       }
       if (!isValid) {
         throw new Error(
-          `Validator error: Expected one of ${validator.value.map((v) => v.type).join(", ")}, got \`${value}\``,
+          `Validator error: Expected one of ${validator.value.map((v) => v.type).join(", ")}, got \`${JSON.stringify(value)}\``,
         );
       }
       return;
