@@ -952,6 +952,24 @@ function validateValidator(validator: ValidatorJSON, value: any) {
       }
       return;
     }
+    case "union": {
+      let isValid = false;
+      for (const v of validator.value) {
+        try {
+          validateValidator(v, value);
+          isValid = true;
+          break;
+        } catch (e) {
+          // Ignore
+        }
+      }
+      if (!isValid) {
+        throw new Error(
+          `Validator error: Expected one of ${validator.value.map((v) => v.type).join(", ")}, got \`${JSON.stringify(value)}\``,
+        );
+      }
+      return;
+    }
     case "object": {
       if (typeof value !== "object") {
         throw new Error(

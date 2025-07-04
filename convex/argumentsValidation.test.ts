@@ -71,3 +71,22 @@ test("component mutation arguments validation", async () => {
     }),
   ).toEqual(Number.POSITIVE_INFINITY);
 });
+
+test("query with union arg", async () => {
+  const t = testWithCounter();
+  expect(
+    await t.query(api.argumentsValidation.queryWithUnionArg, {
+      a: 42,
+    }),
+  ).toEqual("ok");
+  expect(
+    await t.query(api.argumentsValidation.queryWithUnionArg, {
+      a: "42",
+    }),
+  ).toEqual("ok");
+  await expect(
+    t.query(api.argumentsValidation.queryWithUnionArg, {
+      a: null as any,
+    }),
+  ).rejects.toThrowError(/Validator error/);
+});
