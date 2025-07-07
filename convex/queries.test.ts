@@ -18,6 +18,16 @@ test("collect", async () => {
   ]);
 });
 
+test("count", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello1" });
+    await ctx.db.insert("messages", { author: "sarah", body: "hello2" });
+  });
+  const count = await t.query(api.queries.count);
+  expect(count).toStrictEqual(2);
+});
+
 test("withIndex", async () => {
   const t = convexTest(schema);
   const messages = await t.run(async (ctx) => {

@@ -1291,6 +1291,23 @@ function asyncSyscallImpl() {
           Math.random();
         return JSON.stringify(convexToJson(url));
       }
+      case "1.0/count": {
+        const { table } = args;
+        const queryId = db.startQuery({
+          source: { type: "FullTableScan", tableName: table, order: "asc" },
+          operators: [],
+        });
+        let count = 0;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const result = db.queryNext(queryId);
+          if (result.done) {
+            break;
+          }
+          count += 1;
+        }
+        return JSON.stringify(count);
+      }
       default: {
         throw new Error(
           `\`convexTest\` does not support async syscall: "${op}"`,
