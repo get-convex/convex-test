@@ -7,6 +7,10 @@ export const list = query(async (ctx) => {
   return await ctx.db.query("messages").collect();
 });
 
+export const count = query(async (ctx) => {
+  return await (ctx.db.query("messages") as any).count();
+});
+
 /// order
 
 export const lastN = query({
