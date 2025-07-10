@@ -739,7 +739,9 @@ function evaluateSearchFilter(
     case "Search":
       return (result as string)
         .split(/\s/)
-        .some((word) => word.startsWith(filter.value));
+        .some((word) =>
+          word.toLowerCase().startsWith(filter.value.toLowerCase()),
+        );
   }
 }
 
