@@ -16,3 +16,16 @@ export const list = query({
       .paginate(args.paginationOptions);
   },
 });
+
+export const listWithIndex = query({
+  args: {
+    author: v.string(),
+    paginationOptions: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("messages")
+      .withIndex("author", (q) => q.eq("author", args.author))
+      .paginate(args.paginationOptions);
+  },
+});
