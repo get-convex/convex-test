@@ -373,21 +373,22 @@ class DatabaseFake {
     let isDone = false;
     let continueCursor = null;
 
-    // Parse cursor to get the index key values if it's not a document ID
+    // Parse cursor to get the index key values
     let cursorIndexKeys: any[] | null = null;
     if (cursor && cursor !== "_end_cursor") {
       try {
-        // Try to parse as JSON array (index keys)
+        // Parse as JSON array (index keys)
         const parsed = JSON.parse(cursor);
         if (Array.isArray(parsed)) {
           cursorIndexKeys = parsed;
         } else {
-          // Not an array, treat as legacy cursor
-          cursorIndexKeys = null;
+          throw new Error("Invalid cursor format: expected JSON array");
         }
-      } catch {
-        // If parsing fails, treat as legacy document ID cursor
-        cursorIndexKeys = null;
+      } catch (e) {
+        if (e instanceof Error && e.message.includes("expected JSON array")) {
+          throw e;
+        }
+        throw new Error("Invalid cursor format: must be a JSON array or null");
       }
     }
 
@@ -427,11 +428,6 @@ class DatabaseFake {
           if (shouldStart) {
             isInPage = true;
           }
-        }
-      } else {
-        // Legacy: exact document ID match - start from next doc after cursor
-        if (!isInPage && value!._id === cursor) {
-          isInPage = true;
         }
       }
 
@@ -482,8 +478,7 @@ class DatabaseFake {
         if (index) {
           fields = index.fields.concat(["_creationTime", "_id"]);
         } else {
-          // Fallback to document ID
-          return document._id as string;
+          throw new Error(`Unknown index "${indexName}" for table "${tableName}"`);
         }
       }
 
@@ -503,8 +498,12 @@ class DatabaseFake {
       return JSON.stringify(indexValues);
     }
 
-    // For other query types, fallback to document ID
-    return document._id as string;
+    // For other query types, use creation time and ID
+    const fields = ["_creationTime", "_id"];
+    const indexValues = fields.map((field) =>
+      evaluateFieldPath(field, document),
+    );
+    return JSON.stringify(indexValues);
   }
 
   private _shouldStartFromDocument(
@@ -531,8 +530,7 @@ class DatabaseFake {
         if (index) {
           fields = index.fields.concat(["_creationTime", "_id"]);
         } else {
-          // Fallback to document ID comparison
-          return (document._id as string) > JSON.stringify(cursorIndexKeys);
+          throw new Error(`Unknown index "${indexName}" for table "${tableName}"`);
         }
       }
 
@@ -570,8 +568,20 @@ class DatabaseFake {
       return comparison > 0;
     }
 
-    // For other query types, fallback to document ID comparison
-    return (document._id as string) > JSON.stringify(cursorIndexKeys);
+    // For other query types, use creation time and ID comparison
+    const fields = ["_creationTime", "_id"];
+    const documentIndexValues = fields.map((field) =>
+      evaluateFieldPath(field, document),
+    );
+    
+    const order = "asc";
+    const comparison = this._compareIndexValues(
+      documentIndexValues,
+      cursorIndexKeys,
+      order,
+    );
+    
+    return comparison > 0;
   }
 
   private _compareIndexValues(
