@@ -478,7 +478,9 @@ class DatabaseFake {
         if (index) {
           fields = index.fields.concat(["_creationTime", "_id"]);
         } else {
-          throw new Error(`Unknown index "${indexName}" for table "${tableName}"`);
+          throw new Error(
+            `Unknown index "${indexName}" for table "${tableName}"`,
+          );
         }
       }
 
@@ -530,7 +532,9 @@ class DatabaseFake {
         if (index) {
           fields = index.fields.concat(["_creationTime", "_id"]);
         } else {
-          throw new Error(`Unknown index "${indexName}" for table "${tableName}"`);
+          throw new Error(
+            `Unknown index "${indexName}" for table "${tableName}"`,
+          );
         }
       }
 
@@ -573,14 +577,14 @@ class DatabaseFake {
     const documentIndexValues = fields.map((field) =>
       evaluateFieldPath(field, document),
     );
-    
+
     const order = "asc";
     const comparison = this._compareIndexValues(
       documentIndexValues,
       cursorIndexKeys,
       order,
     );
-    
+
     return comparison > 0;
   }
 
