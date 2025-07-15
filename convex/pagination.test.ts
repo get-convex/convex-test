@@ -116,7 +116,7 @@ test("paginate with deletes and indexes", async () => {
       },
     },
   );
-  expect(page).toMatchObject([{ author: "jordan", body: "hello1" }]);
+  expect(page).toMatchObject([{ author: "jordan", body: "hello4" }]);
   expect(isDone).toEqual(false);
   await t.run(async (ctx) => {
     await ctx.db.delete(page[0]._id);
@@ -133,20 +133,23 @@ test("paginate with deletes and indexes", async () => {
     },
   });
   expect(page2).toMatchObject([
-    { author: "jordan", body: "hello2" },
     { author: "jordan", body: "hello3" },
+    { author: "jordan", body: "hello2" },
   ]);
   expect(isDone2).toEqual(false);
   await t.run(async (ctx) => {
     await ctx.db.delete(page2[1]._id);
   });
-  const { isDone: isDone3, page: page3 } = await t.query(api.pagination.list, {
-    author: "jordan",
-    paginationOptions: {
-      cursor: continueCursor2,
-      numItems: 1,
+  const { isDone: isDone3, page: page3 } = await t.query(
+    api.pagination.listWithIndex,
+    {
+      author: "jordan",
+      paginationOptions: {
+        cursor: continueCursor2,
+        numItems: 1,
+      },
     },
-  });
-  expect(page3).toMatchObject([{ author: "jordan", body: "hello4" }]);
+  );
+  expect(page3).toMatchObject([{ author: "jordan", body: "hello1" }]);
   expect(isDone3).toEqual(true);
 });
