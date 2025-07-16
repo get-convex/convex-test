@@ -39,3 +39,67 @@ test("text search", async () => {
     expect(messages).toMatchObject([{ author: "sarah", body: "hello convex" }]);
   }
 });
+
+test("case insensitive text search", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", { author: "alice", body: "Hello World" });
+    await ctx.db.insert("messages", { author: "bob", body: "GOODBYE WORLD" });
+    await ctx.db.insert("messages", {
+      author: "charlie",
+      body: "Mixed Case Text",
+    });
+    await ctx.db.insert("messages", {
+      author: "diana",
+      body: "lowercase text",
+    });
+  });
+
+  {
+    const messages = await t.query(api.textSearch.textSearch, {
+      body: "HELLO",
+      author: null,
+    });
+    expect(messages).toMatchObject([{ author: "alice", body: "Hello World" }]);
+  }
+
+  {
+    const messages = await t.query(api.textSearch.textSearch, {
+      body: "goodbye",
+      author: null,
+    });
+    expect(messages).toMatchObject([{ author: "bob", body: "GOODBYE WORLD" }]);
+  }
+
+  {
+    const messages = await t.query(api.textSearch.textSearch, {
+      body: "WoRlD",
+      author: null,
+    });
+    expect(messages).toMatchObject([
+      { author: "alice", body: "Hello World" },
+      { author: "bob", body: "GOODBYE WORLD" },
+    ]);
+  }
+
+  {
+    const messages = await t.query(api.textSearch.textSearch, {
+      body: "TEX",
+      author: null,
+    });
+    expect(messages).toMatchObject([
+      { author: "charlie", body: "Mixed Case Text" },
+      { author: "diana", body: "lowercase text" },
+    ]);
+  }
+
+  {
+    const messages = await t.query(api.textSearch.textSearch, {
+      body: "TEXT",
+      author: "charlie",
+    });
+    expect(messages).toMatchObject([
+      { author: "charlie", body: "Mixed Case Text" },
+    ]);
+  }
+});
