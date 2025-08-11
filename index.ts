@@ -737,11 +737,11 @@ function evaluateSearchFilter(
     case "Eq":
       return compareValues(result, filter.value) === 0;
     case "Search":
-      return (result as string)
-        .split(/\s/)
-        .some((word) =>
-          word.toLowerCase().startsWith(filter.value.toLowerCase()),
-        );
+      const queryTerms = filter.value.toLowerCase().split(/\s+/).filter(term => term.length > 0);
+      const documentWords = (result as string).split(/\s+/).map(word => word.toLowerCase());
+      return queryTerms.every(queryTerm => 
+        documentWords.some(word => word.startsWith(queryTerm))
+      );
   }
 }
 
