@@ -119,7 +119,11 @@ test("multi-word query matching", async () => {
       body: "foo bar",
       author: null,
     });
-    expect(messages).toMatchObject([{ author: "alice", body: "Foo Bar Baz" }]);
+    expect(messages).toMatchObject([
+      { author: "alice", body: "Foo Bar Baz" },
+      { author: "charlie", body: "Foo" },
+      { author: "diana", body: "Bar" },
+    ]);
   }
 
   {
@@ -135,7 +139,10 @@ test("multi-word query matching", async () => {
       body: "foo baz",
       author: null,
     });
-    expect(messages).toMatchObject([{ author: "alice", body: "Foo Bar Baz" }]);
+    expect(messages).toMatchObject([
+      { author: "alice", body: "Foo Bar Baz" },
+      { author: "charlie", body: "Foo" },
+    ]);
   }
 
   {
@@ -143,7 +150,10 @@ test("multi-word query matching", async () => {
       body: "foo missing",
       author: null,
     });
-    expect(messages).toMatchObject([]);
+    expect(messages).toMatchObject([
+      { author: "alice", body: "Foo Bar Baz" },
+      { author: "charlie", body: "Foo" },
+    ]);
   }
 
   {
@@ -151,6 +161,10 @@ test("multi-word query matching", async () => {
       body: "   foo   bar   ",
       author: null,
     });
-    expect(messages).toMatchObject([{ author: "alice", body: "Foo Bar Baz" }]);
+    expect(messages).toMatchObject([
+      { author: "alice", body: "Foo Bar Baz" },
+      { author: "charlie", body: "Foo" },
+      { author: "diana", body: "Bar" },
+    ]);
   }
 });

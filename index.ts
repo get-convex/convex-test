@@ -735,7 +735,7 @@ function evaluateSearchFilter(
   const result = evaluateFieldPath(filter.fieldPath, document);
   switch (filter.type) {
     case "Eq":
-      return compareValues(result, filter.value) === 0;
+      return compareValues(result, evaluateValue(filter.value)) === 0;
     case "Search": {
       const queryTerms = filter.value
         .toLowerCase()
@@ -744,7 +744,7 @@ function evaluateSearchFilter(
       const documentWords = (result as string)
         .split(/\s+/)
         .map((word) => word.toLowerCase());
-      return queryTerms.every((queryTerm) =>
+      return queryTerms.some((queryTerm) =>
         documentWords.some((word) => word.startsWith(queryTerm)),
       );
     }
