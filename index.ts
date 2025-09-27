@@ -36,6 +36,9 @@ import {
   jsonToConvex,
 } from "convex/values";
 import { compareValues } from "./compare.js";
+import { fileURLToPath } from "url";
+import { join } from "path";
+import { existsSync, readdirSync, statSync } from "fs";
 
 type FilterJson =
   | { $eq: [FilterJson, FilterJson] }
@@ -1556,8 +1559,81 @@ function getSyscalls() {
   };
 }
 
+function findConvexFiles(
+  projectRoot: string,
+): Record<string, () => Promise<any>> {
+  const convexDir = join(projectRoot, "convex");
+
+  if (!existsSync(convexDir)) {
+    throw new Error(
+      `Could not find "convex" directory at "${convexDir}". ` +
+        `Make sure your project has a convex directory, or provide the modules parameter to convexTest().`,
+    );
+  }
+
+  const modules: Record<string, () => Promise<any>> = {};
+
+  function scanDirectory(dir: string, relativePath: string = "") {
+    const items = readdirSync(dir);
+
+    for (const item of items) {
+      const fullPath = join(dir, item);
+      const stat = statSync(fullPath);
+
+      if (stat.isDirectory()) {
+        scanDirectory(
+          fullPath,
+          relativePath ? `${relativePath}/${item}` : item,
+        );
+      } else if (stat.isFile() && /\.(js|ts|mjs|mts)$/.test(item)) {
+        // Create a relative path from convex directory
+        const moduleKey = relativePath
+          ? `./convex/${relativePath}/${item}`
+          : `./convex/${item}`;
+
+        modules[moduleKey] = async () => {
+          return await import(fullPath);
+        };
+      }
+    }
+  }
+
+  scanDirectory(convexDir);
+  return modules;
+}
+
+function findProjectRoot(): string {
+  // Split on node_modules - works for npm, yarn, and pnpm in standard setups
+  try {
+    const currentPath =
+      typeof __filename !== "undefined"
+        ? __filename
+        : fileURLToPath(import.meta.url);
+
+    // For pnpm, we need to find the first node_modules, not the last one
+    // because pnpm can have nested node_modules like:
+    // /project/node_modules/.pnpm/package@version_deps/node_modules/package/file.js
+    const nodeModulesIndex = currentPath.indexOf("/node_modules/");
+    if (nodeModulesIndex !== -1) {
+      return currentPath.substring(0, nodeModulesIndex);
+    }
+  } catch (e) {
+    // Fall through to fallback
+  }
+
+  // Fallback to current working directory
+  return process.cwd();
+}
+
 function moduleCache(specifiedModules?: Record<string, () => Promise<any>>) {
-  const modules = specifiedModules ?? import.meta.glob("./convex/**/*.*s");
+  const modules =
+    specifiedModules ??
+    (() => {
+      // Use dynamic module discovery when no modules are specified
+      const projectRoot = findProjectRoot();
+      return findConvexFiles(projectRoot);
+    })();
+
   const prefix = findModulesRoot(
     Object.keys(modules),
     specifiedModules !== undefined,
@@ -1591,9 +1667,9 @@ function findModulesRoot(modulesPaths: string[], userProvidedModules: boolean) {
       (userProvidedModules
         ? "Make sure your `import.meta.glob` includes the files in the " +
           '"_generated" directory'
-        : "If your Convex functions aren't defined in a directory " +
-          'called "convex" sibling to your node_modules, ' +
-          "provide the second argument to `convexTest`"),
+        : "convex-test automatically detected your project root and convex directory. " +
+          "If your Convex functions are in a non-standard location, " +
+          "provide the modules parameter to `convexTest` with your custom `import.meta.glob` pattern."),
   );
 }
 
