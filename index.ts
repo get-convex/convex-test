@@ -46,16 +46,16 @@ type QueryOperator = { filter: FilterJson } | { limit: number };
 type Source =
   | { type: "FullTableScan"; tableName: string; order: "asc" | "desc" | null }
   | {
-      type: "IndexRange";
-      indexName: string;
-      range: ReadonlyArray<SerializedRangeExpression>;
-      order: "asc" | "desc" | null;
-    }
+    type: "IndexRange";
+    indexName: string;
+    range: ReadonlyArray<SerializedRangeExpression>;
+    order: "asc" | "desc" | null;
+  }
   | {
-      type: "Search";
-      indexName: string;
-      filters: ReadonlyArray<SerializedSearchFilter>;
-    };
+    type: "Search";
+    indexName: string;
+    filters: ReadonlyArray<SerializedSearchFilter>;
+  };
 
 type SerializedQuery = {
   source: Source;
@@ -70,15 +70,15 @@ type SerializedRangeExpression = {
 
 type SerializedSearchFilter =
   | {
-      type: "Search";
-      fieldPath: string;
-      value: string;
-    }
+    type: "Search";
+    fieldPath: string;
+    value: string;
+  }
   | {
-      type: "Eq";
-      fieldPath: string;
-      value: JSONValue;
-    };
+    type: "Eq";
+    fieldPath: string;
+    value: JSONValue;
+  };
 
 type ScheduledFunction = DocumentByName<
   SystemDataModel,
@@ -119,7 +119,7 @@ class DatabaseFake {
   private _lastCreationTime: number = 0;
   private _queryResults: Record<QueryId, Array<GenericDocument>> = {};
   // TODO: Make this more robust and cleaner
-  jobListener: (jobId: string) => void = () => {};
+  jobListener: (jobId: string) => void = () => { };
   // Pending writes for each level of transaction nesting.
   // Whenever a child mutation begins, a new level is created for all
   // components.
@@ -151,14 +151,14 @@ class DatabaseFake {
       schema === null
         ? null
         : {
-            schemaValidation: (schema as any).schemaValidation,
-            tables: new Map(
-              Object.entries(schema.tables).map(([name, tableSchema]) => [
-                name,
-                (tableSchema as any).export(),
-              ]),
-            ),
-          };
+          schemaValidation: (schema as any).schemaValidation,
+          tables: new Map(
+            Object.entries(schema.tables).map(([name, tableSchema]) => [
+              name,
+              (tableSchema as any).export(),
+            ]),
+          ),
+        };
     this._componentPath = componentPath;
 
     this.validateSchema();
@@ -172,8 +172,7 @@ class DatabaseFake {
   get(id: GenericId<string>) {
     if (typeof id !== "string") {
       throw new Error(
-        `Invalid argument \`id\` for \`db.get\`, expected string but got '${typeof id}': ${
-          id as any
+        `Invalid argument \`id\` for \`db.get\`, expected string but got '${typeof id}': ${id as any
         }`,
       );
     }
@@ -236,7 +235,7 @@ class DatabaseFake {
     if (value._id !== undefined && value._id !== _id) {
       throw new Error(
         `Provided \`_id\` field value "${value._id}" ` +
-          `does not match the document ID "${_id}"`,
+        `does not match the document ID "${_id}"`,
       );
     }
     if (
@@ -245,7 +244,7 @@ class DatabaseFake {
     ) {
       throw new Error(
         `Provided \`_creationTime\` field value ${value._creationTime} ` +
-          `does not match the document's creation time ${_creationTime}`,
+        `does not match the document's creation time ${_creationTime}`,
       );
     }
     delete value["_id"];
@@ -267,7 +266,7 @@ class DatabaseFake {
     if (value._id !== undefined && value._id !== document._id) {
       throw new Error(
         `Provided \`_id\` field value "${value._id}" ` +
-          `does not match the document ID "${document._id}"`,
+        `does not match the document ID "${document._id}"`,
       );
     }
     if (
@@ -276,7 +275,7 @@ class DatabaseFake {
     ) {
       throw new Error(
         `Provided \`_creationTime\` field value ${value._creationTime} ` +
-          `does not match the document's creation time ${document._creationTime}`,
+        `does not match the document's creation time ${document._creationTime}`,
       );
     }
     delete value["_id"];
@@ -372,7 +371,7 @@ class DatabaseFake {
     let isInPage = cursor === null;
     let isDone = false;
     let continueCursor = null;
-    for (;;) {
+    for (; ;) {
       const { value, done } = this.queryNext(queryId);
       if (done) {
         isDone = true;
@@ -451,7 +450,7 @@ class DatabaseFake {
           if (index === undefined) {
             throw new Error(
               `Cannot use index "${indexName}" for table "${tableName}" because ` +
-                `it is not declared in the schema.`,
+              `it is not declared in the schema.`,
             );
           }
           fields = index.fields.concat(["_creationTime", "_id"]);
@@ -540,7 +539,7 @@ class DatabaseFake {
     if (vectorIndex === undefined) {
       throw new Error(
         `Cannot use vector index "${indexName}" for table "${tableName}" because ` +
-          `it is not declared in the schema.`,
+        `it is not declared in the schema.`,
       );
     }
     const { vectorField } = vectorIndex;
@@ -784,8 +783,8 @@ function validateIndexRangeExpression(
     if (state === "done") {
       throw new Error(
         `Incorrect operator used in \`withIndex\`, cannot chain ` +
-          `more operators after both \`.gt\` and \`.lt\` were already used, ` +
-          `got \`${printIndexOperator(filter)}\`.`,
+        `more operators after both \`.gt\` and \`.lt\` were already used, ` +
+        `got \`${printIndexOperator(filter)}\`.`,
       );
     }
 
@@ -808,7 +807,7 @@ function validateIndexRangeExpression(
         }
         throw new Error(
           `Incorrect field used in \`withIndex\`, ` +
-            `expected "${fields[fieldIndex]}", got "${filter.fieldPath}"`,
+          `expected "${fields[fieldIndex]}", got "${filter.fieldPath}"`,
         );
 
       // Allow to operate on the previous field (gt and lt must operate on same field)
@@ -820,15 +819,15 @@ function validateIndexRangeExpression(
         }
         throw new Error(
           `Incorrect field used in \`withIndex\`, ` +
-            `\`.gt\` and \`.lt\` must operate on the same field, ` +
-            `expected "${fields[fieldIndex - 1]}", got "${filter.fieldPath}"`,
+          `\`.gt\` and \`.lt\` must operate on the same field, ` +
+          `expected "${fields[fieldIndex - 1]}", got "${filter.fieldPath}"`,
         );
 
       default:
         throw new Error(
           `Incorrect operator used in \`withIndex\`, ` +
-            `cannot chain \`.${filter.type.toLowerCase()}()\` ` +
-            `after \`.${source.range[filterIndex - 1].type.toLowerCase()}()\``,
+          `cannot chain \`.${filter.type.toLowerCase()}()\` ` +
+          `after \`.${source.range[filterIndex - 1].type.toLowerCase()}()\``,
         );
     }
   }
@@ -858,8 +857,8 @@ type ObjectFieldType = { fieldType: ValidatorJSON; optional: boolean };
 
 type ValidatorJSON =
   | {
-      type: "null";
-    }
+    type: "null";
+  }
   | { type: "number" }
   | { type: "bigint" }
   | { type: "boolean" }
@@ -867,9 +866,9 @@ type ValidatorJSON =
   | { type: "bytes" }
   | { type: "any" }
   | {
-      type: "literal";
-      value: JSONValue;
-    }
+    type: "literal";
+    value: JSONValue;
+  }
   | { type: "id"; tableName: string }
   | { type: "array"; value: ValidatorJSON }
   | { type: "object"; value: Record<string, ObjectFieldType> }
@@ -929,8 +928,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
     case "literal": {
       if (value !== validator.value) {
         throw new Error(
-          `Validator error: Expected \`${
-            validator.value as any
+          `Validator error: Expected \`${validator.value as any
           }\`, got \`${value}\``,
         );
       }
@@ -1042,7 +1040,7 @@ function syscallImpl() {
 }
 
 class AuthFake {
-  constructor(private _userIdentity: any = null) {}
+  constructor(private _userIdentity: any = null) { }
 
   getUserIdentity(): Promise<any> {
     return Promise.resolve(this._userIdentity);
@@ -1587,13 +1585,13 @@ function findModulesRoot(modulesPaths: string[], userProvidedModules: boolean) {
 
   throw new Error(
     'Could not find the "_generated" directory, make sure to run ' +
-      "`npx convex dev` or `npx convex codegen`. " +
-      (userProvidedModules
-        ? "Make sure your `import.meta.glob` includes the files in the " +
-          '"_generated" directory'
-        : "If your Convex functions aren't defined in a directory " +
-          'called "convex" sibling to your node_modules, ' +
-          "provide the second argument to `convexTest`"),
+    "`npx convex dev` or `npx convex codegen`. " +
+    (userProvidedModules
+      ? "Make sure your `import.meta.glob` includes the files in the " +
+      '"_generated" directory'
+      : "If your Convex functions aren't defined in a directory " +
+      'called "convex" sibling to your node_modules, ' +
+      "provide the second argument to `convexTest`"),
   );
 }
 
@@ -1852,16 +1850,22 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       getTransactionManager().beginAction(functionPath);
       // Real backend uses different ID format
       const requestId = "" + Math.random();
-      const rawResult = await (
-        a as unknown as {
-          invokeAction: (requestId: string, args: string) => Promise<string>;
-        }
-      ).invokeAction(
-        requestId,
-        JSON.stringify(convexToJson([parseArgs(args)])),
-      );
-      getTransactionManager().finishAction();
-      return jsonToConvex(JSON.parse(rawResult));
+      try {
+        const rawResult = await (
+          a as unknown as {
+            invokeAction: (requestId: string, args: string) => Promise<string>;
+          }
+        ).invokeAction(
+          requestId,
+          JSON.stringify(convexToJson([parseArgs(args)])),
+        );
+        getTransactionManager().finishAction();
+        return jsonToConvex(JSON.parse(rawResult));
+      } catch (e) {
+        getTransactionManager().finishAction();
+        console.error(`Error in action ${functionPath.udfPath}: ${JSON.stringify(e)}`);
+        throw e;
+      }
     },
   };
 
@@ -2006,8 +2010,8 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       }
       throw new Error(
         "finishAllScheduledFunctions: too many iterations. " +
-          "Check for infinitely recursive scheduled functions, " +
-          "or increase maxIterations.",
+        "Check for infinitely recursive scheduled functions, " +
+        "or increase maxIterations.",
       );
     },
   };
@@ -2021,8 +2025,7 @@ function parseArgs(
   }
   if (!isSimpleObject(args)) {
     throw new Error(
-      `The arguments to a Convex function must be an object. Received: ${
-        args as any
+      `The arguments to a Convex function must be an object. Received: ${args as any
       }`,
     );
   }
