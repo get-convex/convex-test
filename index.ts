@@ -1490,6 +1490,28 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    *   with `finishInProgressScheduledFunctions()`.
    */
   finishAllScheduledFunctions: (advanceTimers: () => void) => Promise<void>;
+
+  /**
+   * A simulated ActionCtx that can be passed to helper functions.
+   *
+   * This provides `runQuery`, `runMutation`, and `runAction` methods
+   * that can be used to call Convex functions from helper functions
+   * that expect an ActionCtx parameter.
+   */
+  ctx: {
+    runQuery: <Query extends FunctionReference<"query", any>>(
+      query: Query,
+      ...args: OptionalRestArgs<Query>
+    ) => Promise<FunctionReturnType<Query>>;
+    runMutation: <Mutation extends FunctionReference<"mutation", any>>(
+      mutation: Mutation,
+      ...args: OptionalRestArgs<Mutation>
+    ) => Promise<FunctionReturnType<Mutation>>;
+    runAction: <Action extends FunctionReference<"action", any>>(
+      action: Action,
+      ...args: OptionalRestArgs<Action>
+    ) => Promise<FunctionReturnType<Action>>;
+  };
 };
 
 export type TestConvexForDataModelAndIdentity<
@@ -2009,6 +2031,12 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           "Check for infinitely recursive scheduled functions, " +
           "or increase maxIterations.",
       );
+    },
+
+    ctx: {
+      runQuery: byType.query,
+      runMutation: byType.mutation,
+      runAction: byType.action,
     },
   };
 }
