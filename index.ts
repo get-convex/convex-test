@@ -36,7 +36,6 @@ import {
   jsonToConvex,
 } from "convex/values";
 import { compareValues } from "./compare.js";
-import { table } from "console";
 
 type FilterJson =
   | { $eq: [FilterJson, FilterJson] }
@@ -237,7 +236,7 @@ class DatabaseFake {
 
     if (typeof value !== "object") {
       throw new Error(
-        `Invalid argument \`value\` in \`db.patch\`, expected object but got '${typeof value}': ${value}`,
+        `Invalid argument \`value\` in \`db.patch\`, expected object but got '${typeof value}': ${value as any}`,
       );
     }
 
@@ -281,7 +280,7 @@ class DatabaseFake {
 
     if (typeof value !== "object") {
       throw new Error(
-        `Invalid argument \`value\` in \`db.replace\`, expected object but got '${typeof value}': ${value}`,
+        `Invalid argument \`value\` in \`db.replace\`, expected object but got '${typeof value}': ${value as any}`,
       );
     }
 
