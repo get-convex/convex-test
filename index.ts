@@ -177,7 +177,7 @@ class DatabaseFake {
     return this._get(id);
   }
 
-  _get(id: GenericId<string>) {
+  private _get(id: GenericId<string>) {
     for (let i = this._writes.length - 1; i >= 0; i--) {
       const write = this._writes[i][id];
       if (write !== undefined) {
