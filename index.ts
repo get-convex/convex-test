@@ -36,6 +36,7 @@ import {
   jsonToConvex,
 } from "convex/values";
 import { compareValues } from "./compare.js";
+import { table } from "console";
 
 type FilterJson =
   | { $eq: [FilterJson, FilterJson] }
@@ -169,14 +170,10 @@ class DatabaseFake {
     this._writes.push({});
   }
 
-  get(id: GenericId<string>) {
-    if (typeof id !== "string") {
-      throw new Error(
-        `Invalid argument \`id\` for \`db.get\`, expected string but got '${typeof id}': ${
-          id as any
-        }`,
-      );
-    }
+  get(arg0: any, arg1?: any) {
+    const [tableName, id] =
+      arg1 === undefined ? [undefined, arg0] : [arg0, arg1];
+    this._validateId(tableName, id);
 
     for (let i = this._writes.length - 1; i >= 0; i--) {
       const write = this._writes[i][id];
@@ -227,7 +224,17 @@ class DatabaseFake {
     return _id;
   }
 
-  patch(id: DocumentId, value: Record<string, any>) {
+  patch(arg0: any, arg1: any, arg2?: any) {
+    const [tableName, id, value] =
+      arg2 === undefined ? [undefined, arg0, arg1] : [arg0, arg1, arg2];
+    this._validateId(tableName, id);
+
+    if (typeof value !== "object") {
+      throw new Error(
+        `Invalid argument \`value\` in \`db.patch\`, expected object but got '${typeof value}': ${value}`,
+      );
+    }
+
     const document = this.get(id);
     if (document === null) {
       throw new Error(`Patch on non-existent document with ID "${id}"`);
@@ -259,7 +266,17 @@ class DatabaseFake {
     this._addWrite(id, { _id, _creationTime, ...merged });
   }
 
-  replace(id: DocumentId, value: Record<string, any>) {
+  replace(arg0: any, arg1: any, arg2?: any) {
+    const [tableName, id, value] =
+      arg2 === undefined ? [undefined, arg0, arg1] : [arg0, arg1, arg2];
+    this._validateId(tableName, id);
+
+    if (typeof value !== "object") {
+      throw new Error(
+        `Invalid argument \`value\` in \`db.replace\`, expected object but got '${typeof value}': ${value}`,
+      );
+    }
+
     const document = this.get(id);
     if (document === null) {
       throw new Error(`Replace on non-existent document with ID "${id}"`);
@@ -293,12 +310,50 @@ class DatabaseFake {
     });
   }
 
-  delete(id: DocumentId) {
+  delete(arg0: any, arg1?: any) {
+    const [tableName, id] =
+      arg1 === undefined ? [undefined, arg0] : [arg0, arg1];
+    this._validateId(tableName, id);
+
     const document = this.get(id);
     if (document === null) {
       throw new Error("Delete on non-existent doc");
     }
     this._addWrite(id, null);
+  }
+
+  private _validateId(
+    expectedTableName: unknown,
+    id: unknown,
+  ): asserts id is DocumentId {
+    if (typeof id !== "string") {
+      throw new Error(
+        `Invalid argument \`id\`, expected string but got '${typeof id}': ${id as any}`,
+      );
+    }
+
+    if (expectedTableName === undefined) {
+      return;
+    }
+
+    if (typeof expectedTableName !== "string") {
+      throw new Error(
+        `Invalid argument \`tableName\`, expected string but got '${typeof tableName}': ${tableName as any}`,
+      );
+    }
+
+    const idParts = id.split(";");
+    if (idParts.length !== 2) {
+      throw new Error(
+        `Invalid argument \`id\`, expected ID value but got '${id}'`,
+      );
+    }
+
+    if (idParts[0] !== expectedTableName) {
+      throw new Error(
+        `Invalid argument \`id\`, expected ID in table '${expectedTableName}' but got '${idParts[0]}'`,
+      );
+    }
   }
 
   commit() {
