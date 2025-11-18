@@ -14,6 +14,7 @@ import type * as actions from "../actions.js";
 import type * as argumentsValidation from "../argumentsValidation.js";
 import type * as authentication from "../authentication.js";
 import type * as component from "../component.js";
+import type * as explicitTableNames from "../explicitTableNames.js";
 import type * as http from "../http.js";
 import type * as messages from "../messages.js";
 import type * as mutations from "../mutations.js";
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   argumentsValidation: typeof argumentsValidation;
   authentication: typeof authentication;
   component: typeof component;
+  explicitTableNames: typeof explicitTableNames;
   http: typeof http;
   messages: typeof messages;
   mutations: typeof mutations;
