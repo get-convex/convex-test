@@ -33,10 +33,9 @@
   "author": "Sarah Shader & Michal Srb <srb@convex.dev>",
   "license": "Apache-2.0",
   "peerDependencies": {
-    "convex": "^1.25.4"
+    "convex": "^1.16.4"
   },
   "devDependencies": {
-    "convex": "1.30.0-alpha.0",
     "@edge-runtime/vm": "^3.2.0",
     "@types/node": "^20.12.11",
     "@typescript-eslint/eslint-plugin": "^6.7.0",
