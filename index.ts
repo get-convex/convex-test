@@ -317,9 +317,10 @@ class DatabaseFake {
     });
   }
 
-  delete(arg0: any, arg1?: any) {
-    const [tableName, id] =
-      arg1 === undefined ? [undefined, arg0] : [arg0, arg1];
+  delete<Table extends TableName>(
+    tableName: Table | undefined,
+    id: GenericId<Table>,
+  ) {
     this._validateId(tableName, id);
 
     const document = this._get(id);
@@ -1338,7 +1339,7 @@ function asyncSyscallImpl() {
       case "1.0/storageDelete": {
         const { storageId } = args;
         await writeToDatabase(async (db) => {
-          db.delete(storageId);
+          db.delete(undefined, storageId);
         });
         return JSON.stringify({});
       }
