@@ -174,10 +174,7 @@ class DatabaseFake {
     id: GenericId<Table>,
   ) {
     this._validateId(tableName, id);
-    return this._get(id);
-  }
 
-  private _get(id: GenericId<string>) {
     for (let i = this._writes.length - 1; i >= 0; i--) {
       const write = this._writes[i][id];
       if (write !== undefined) {
@@ -203,7 +200,7 @@ class DatabaseFake {
   }
 
   getFile(storageId: GenericId<"_storage">) {
-    if (this._get(storageId) === null) {
+    if (this.get(undefined, storageId) === null) {
       return null;
     }
     return this._storage[storageId];
@@ -240,7 +237,7 @@ class DatabaseFake {
       );
     }
 
-    const document = this._get(id);
+    const document = this.get(undefined, id);
     if (document === null) {
       throw new Error(`Patch on non-existent document with ID "${id}"`);
     }
@@ -284,7 +281,7 @@ class DatabaseFake {
       );
     }
 
-    const document = this._get(id);
+    const document = this.get(undefined, id);
     if (document === null) {
       throw new Error(`Replace on non-existent document with ID "${id}"`);
     }
@@ -323,7 +320,7 @@ class DatabaseFake {
   ) {
     this._validateId(tableName, id);
 
-    const document = this._get(id);
+    const document = this.get(undefined, id);
     if (document === null) {
       throw new Error("Delete on non-existent doc");
     }
@@ -474,7 +471,7 @@ class DatabaseFake {
       }
     }
     for (const id of ids) {
-      const document = this._get(id as DocumentId);
+      const document = this.get(undefined, id as DocumentId);
       if (document !== null) {
         callback(document);
       }
@@ -1264,7 +1261,7 @@ function asyncSyscallImpl() {
             const canceled = await withAuth().runInComponent(
               componentPath,
               async () => {
-                const job = db._get(jobId) as ScheduledFunction;
+                const job = db.get(undefined, jobId) as ScheduledFunction;
                 if (job.state.kind === "canceled") {
                   return true;
                 }
@@ -1297,7 +1294,7 @@ function asyncSyscallImpl() {
               return;
             }
             await withAuth().runInComponent(componentPath, async () => {
-              const job = db._get(jobId) as ScheduledFunction;
+              const job = db.get(undefined, jobId) as ScheduledFunction;
               if (job.state.kind !== "inProgress") {
                 throw new Error(
                   `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
@@ -1345,7 +1342,7 @@ function asyncSyscallImpl() {
       }
       case "1.0/storageGetUrl": {
         const { storageId } = args;
-        const metadata = db._get(storageId);
+        const metadata = db.get(undefined, storageId);
         if (metadata === null) {
           return JSON.stringify(null);
         }
