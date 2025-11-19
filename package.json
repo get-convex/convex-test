@@ -21,7 +21,7 @@
   "scripts": {
     "format": "prettier --write .",
     "prebuild": "npm run lint && npm run test:once",
-    "build": "tsc && replace-in-file '\"./convex/**/*.*s\"' '\"../../../convex/**/*.*s\"' ./dist/index.js",
+    "build": "tsc",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0 && prettier --check .",
     "test": "vitest",
     "test:once": "vitest run",
@@ -45,8 +45,8 @@
     "convex": "^1.29.2",
     "eslint": "^8.49.0",
     "pkg-pr-new": "^0.0.54",
-    "replace-in-file": "^7.1.0",
     "typescript": "^5.4.3",
+    "vite": "^5.0.0",
     "vitest": "^1.4.0"
   }
 }

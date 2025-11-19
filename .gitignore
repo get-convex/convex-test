@@ -5,3 +5,4 @@ dist
 coverage
 .env.local
 *.tgz
+.claude
