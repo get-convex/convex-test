@@ -237,7 +237,7 @@ class DatabaseFake {
       );
     }
 
-    const document = this.get(undefined, id);
+    const document = this.get(tableName, id);
     if (document === null) {
       throw new Error(`Patch on non-existent document with ID "${id}"`);
     }
@@ -281,7 +281,7 @@ class DatabaseFake {
       );
     }
 
-    const document = this.get(undefined, id);
+    const document = this.get(tableName, id);
     if (document === null) {
       throw new Error(`Replace on non-existent document with ID "${id}"`);
     }
@@ -320,7 +320,7 @@ class DatabaseFake {
   ) {
     this._validateId(tableName, id);
 
-    const document = this.get(undefined, id);
+    const document = this.get(tableName, id);
     if (document === null) {
       throw new Error("Delete on non-existent doc");
     }
@@ -471,7 +471,7 @@ class DatabaseFake {
       }
     }
     for (const id of ids) {
-      const document = this.get(undefined, id as DocumentId);
+      const document = this.get(tableName, id as DocumentId);
       if (document !== null) {
         callback(document);
       }
@@ -1261,7 +1261,10 @@ function asyncSyscallImpl() {
             const canceled = await withAuth().runInComponent(
               componentPath,
               async () => {
-                const job = db.get(undefined, jobId) as ScheduledFunction;
+                const job = db.get(
+                  "_scheduled_functions",
+                  jobId,
+                ) as ScheduledFunction;
                 if (job.state.kind === "canceled") {
                   return true;
                 }
@@ -1270,7 +1273,9 @@ function asyncSyscallImpl() {
                     `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
                   );
                 }
-                db.patch(undefined, jobId, { state: { kind: "inProgress" } });
+                db.patch("_scheduled_functions", jobId, {
+                  state: { kind: "inProgress" },
+                });
                 return false;
               },
             );
@@ -1285,7 +1290,7 @@ function asyncSyscallImpl() {
                 error,
               );
               await withAuth().runInComponent(componentPath, async () => {
-                db.patch(undefined, jobId, {
+                db.patch("_scheduled_functions", jobId, {
                   state: { kind: "failed" },
                   completedTime: Date.now(),
                 });
@@ -1294,13 +1299,18 @@ function asyncSyscallImpl() {
               return;
             }
             await withAuth().runInComponent(componentPath, async () => {
-              const job = db.get(undefined, jobId) as ScheduledFunction;
+              const job = db.get(
+                "_scheduled_functions",
+                jobId,
+              ) as ScheduledFunction;
               if (job.state.kind !== "inProgress") {
                 throw new Error(
                   `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
                 );
               }
-              db.patch(undefined, jobId, { state: { kind: "success" } });
+              db.patch("_scheduled_functions", jobId, {
+                state: { kind: "success" },
+              });
             });
             db.jobFinished(jobId);
           }) as () => void,
@@ -1330,19 +1340,19 @@ function asyncSyscallImpl() {
       }
       case "1.0/cancel_job": {
         const { id } = args;
-        db.patch(undefined, id, { state: { kind: "canceled" } });
+        db.patch("_scheduled_functions", id, { state: { kind: "canceled" } });
         return JSON.stringify({});
       }
       case "1.0/storageDelete": {
         const { storageId } = args;
         await writeToDatabase(async (db) => {
-          db.delete(undefined, storageId);
+          db.delete("_storage", storageId);
         });
         return JSON.stringify({});
       }
       case "1.0/storageGetUrl": {
         const { storageId } = args;
-        const metadata = db.get(undefined, storageId);
+        const metadata = db.get("_storage", storageId);
         if (metadata === null) {
           return JSON.stringify(null);
         }
