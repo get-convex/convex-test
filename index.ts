@@ -432,6 +432,35 @@ class DatabaseFake {
     let isInPage = cursor === null;
     let isDone = false;
     let continueCursor = null;
+
+    // Parse cursor to get the index key values
+    let cursorIndexKeys: any[] | null = null;
+    if (cursor && cursor !== "_end_cursor") {
+      try {
+        // Parse as JSON array (index keys)
+        const parsed = JSON.parse(cursor);
+        if (Array.isArray(parsed)) {
+          cursorIndexKeys = parsed;
+        } else {
+          throw new Error("Invalid cursor format: expected JSON array");
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message.includes("expected JSON array")) {
+          throw e;
+        }
+        throw new Error("Invalid cursor format: must be a JSON array or null");
+      }
+    }
+
+    // If cursor is "_end_cursor", we're already at the end
+    if (cursor === "_end_cursor") {
+      return {
+        page: [],
+        isDone: true,
+        continueCursor: "_end_cursor",
+      };
+    }
+
     for (;;) {
       const { value, done } = this.queryNext(queryId);
       if (done) {
@@ -441,15 +470,42 @@ class DatabaseFake {
         continueCursor = "_end_cursor";
         break;
       }
+
+      // First determine if we should start including documents in the page
+      if (cursor === null) {
+        isInPage = true;
+      } else if (cursor === "_end_cursor") {
+        // Already at end, should not happen
+        break;
+      } else if (cursorIndexKeys) {
+        // Compare based on index key values - start from the next doc after cursor
+        if (!isInPage) {
+          const shouldStart = this._shouldStartFromDocument(
+            query,
+            value!,
+            cursorIndexKeys,
+          );
+          if (shouldStart) {
+            isInPage = true;
+          }
+        }
+      }
+
+      // Then, if we're in the page, add the document
       if (isInPage) {
         page.push(value);
         if (page.length >= pageSize) {
-          continueCursor = value!._id;
+          // Generate cursor based on index key values
+          continueCursor = this._generateIndexCursor(query, value!);
+
+          // Check if there are more documents after this one
+          const { done: nextDone } = this.queryNext(queryId);
+          if (nextDone) {
+            isDone = true;
+            continueCursor = "_end_cursor";
+          }
           break;
         }
-      }
-      if (value!._id === cursor) {
-        isInPage = true;
       }
     }
     return {
@@ -457,6 +513,157 @@ class DatabaseFake {
       isDone,
       continueCursor,
     };
+  }
+
+  private _generateIndexCursor(
+    query: SerializedQuery,
+    document: GenericDocument,
+  ): string {
+    const source = query.source;
+
+    if (source.type === "IndexRange") {
+      const [tableName, indexName] = source.indexName.split(".");
+      let fields: string[];
+
+      if (indexName === "by_creation_time") {
+        fields = ["_creationTime", "_id"];
+      } else if (indexName === "by_id") {
+        fields = ["_id"];
+      } else {
+        const indexes = this._schema?.tables.get(tableName)?.indexes;
+        const index = indexes?.find(
+          ({ indexDescriptor }: { indexDescriptor: string }) =>
+            indexDescriptor === indexName,
+        );
+        if (index) {
+          fields = index.fields.concat(["_creationTime", "_id"]);
+        } else {
+          throw new Error(
+            `Unknown index "${indexName}" for table "${tableName}"`,
+          );
+        }
+      }
+
+      // Extract the index key values from the document
+      const indexValues = fields.map((field) =>
+        evaluateFieldPath(field, document),
+      );
+      return JSON.stringify(indexValues);
+    }
+
+    if (source.type === "FullTableScan") {
+      // For FullTableScan, use the natural sort order which is by _creationTime, _id
+      const fields = ["_creationTime", "_id"];
+      const indexValues = fields.map((field) =>
+        evaluateFieldPath(field, document),
+      );
+      return JSON.stringify(indexValues);
+    }
+
+    // For other query types, use creation time and ID
+    const fields = ["_creationTime", "_id"];
+    const indexValues = fields.map((field) =>
+      evaluateFieldPath(field, document),
+    );
+    return JSON.stringify(indexValues);
+  }
+
+  private _shouldStartFromDocument(
+    query: SerializedQuery,
+    document: GenericDocument,
+    cursorIndexKeys: any[],
+  ): boolean {
+    const source = query.source;
+
+    if (source.type === "IndexRange") {
+      const [tableName, indexName] = source.indexName.split(".");
+      let fields: string[];
+
+      if (indexName === "by_creation_time") {
+        fields = ["_creationTime", "_id"];
+      } else if (indexName === "by_id") {
+        fields = ["_id"];
+      } else {
+        const indexes = this._schema?.tables.get(tableName)?.indexes;
+        const index = indexes?.find(
+          ({ indexDescriptor }: { indexDescriptor: string }) =>
+            indexDescriptor === indexName,
+        );
+        if (index) {
+          fields = index.fields.concat(["_creationTime", "_id"]);
+        } else {
+          throw new Error(
+            `Unknown index "${indexName}" for table "${tableName}"`,
+          );
+        }
+      }
+
+      // Extract the index key values from the document
+      const documentIndexValues = fields.map((field) =>
+        evaluateFieldPath(field, document),
+      );
+
+      // Compare the index values according to the sort order
+      const order = source.order ?? "asc";
+      const comparison = this._compareIndexValues(
+        documentIndexValues,
+        cursorIndexKeys,
+        order,
+      );
+
+      return comparison > 0;
+    }
+
+    if (source.type === "FullTableScan") {
+      // For FullTableScan, use the natural sort order which is by _creationTime, _id
+      const fields = ["_creationTime", "_id"];
+      const documentIndexValues = fields.map((field) =>
+        evaluateFieldPath(field, document),
+      );
+
+      // Compare the index values according to the sort order
+      const order = source.order ?? "asc";
+      const comparison = this._compareIndexValues(
+        documentIndexValues,
+        cursorIndexKeys,
+        order,
+      );
+
+      return comparison > 0;
+    }
+
+    // For other query types, use creation time and ID comparison
+    const fields = ["_creationTime", "_id"];
+    const documentIndexValues = fields.map((field) =>
+      evaluateFieldPath(field, document),
+    );
+
+    const order = "asc";
+    const comparison = this._compareIndexValues(
+      documentIndexValues,
+      cursorIndexKeys,
+      order,
+    );
+
+    return comparison > 0;
+  }
+
+  private _compareIndexValues(
+    a: any[],
+    b: any[],
+    order: "asc" | "desc",
+  ): number {
+    const orderMultiplier = order === "asc" ? 1 : -1;
+
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      const comparison = compareValues(a[i], b[i]);
+      if (comparison !== 0) {
+        return comparison * orderMultiplier;
+      }
+    }
+
+    // If all compared values are equal, shorter array comes first
+    return (a.length - b.length) * orderMultiplier;
   }
 
   private _iterateDocs(
