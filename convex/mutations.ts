@@ -76,7 +76,7 @@ export const rolledBackSubtransaction = mutation({
         body: "hello",
         author: "lee",
       });
-    } catch (e) {
+    } catch {
       // ignore
     }
     await ctx.db.insert("messages", { body: "world", author: "sarah" });
