@@ -899,7 +899,7 @@ function printIndexOperator(filter: SerializedRangeExpression) {
 }
 
 function validateFieldNames(validator: ValidatorJSON) {
-  validator.type === "object" &&
+  if (validator.type === "object") {
     Object.keys(validator.value).forEach((fieldName) => {
       if (!isValidIdentifier(fieldName)) {
         throw new Error(
@@ -907,7 +907,11 @@ function validateFieldNames(validator: ValidatorJSON) {
         );
       }
     });
-  validator.type === "union" && validator.value.forEach(validateFieldNames);
+  }
+
+  if (validator.type === "union") {
+    validator.value.forEach(validateFieldNames);
+  }
 }
 
 function isValidIdentifier(name: string) {
@@ -1027,7 +1031,7 @@ function validateValidator(validator: ValidatorJSON, value: any) {
           validateValidator(v, value);
           isValid = true;
           break;
-        } catch (e) {
+        } catch {
           // Ignore
         }
       }
@@ -1377,7 +1381,7 @@ function asyncSyscallImpl() {
           operators: [],
         });
         let count = 0;
-        // eslint-disable-next-line no-constant-condition
+
         while (true) {
           const result = db.queryNext(queryId);
           if (result.done) {
@@ -2231,6 +2235,7 @@ async function getFunctionFromPath<T extends RegisteredFunctionKind>(
     case "any":
       break;
     default:
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw type satisfies never;
   }
   return func;
