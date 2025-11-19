@@ -347,16 +347,16 @@ class DatabaseFake {
       );
     }
 
-    const idParts = id.split(";");
-    if (idParts.length !== 2) {
+    const actualTableName = tableNameFromId(id);
+    if (actualTableName === null) {
       throw new Error(
         `Invalid argument \`id\`, expected ID value but got '${id}'`,
       );
     }
 
-    if (idParts[1] !== expectedTableName) {
+    if (actualTableName !== expectedTableName) {
       throw new Error(
-        `Invalid argument \`id\`, expected ID in table '${expectedTableName}' but got '${idParts[0]}'`,
+        `Invalid argument \`id\`, expected ID in table '${expectedTableName}' but got ID in table '${actualTableName}'`,
       );
     }
   }
