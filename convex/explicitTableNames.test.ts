@@ -13,27 +13,35 @@ describe("called with wrong table name", () => {
     const t = convexTest(schema);
     await expect(
       t.mutation(api.explicitTableNames.getWrongTable),
-    ).rejects.toThrow();
+    ).rejects.toThrowError(
+      "Invalid argument `id`, expected ID in table 'otherTable' but got ID in table 'messages'",
+    );
   });
 
   test("patch", async () => {
     const t = convexTest(schema);
     await expect(
       t.mutation(api.explicitTableNames.patchWrongTable),
-    ).rejects.toThrow();
+    ).rejects.toThrowError(
+      "Invalid argument `id`, expected ID in table 'otherTable' but got ID in table 'messages'",
+    );
   });
 
   test("delete", async () => {
     const t = convexTest(schema);
     await expect(
       t.mutation(api.explicitTableNames.deleteWrongTable),
-    ).rejects.toThrow();
+    ).rejects.toThrowError(
+      "Invalid argument `id`, expected ID in table 'otherTable' but got ID in table 'messages'",
+    );
   });
 
   test("replace", async () => {
     const t = convexTest(schema);
     await expect(
       t.mutation(api.explicitTableNames.replaceWrongTable),
-    ).rejects.toThrow();
+    ).rejects.toThrowError(
+      "Invalid argument `id`, expected ID in table 'otherTable' but got ID in table 'messages'",
+    );
   });
 });
