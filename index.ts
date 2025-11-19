@@ -169,14 +169,11 @@ class DatabaseFake {
     this._writes.push({});
   }
 
-  get(id: GenericId<string>) {
-    if (typeof id !== "string") {
-      throw new Error(
-        `Invalid argument \`id\` for \`db.get\`, expected string but got '${typeof id}': ${
-          id as any
-        }`,
-      );
-    }
+  get<Table extends TableName>(
+    tableName: Table | undefined,
+    id: GenericId<Table>,
+  ) {
+    this._validateId(tableName, id);
 
     for (let i = this._writes.length - 1; i >= 0; i--) {
       const write = this._writes[i][id];
@@ -203,7 +200,7 @@ class DatabaseFake {
   }
 
   getFile(storageId: GenericId<"_storage">) {
-    if (this.get(storageId) === null) {
+    if (this.get("_storage", storageId) === null) {
       return null;
     }
     return this._storage[storageId];
@@ -227,8 +224,20 @@ class DatabaseFake {
     return _id;
   }
 
-  patch(id: DocumentId, value: Record<string, any>) {
-    const document = this.get(id);
+  patch<Table extends TableName>(
+    tableName: Table | undefined,
+    id: GenericId<Table>,
+    value: Record<string, any>,
+  ) {
+    this._validateId(tableName, id);
+
+    if (typeof value !== "object") {
+      throw new Error(
+        `Invalid argument \`value\` in \`db.patch\`, expected object but got '${typeof value}': ${value as any}`,
+      );
+    }
+
+    const document = this.get(tableName, id);
     if (document === null) {
       throw new Error(`Patch on non-existent document with ID "${id}"`);
     }
@@ -259,8 +268,20 @@ class DatabaseFake {
     this._addWrite(id, { _id, _creationTime, ...merged });
   }
 
-  replace(id: DocumentId, value: Record<string, any>) {
-    const document = this.get(id);
+  replace<Table extends TableName>(
+    tableName: Table | undefined,
+    id: DocumentId,
+    value: Record<string, any>,
+  ) {
+    this._validateId(tableName, id);
+
+    if (typeof value !== "object") {
+      throw new Error(
+        `Invalid argument \`value\` in \`db.replace\`, expected object but got '${typeof value}': ${value as any}`,
+      );
+    }
+
+    const document = this.get(tableName, id);
     if (document === null) {
       throw new Error(`Replace on non-existent document with ID "${id}"`);
     }
@@ -293,12 +314,51 @@ class DatabaseFake {
     });
   }
 
-  delete(id: DocumentId) {
-    const document = this.get(id);
+  delete<Table extends TableName>(
+    tableName: Table | undefined,
+    id: GenericId<Table>,
+  ) {
+    this._validateId(tableName, id);
+
+    const document = this.get(tableName, id);
     if (document === null) {
       throw new Error("Delete on non-existent doc");
     }
     this._addWrite(id, null);
+  }
+
+  private _validateId(
+    expectedTableName: unknown,
+    id: unknown,
+  ): asserts id is DocumentId {
+    if (typeof id !== "string") {
+      throw new Error(
+        `Invalid argument \`id\`, expected string but got '${typeof id}': ${id as any}`,
+      );
+    }
+
+    if (expectedTableName === undefined) {
+      return;
+    }
+
+    if (typeof expectedTableName !== "string") {
+      throw new Error(
+        `Invalid argument \`tableName\`, expected string but got '${typeof expectedTableName}': ${expectedTableName as any}`,
+      );
+    }
+
+    const actualTableName = tableNameFromId(id);
+    if (actualTableName === null) {
+      throw new Error(
+        `Invalid argument \`id\`, expected ID value but got '${id}'`,
+      );
+    }
+
+    if (actualTableName !== expectedTableName) {
+      throw new Error(
+        `Invalid argument \`id\`, expected ID in table '${expectedTableName}' but got ID in table '${actualTableName}'`,
+      );
+    }
   }
 
   commit() {
@@ -411,7 +471,7 @@ class DatabaseFake {
       }
     }
     for (const id of ids) {
-      const document = this.get(id as DocumentId);
+      const document = this.get(tableName, id as DocumentId);
       if (document !== null) {
         callback(document);
       }
@@ -1055,7 +1115,8 @@ function asyncSyscallImpl() {
     const db = getDb();
     switch (op) {
       case "1.0/get": {
-        const doc = db.get(args.id);
+        const { table, id } = args;
+        const doc = db.get(table, id);
         return JSON.stringify(convexToJson(doc));
       }
       case "1.0/queryStreamNext": {
@@ -1076,18 +1137,18 @@ function asyncSyscallImpl() {
         return JSON.stringify({ _id });
       }
       case "1.0/shallowMerge": {
-        const { id, value } = args;
-        db.patch(id, value);
+        const { table, id, value } = args;
+        db.patch(table, id, value);
         return JSON.stringify({});
       }
       case "1.0/replace": {
-        const { id, value } = args;
-        db.replace(id, value);
+        const { table, id, value } = args;
+        db.replace(table, id, value);
         return JSON.stringify({});
       }
       case "1.0/remove": {
-        const { id } = args;
-        db.delete(id);
+        const { table, id } = args;
+        db.delete(table, id);
         return JSON.stringify({});
       }
       case "1.0/actions/query": {
@@ -1200,7 +1261,10 @@ function asyncSyscallImpl() {
             const canceled = await withAuth().runInComponent(
               componentPath,
               async () => {
-                const job = db.get(jobId) as ScheduledFunction;
+                const job = db.get(
+                  "_scheduled_functions",
+                  jobId,
+                ) as ScheduledFunction;
                 if (job.state.kind === "canceled") {
                   return true;
                 }
@@ -1209,7 +1273,9 @@ function asyncSyscallImpl() {
                     `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
                   );
                 }
-                db.patch(jobId, { state: { kind: "inProgress" } });
+                db.patch("_scheduled_functions", jobId, {
+                  state: { kind: "inProgress" },
+                });
                 return false;
               },
             );
@@ -1224,7 +1290,7 @@ function asyncSyscallImpl() {
                 error,
               );
               await withAuth().runInComponent(componentPath, async () => {
-                db.patch(jobId, {
+                db.patch("_scheduled_functions", jobId, {
                   state: { kind: "failed" },
                   completedTime: Date.now(),
                 });
@@ -1233,13 +1299,18 @@ function asyncSyscallImpl() {
               return;
             }
             await withAuth().runInComponent(componentPath, async () => {
-              const job = db.get(jobId) as ScheduledFunction;
+              const job = db.get(
+                "_scheduled_functions",
+                jobId,
+              ) as ScheduledFunction;
               if (job.state.kind !== "inProgress") {
                 throw new Error(
                   `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
                 );
               }
-              db.patch(jobId, { state: { kind: "success" } });
+              db.patch("_scheduled_functions", jobId, {
+                state: { kind: "success" },
+              });
             });
             db.jobFinished(jobId);
           }) as () => void,
@@ -1269,19 +1340,19 @@ function asyncSyscallImpl() {
       }
       case "1.0/cancel_job": {
         const { id } = args;
-        db.patch(id, { state: { kind: "canceled" } });
+        db.patch("_scheduled_functions", id, { state: { kind: "canceled" } });
         return JSON.stringify({});
       }
       case "1.0/storageDelete": {
         const { storageId } = args;
         await writeToDatabase(async (db) => {
-          db.delete(storageId);
+          db.delete("_storage", storageId);
         });
         return JSON.stringify({});
       }
       case "1.0/storageGetUrl": {
         const { storageId } = args;
-        const metadata = db.get(storageId);
+        const metadata = db.get("_storage", storageId);
         if (metadata === null) {
           return JSON.stringify(null);
         }
