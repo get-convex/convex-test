@@ -200,7 +200,7 @@ class DatabaseFake {
   }
 
   getFile(storageId: GenericId<"_storage">) {
-    if (this.get(undefined, storageId) === null) {
+    if (this.get("_storage", storageId) === null) {
       return null;
     }
     return this._storage[storageId];
