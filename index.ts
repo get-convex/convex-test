@@ -18,7 +18,6 @@ import {
   RegisteredMutation,
   RegisteredQuery,
   SchemaDefinition,
-  StorageActionWriter,
   SystemDataModel,
   UserIdentity,
   actionGeneric,
