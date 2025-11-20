@@ -1977,15 +1977,15 @@ function withAuth(auth: AuthFake = new AuthFake()) {
   ): Promise<T> => {
     // Grab StorageActionWriter from action ctx
     const a = actionGeneric({
-      handler: async ({
-        storage,
-        runAction,
-        vectorSearch,
-      }: GenericActionCtx<any>) => {
+      handler: async (ctx: GenericActionCtx<any>) => {
         return await runTransaction(
           handler,
           {},
-          { storage, runAction, vectorSearch },
+          {
+            storage: ctx.storage,
+            runAction: ctx.runAction.bind(ctx),
+            vectorSearch: ctx.vectorSearch.bind(ctx),
+          },
           // Fake mutation path.
           {
             componentPath,
