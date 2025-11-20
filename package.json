@@ -1,6 +1,6 @@
 {
   "name": "convex-test",
-  "version": "0.0.38",
+  "version": "0.0.39",
   "description": "A JS mock of the Convex backend for testing your Convex functions.",
   "keywords": [
     "test",
@@ -22,13 +22,14 @@
     "format": "prettier --write .",
     "prebuild": "npm run lint && npm run test:once",
     "build": "tsc && replace-in-file '\"./convex/**/*.*s\"' '\"../../../convex/**/*.*s\"' ./dist/index.js",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0 && prettier --check .",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0 && prettier --check .",
     "test": "vitest",
     "test:once": "vitest run",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:coverage": "vitest run --coverage",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "prepack": "node scripts/dont-publish-alpha-as-latest.mjs"
   },
   "author": "Sarah Shader & Michal Srb <srb@convex.dev>",
   "license": "Apache-2.0",
@@ -37,11 +38,15 @@
   },
   "devDependencies": {
     "@edge-runtime/vm": "^3.2.0",
+    "@eslint/eslintrc": "^3.3.1",
+    "@eslint/js": "^9.39.1",
     "@types/node": "^20.12.11",
-    "@typescript-eslint/eslint-plugin": "^6.7.0",
-    "@typescript-eslint/parser": "^6.7.0",
+    "@typescript-eslint/eslint-plugin": "^8.47.0",
+    "@typescript-eslint/parser": "^8.47.0",
     "@vitest/coverage-v8": "^1.6.0",
-    "eslint": "^8.49.0",
+    "convex": "^1.29.2",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
     "pkg-pr-new": "^0.0.54",
     "replace-in-file": "^7.1.0",
     "typescript": "^5.4.3",
