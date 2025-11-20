@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import {
   action,
+  ActionCtx,
   internalAction,
   internalQuery,
   mutation,
@@ -51,17 +52,21 @@ export const actionCallingMutation = action({
 
 export const actionCallingAction = internalAction({
   args: { count: v.number() },
-  handler: async (ctx, { count }) => {
-    if (count > 0) {
-      const result: { called: number } = await ctx.runAction(
-        internal.actions.actionCallingAction,
-        { count: count - 1 },
-      );
-      return { called: result.called + 1 };
-    }
-    return { called: 0 };
-  },
+  handler: actionCallingActionHandler,
 });
+export async function actionCallingActionHandler(
+  ctx: ActionCtx,
+  { count }: { count: number },
+) {
+  if (count > 0) {
+    const result: { called: number } = await ctx.runAction(
+      internal.actions.actionCallingAction,
+      { count: count - 1 },
+    );
+    return { called: result.called + 1 };
+  }
+  return { called: 0 };
+}
 
 /// actions calling mutations concurrently
 

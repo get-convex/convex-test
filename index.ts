@@ -1446,14 +1446,19 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    * Read from and write to the mock backend.
    *
    * @param func The async function that reads or writes to the mock backend.
-   *   It receives a {@link GenericMutationCtx} as its first argument, enriched
-   *   with the `storage` API available in actions, so it can read and write
-   *   directly to file storage.
+   *   It receives a ctx as its first argument that conforms to both
+   *   {@link GenericMutationCtx} and {@link GenericActionCtx},
+   *   so it can be passed to functions that expect either context, use file
+   *   storage, etc.
    * @returns A `Promise` of the function's result.
    */
   run: <Output>(
     func: (
-      ctx: GenericMutationCtx<DataModel> & { storage: StorageActionWriter },
+      ctx: GenericMutationCtx<DataModel> &
+        Pick<
+          GenericActionCtx<DataModel>,
+          "storage" | "runAction" | "vectorSearch"
+        >,
     ) => Promise<Output>,
   ) => Promise<Output>;
 
@@ -1898,11 +1903,15 @@ function withAuth(auth: AuthFake = new AuthFake()) {
   ): Promise<T> => {
     // Grab StorageActionWriter from action ctx
     const a = actionGeneric({
-      handler: async ({ storage }: any) => {
+      handler: async ({
+        storage,
+        runAction,
+        vectorSearch,
+      }: GenericActionCtx<any>) => {
         return await runTransaction(
           handler,
           {},
-          { storage },
+          { storage, runAction, vectorSearch },
           // Fake mutation path.
           {
             componentPath,

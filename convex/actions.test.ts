@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { convexTest } from "../index";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
+import { actionCallingActionHandler } from "./actions";
 
 test("action calling query", async () => {
   const t = convexTest(schema);
@@ -25,6 +26,16 @@ test("action calling action", async () => {
     count: 2,
   });
   expect(result.called).toEqual(2);
+});
+
+test("calling action from t.run()", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    const result = await actionCallingActionHandler(ctx, {
+      count: 2,
+    });
+    expect(result.called).toEqual(2);
+  });
 });
 
 test("action calling mutations concurrently", async () => {
