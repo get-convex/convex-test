@@ -22,5 +22,5 @@ alpha:
 npm run alpha
 ```
 
-To publish a major or minor release, modify the release script to use either
+To publish a major or minor release, look at the release script and use either
 `npm version major` or `npm version minor` instead of `npm version patch`.
