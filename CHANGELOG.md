@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.0.40 alpha
+## 0.0.40
 
 - Extends ctx in t.run to conform to both MutationCtx and ActionCtx.
 
