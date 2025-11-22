@@ -31,7 +31,7 @@
     "alpha": "npm version prerelease --preid alpha && npm publish --tag alpha && git push --tags",
     "release": "npm version patch && npm publish && git push --tags",
     "preversion": "npm run clean && npm ci && npm run test:once && npm run lint && npm run build",
-    "version": "pbcopy <<<$npm_package_version; vim CHANGELOG.md && prettier -w CHANGELOG.md && git add CHANGELOG.md",
+    "version": "vim -c 'normal o' -c 'normal o## '$npm_package_version CHANGELOG.md && prettier -w CHANGELOG.md && git add CHANGELOG.md",
     "prepublishOnly": "npm run build",
     "prepack": "node scripts/dont-publish-alpha-as-latest.mjs"
   },
