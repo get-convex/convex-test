@@ -1446,29 +1446,37 @@ async function blobSha(blob: Blob) {
 
 async function waitForInProgressScheduledFunctions(): Promise<boolean> {
   let hadScheduledFunctions = false;
-  for (const componentPath of Object.keys(getConvexGlobal().components)) {
-    const inProgressJobs = (await withAuth().runInComponent(
-      componentPath,
-      async (ctx) => {
-        return (
-          await ctx.db.system.query("_scheduled_functions").collect()
-        ).filter((job: ScheduledFunction) => job.state.kind === "inProgress");
-      },
-    )) as ScheduledFunction[];
-    let numRemaining = inProgressJobs.length;
-    if (numRemaining === 0) {
-      continue;
-    }
-    hadScheduledFunctions = true;
 
-    await new Promise<void>((resolve) => {
-      getDbForComponent(componentPath).jobListener = () => {
-        numRemaining -= 1;
-        if (numRemaining === 0) {
-          resolve();
-        }
-      };
-    });
+  while (true) {
+    let anyComponentsHadScheduledFunctions = false;
+    for (const componentPath of Object.keys(getConvexGlobal().components)) {
+      const inProgressJobs = (await withAuth().runInComponent(
+        componentPath,
+        async (ctx) => {
+          return (
+            await ctx.db.system.query("_scheduled_functions").collect()
+          ).filter((job: ScheduledFunction) => job.state.kind === "inProgress");
+        },
+      )) as ScheduledFunction[];
+      let numRemaining = inProgressJobs.length;
+      if (numRemaining === 0) {
+        continue;
+      }
+      hadScheduledFunctions = true;
+      anyComponentsHadScheduledFunctions = true;
+
+      await new Promise<void>((resolve) => {
+        getDbForComponent(componentPath).jobListener = () => {
+          numRemaining -= 1;
+          if (numRemaining === 0) {
+            resolve();
+          }
+        };
+      });
+    }
+    if (!anyComponentsHadScheduledFunctions) {
+      break;
+    }
   }
   return hadScheduledFunctions;
 }
