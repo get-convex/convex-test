@@ -14,6 +14,22 @@ function testWithCounter() {
   return t;
 }
 
+test("direct call", async () => {
+  const t = testWithCounter();
+  await t.mutation(components.counter.public.add, {
+    name: "beans",
+    count: 3,
+  });
+  const count = await t.query(components.counter.public.count, {
+    name: "beans",
+  });
+  expect(count).toEqual(3);
+  const counts = await t.action(components.counter.public.countMany, {
+    names: ["beans", "pennies"],
+  });
+  expect(counts).toEqual([3, 0]);
+});
+
 test("generated attributes", async () => {
   const t = testWithCounter();
   const x = await t.action(internal.component.directCall);
