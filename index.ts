@@ -1217,6 +1217,14 @@ function asyncSyscallImpl() {
             ),
           );
         }
+        if (udfType === "action") {
+          throw new Error("here");
+          return JSON.stringify(
+            convexToJson(
+              await withAuth().actionFromPath(functionPath, udfArgs),
+            ),
+          );
+        }
         throw new Error(
           `\`convexTest\` does not support udf type: "${udfType}"`,
         );
