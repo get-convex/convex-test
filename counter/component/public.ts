@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { action, mutation, query } from "./_generated/server";
 import { api } from "./_generated/api";
 
 export const add = mutation({
@@ -38,6 +38,18 @@ export const count = query({
       .withIndex("name", (q) => q.eq("name", args.name))
       .collect();
     return counters.reduce((sum, counter) => sum + counter.value, 0);
+  },
+});
+
+export const countMany = action({
+  args: { names: v.array(v.string()) },
+  returns: v.array(v.number()),
+  handler: async (ctx, args): Promise<number[]> => {
+    return await Promise.all(
+      args.names.map(async (name) => {
+        return await ctx.runQuery(api.public.count, { name });
+      }),
+    );
   },
 });
 

@@ -3,7 +3,7 @@
 import { expect, test, vi } from "vitest";
 import { convexTest } from "../index";
 import schema from "./schema";
-import { internal } from "./_generated/api";
+import { components, internal } from "./_generated/api";
 import counterSchema from "../counter/component/schema";
 
 const counterModules = import.meta.glob("../counter/component/**/*.ts");
@@ -16,7 +16,7 @@ function testWithCounter() {
 
 test("generated attributes", async () => {
   const t = testWithCounter();
-  const x = await t.mutation(internal.component.directCall);
+  const x = await t.action(internal.component.directCall);
   // const x = await t.query(internal.components.directCall2);
   expect(x).toEqual(3);
 });

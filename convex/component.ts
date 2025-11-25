@@ -1,9 +1,13 @@
-import { internalMutation, internalQuery } from "./_generated/server";
+import {
+  internalAction,
+  internalMutation,
+  internalQuery,
+} from "./_generated/server";
 import { components } from "./_generated/api";
 import { createFunctionHandle } from "convex/server";
 import { v } from "convex/values";
 
-export const directCall = internalMutation({
+export const directCall = internalAction({
   args: {},
   handler: async (ctx, _args) => {
     await ctx.runMutation(components.counter.public.add, {
@@ -14,6 +18,9 @@ export const directCall = internalMutation({
       name: "beans",
       count: 3,
       shards: 100,
+    });
+    await ctx.runAction(components.counter.public.countMany, {
+      names: ["beans", "pennies"],
     });
     const count = await ctx.runQuery(components.counter.public.count, {
       name: "beans",
