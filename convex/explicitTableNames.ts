@@ -8,17 +8,20 @@ export const correctUsage = mutation({
       body: "Hello world",
     });
 
+    // @ts-expect-error -- Upcoming API syntax
     await ctx.db.get("messages", docId);
 
+    // @ts-expect-error -- Upcoming API syntax
     await ctx.db.patch("messages", docId, {
       body: "Hello, world!",
     });
-
+    // @ts-expect-error -- Upcoming API syntax
     await ctx.db.replace("messages", docId, {
       author: "Nicolas Ettlin",
       body: "Replaced task",
     });
 
+    // @ts-expect-error -- Upcoming API syntax
     await ctx.db.delete("messages", docId);
   },
 });
@@ -32,8 +35,8 @@ export const getWrongTable = mutation({
     });
 
     await ctx.db.get(
-      // @ts-expect-error -- Wrong table
       "otherTable",
+      // @ts-expect-error -- Wrong table
       docId,
     );
   },
@@ -48,9 +51,9 @@ export const patchWrongTable = mutation({
     });
 
     await ctx.db.patch(
-      // @ts-expect-error -- Wrong table
       "otherTable",
       docId,
+      // @ts-expect-error -- Wrong table
       {},
     );
   },
@@ -65,9 +68,9 @@ export const replaceWrongTable = mutation({
     });
 
     await ctx.db.replace(
-      // @ts-expect-error -- Wrong table
       "otherTable",
       docId,
+      // @ts-expect-error -- Wrong table
       {
         author: "Nicolas Ettlin",
         body: "Replaced task",
@@ -85,8 +88,8 @@ export const deleteWrongTable = mutation({
     });
 
     await ctx.db.delete(
-      // @ts-expect-error -- Wrong table
       "otherTable",
+      // @ts-expect-error -- Wrong table
       docId,
     );
   },
