@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.41
+
+- Removes ActionCtx support for now. Calling component actions was not working correctly.
+
 ## 0.0.40
 
 - Extends ctx in t.run to conform to both MutationCtx and ActionCtx.
