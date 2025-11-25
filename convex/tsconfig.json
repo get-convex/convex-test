@@ -19,6 +19,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["./**/*", "../counter/component/**/*"],
-  "exclude": ["./_generated", "../counter/component/_generated"]
+  "include": ["./**/*"],
+  "exclude": ["./_generated", "./counter/component/_generated"]
 }
