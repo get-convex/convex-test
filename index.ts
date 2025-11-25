@@ -1520,8 +1520,8 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    * Read from and write to the mock backend.
    *
    * @param func The async function that reads or writes to the mock backend.
-   *   It receives a ctx as its first argument that conforms to both
-   *   {@link GenericMutationCtx} and {@link GenericActionCtx},
+   *   It receives a ctx as its first argument that conforms to
+   *   {@link GenericMutationCtx},
    *   so it can be passed to functions that expect either context, use file
    *   storage, etc.
    * @returns A `Promise` of the function's result.
@@ -1531,7 +1531,10 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
       ctx: GenericMutationCtx<DataModel> &
         Pick<
           GenericActionCtx<DataModel>,
-          "storage" | "runAction" | "vectorSearch"
+          "storage"
+          // ActionCtx support was added in 0.0.40, removed in 0.0.41, should be added back in the future.
+          // | "runAction"
+          // | "vectorSearch"
         >,
     ) => Promise<Output>,
   ) => Promise<Output>;
@@ -1983,8 +1986,9 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           {},
           {
             storage: ctx.storage,
-            runAction: ctx.runAction.bind(ctx),
-            vectorSearch: ctx.vectorSearch.bind(ctx),
+            // ActionCtx support was added in 0.0.40, removed in 0.0.41, should be added back in the future.
+            // runAction: ctx.runAction.bind(ctx),
+            // vectorSearch: ctx.vectorSearch.bind(ctx),
           },
           // Fake mutation path.
           {
