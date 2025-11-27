@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { convexTest } from "../index";
 import { api, internal, components } from "./_generated/api";
 import schema from "./schema";
-import counterSchema from "../counter/component/schema";
+import counterSchema from "../counter/component/schema.ts";
 import type { GenericDataModel, GenericMutationCtx } from "convex/server";
 
 const counterModules = import.meta.glob("../counter/component/**/*.ts");
