@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import { expect, test } from "vitest";
 import { convexTest } from "../index";
 import { api, internal, components } from "./_generated/api";
