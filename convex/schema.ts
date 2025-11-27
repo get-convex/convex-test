@@ -9,6 +9,7 @@ export default defineSchema({
     score: v.optional(v.number()),
   })
     .index("author", ["author"])
+    .index("author_body", ["author", "body"])
     .searchIndex("body", {
       searchField: "body",
       filterFields: ["author"],
