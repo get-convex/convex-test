@@ -1159,7 +1159,10 @@ function asyncSyscallImpl() {
         const { name, args: queryArgs } = args;
         return JSON.stringify(
           convexToJson(
-            await withAuth().query(makeFunctionReference(name), queryArgs),
+            (await withAuth().query(
+              makeFunctionReference(name),
+              queryArgs,
+            )) as Value,
           ),
         );
       }
@@ -1178,7 +1181,10 @@ function asyncSyscallImpl() {
         const { name, args: actionArgs } = args;
         return JSON.stringify(
           convexToJson(
-            await withAuth().action(makeFunctionReference(name), actionArgs),
+            (await withAuth().action(
+              makeFunctionReference(name),
+              actionArgs,
+            )) as Value,
           ),
         );
       }
