@@ -2,9 +2,9 @@ import { expect, test } from "vitest";
 import { convexTest } from "../index";
 import { api } from "./_generated/api";
 import schema from "./schema";
-import counterSchema from "../counter/component/schema";
+import counterSchema from "./counter/component/schema";
 
-const counterModules = import.meta.glob("../counter/component/**/*.ts");
+const counterModules = import.meta.glob("./counter/component/**/*.ts");
 
 test("query arguments validation", async () => {
   const t = convexTest(schema);

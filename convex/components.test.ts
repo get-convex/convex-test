@@ -4,9 +4,9 @@ import { expect, test, vi } from "vitest";
 import { convexTest } from "../index";
 import schema from "./schema";
 import { components, internal } from "./_generated/api";
-import counterSchema from "../counter/component/schema";
+import counterSchema from "./counter/component/schema";
 
-const counterModules = import.meta.glob("../counter/component/**/*.ts");
+const counterModules = import.meta.glob("./counter/component/**/*.ts");
 
 function testWithCounter() {
   const t = convexTest(schema);

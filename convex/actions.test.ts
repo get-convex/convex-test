@@ -28,9 +28,10 @@ test("action calling action", async () => {
   expect(result.called).toEqual(2);
 });
 
-test("calling action from t.run()", async () => {
+test.skip("calling action from t.run()", async () => {
   const t = convexTest(schema);
   await t.run(async (ctx) => {
+    // @ts-expect-error -- ActionCtx support was added in 0.0.40, removed in 0.0.41, should be added back in the future.
     const result = await actionCallingActionHandler(ctx, {
       count: 2,
     });
