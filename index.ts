@@ -1218,7 +1218,6 @@ function asyncSyscallImpl() {
           );
         }
         if (udfType === "action") {
-          throw new Error("here");
           return JSON.stringify(
             convexToJson(
               await withAuth().actionFromPath(functionPath, udfArgs),
@@ -1960,6 +1959,8 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     },
   };
 
+  // Top-level adapters that always use isNested=false.
+  // Used for t.query, t.mutation, t.action, scheduled functions (fun), fetch, etc.
   const byType = {
     query: async (functionReference: any, args: any) => {
       const functionPath =
@@ -1987,6 +1988,72 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       return await byTypeWithPath.actionFromPath(functionPath, args);
     },
   };
+
+  // Nested adapters that always use isNested=true.
+  // Used inside t.run so that ctx.runQuery/runMutation/runAction
+  // share the transaction context and don't deadlock.
+  // We need to define nestedActionFromPath first, then nestedByType,
+  // because nestedByType.action calls nestedActionFromPath.
+  const nestedActionFromPath = async (
+    functionPath: FunctionPath,
+    args: any,
+  ) => {
+    const func = await getFunctionFromPath(functionPath, "action");
+    validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
+
+    const a = actionGeneric({
+      handler: (ctx: any, a: any) => {
+        const testCtx = {
+          ...ctx,
+          // Use nestedByType so any further calls stay in the nested world
+          runQuery: nestedByType.query,
+          runMutation: nestedByType.mutation,
+          runAction: nestedByType.action,
+          auth,
+        };
+        return getHandler(func)(testCtx, a);
+      },
+    });
+    getTransactionManager().beginAction(functionPath);
+    // Real backend uses different ID format
+    const requestId = "" + Math.random();
+    const rawResult = await (
+      a as unknown as {
+        invokeAction: (requestId: string, args: string) => Promise<string>;
+      }
+    ).invokeAction(requestId, JSON.stringify(convexToJson([parseArgs(args)])));
+    getTransactionManager().finishAction();
+    return jsonToConvex(JSON.parse(rawResult));
+  };
+
+  const nestedByType = {
+    query: async (functionReference: any, args: any) => {
+      const functionPath =
+        await getFunctionPathFromReference(functionReference);
+      return await byTypeWithPath.queryFromPath(
+        functionPath,
+        /* isNested */ true,
+        args,
+      );
+    },
+
+    mutation: async (functionReference: any, args: any): Promise<Value> => {
+      const functionPath =
+        await getFunctionPathFromReference(functionReference);
+      return await byTypeWithPath.mutationFromPath(
+        functionPath,
+        /* isNested */ true,
+        args,
+      );
+    },
+
+    action: async (functionReference: any, args: any) => {
+      const functionPath =
+        await getFunctionPathFromReference(functionReference);
+      return await nestedActionFromPath(functionPath, args);
+    },
+  };
+
   const run = async <T>(
     componentPath: string,
     handler: (ctx: any) => T,
@@ -1999,7 +2066,11 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           {},
           {
             storage: ctx.storage,
-            runAction: ctx.runAction.bind(ctx),
+            // Wire runQuery/runMutation/runAction to nested adapters
+            // that use isNested=true to share the transaction context
+            runQuery: nestedByType.query,
+            runMutation: nestedByType.mutation,
+            runAction: nestedByType.action,
             vectorSearch: ctx.vectorSearch.bind(ctx),
           },
           // Fake mutation path.
