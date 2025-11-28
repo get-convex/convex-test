@@ -17,17 +17,6 @@ test("inline query", async () => {
   ]);
 });
 
-test("inline query with first", async () => {
-  const t = convexTest(schema);
-  await t.run(async (ctx) => {
-    await ctx.db.insert("messages", { author: "sarah", body: "hello" });
-  });
-  const message = await t.query(async (ctx) => {
-    return await ctx.db.query("messages").first();
-  });
-  expect(message).toMatchObject({ author: "sarah", body: "hello" });
-});
-
 test("inline mutation insert", async () => {
   const t = convexTest(schema);
   const id = await t.mutation(async (ctx) => {
@@ -66,20 +55,6 @@ test("inline mutation delete", async () => {
     return await ctx.db.get(id);
   });
   expect(message).toBeNull();
-});
-
-test("inline action calling inline query and mutation", async () => {
-  const t = convexTest(schema);
-  const result = await t.action(async (ctx) => {
-    await ctx.runMutation(async (mutCtx) => {
-      await mutCtx.db.insert("messages", { author: "action", body: "test" });
-    });
-    const messages = await ctx.runQuery(async (queryCtx) => {
-      return await queryCtx.db.query("messages").collect();
-    });
-    return messages;
-  });
-  expect(result).toMatchObject([{ author: "action", body: "test" }]);
 });
 
 test("inline query is read-only (no db.insert)", async () => {

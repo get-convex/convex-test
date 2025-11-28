@@ -1944,13 +1944,28 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       const func = await getFunctionFromPath(functionPath, "action");
       validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
 
+      // Reference-only ctx.runQuery/runMutation/runAction that call byTypeWithPath directly
+      // These do NOT support inline functions, matching real Convex behavior
+      const ctxRunQuery = async (functionReference: any, queryArgs: any) => {
+        const refPath = await getFunctionPathFromReference(functionReference);
+        return await byTypeWithPath.queryFromPath(refPath, false, queryArgs);
+      };
+      const ctxRunMutation = async (functionReference: any, mutArgs: any) => {
+        const refPath = await getFunctionPathFromReference(functionReference);
+        return await byTypeWithPath.mutationFromPath(refPath, false, mutArgs);
+      };
+      const ctxRunAction = async (functionReference: any, actArgs: any) => {
+        const refPath = await getFunctionPathFromReference(functionReference);
+        return await byTypeWithPath.actionFromPath(refPath, actArgs);
+      };
+
       const a = actionGeneric({
         handler: (ctx: any, a: any) => {
           const testCtx = {
             ...ctx,
-            runQuery: byType.query,
-            runMutation: byType.mutation,
-            runAction: byType.action,
+            runQuery: ctxRunQuery,
+            runMutation: ctxRunMutation,
+            runAction: ctxRunAction,
             auth,
           };
           return getHandler(func)(testCtx, a);
@@ -1972,9 +1987,12 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     },
   };
 
-  const runInlineQuery = async <T>(
-    componentPath: string,
+  // Helper to run a query with a given handler (shared by queryFromPath and inline queries)
+  const runQueryWithHandler = async <T>(
     handler: (ctx: any) => T,
+    functionPath: FunctionPath,
+    args: any,
+    isNested: boolean,
   ): Promise<T> => {
     const q = queryGeneric({
       handler: (ctx: any) => {
@@ -1983,16 +2001,64 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       },
     });
     const transactionManager = getTransactionManager();
-    const functionPath = { componentPath, udfPath: "inline" };
-    await transactionManager.begin(functionPath, false);
+    await transactionManager.begin(functionPath, isNested);
     try {
       const rawResult = await (
         q as unknown as { invokeQuery: (args: string) => Promise<string> }
-      ).invokeQuery(JSON.stringify(convexToJson([{}])));
+      ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
       return jsonToConvex(JSON.parse(rawResult)) as T;
     } finally {
-      transactionManager.rollback(false);
+      transactionManager.rollback(isNested);
     }
+  };
+
+  // Helper to run an action with a given handler (shared by actionFromPath and inline actions)
+  const runActionWithHandler = async <T>(
+    handler: (ctx: any) => T,
+    functionPath: FunctionPath,
+    args: any,
+    ctxRunQuery: any,
+    ctxRunMutation: any,
+    ctxRunAction: any,
+  ): Promise<T> => {
+    const a = actionGeneric({
+      handler: (ctx: any) => {
+        const testCtx = {
+          ...ctx,
+          runQuery: ctxRunQuery,
+          runMutation: ctxRunMutation,
+          runAction: ctxRunAction,
+          auth,
+        };
+        return handler(testCtx);
+      },
+    });
+    getTransactionManager().beginAction(functionPath);
+    const requestId = "" + Math.random();
+    const rawResult = await (
+      a as unknown as {
+        invokeAction: (requestId: string, args: string) => Promise<string>;
+      }
+    ).invokeAction(requestId, JSON.stringify(convexToJson([parseArgs(args)])));
+    getTransactionManager().finishAction();
+    return jsonToConvex(JSON.parse(rawResult)) as T;
+  };
+
+  // Reference-only versions for ctx.runQuery/runMutation/runAction inside actions
+  // These do NOT support inline functions, matching real Convex behavior
+  const refOnlyQuery = async (functionReference: any, args: any) => {
+    const functionPath = await getFunctionPathFromReference(functionReference);
+    return await byTypeWithPath.queryFromPath(functionPath, false, args);
+  };
+
+  const refOnlyMutation = async (functionReference: any, args: any) => {
+    const functionPath = await getFunctionPathFromReference(functionReference);
+    return await byTypeWithPath.mutationFromPath(functionPath, false, args);
+  };
+
+  const refOnlyAction = async (functionReference: any, args: any) => {
+    const functionPath = await getFunctionPathFromReference(functionReference);
+    return await byTypeWithPath.actionFromPath(functionPath, args);
   };
 
   const runInlineMutation = async <T>(
@@ -2008,40 +2074,15 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     );
   };
 
-  const runInlineAction = async <T>(
-    componentPath: string,
-    handler: (ctx: any) => T,
-  ): Promise<T> => {
-    const a = actionGeneric({
-      handler: (ctx: any) => {
-        const testCtx = {
-          ...ctx,
-          runQuery: byType.query,
-          runMutation: byType.mutation,
-          runAction: byType.action,
-          auth,
-        };
-        return handler(testCtx);
-      },
-    });
-    const functionPath = { componentPath, udfPath: "inline" };
-    getTransactionManager().beginAction(functionPath);
-    const requestId = "" + Math.random();
-    const rawResult = await (
-      a as unknown as {
-        invokeAction: (requestId: string, args: string) => Promise<string>;
-      }
-    ).invokeAction(requestId, JSON.stringify(convexToJson([{}])));
-    getTransactionManager().finishAction();
-    return jsonToConvex(JSON.parse(rawResult)) as T;
-  };
-
   const byType = {
     query: async (functionReferenceOrHandler: any, args?: any) => {
       if (typeof functionReferenceOrHandler === "function") {
-        return await runInlineQuery(
-          getCurrentComponentPath(),
+        // Inline query handler
+        return await runQueryWithHandler(
           functionReferenceOrHandler,
+          { componentPath: getCurrentComponentPath(), udfPath: "inline" },
+          {},
+          false,
         );
       }
       const functionPath = await getFunctionPathFromReference(
@@ -2076,9 +2117,15 @@ function withAuth(auth: AuthFake = new AuthFake()) {
 
     action: async (functionReferenceOrHandler: any, args?: any) => {
       if (typeof functionReferenceOrHandler === "function") {
-        return await runInlineAction(
-          getCurrentComponentPath(),
+        // Inline action handler - use refOnly* for ctx.runQuery/runMutation/runAction
+        // to match real Convex behavior (no inline support inside actions)
+        return await runActionWithHandler(
           functionReferenceOrHandler,
+          { componentPath: getCurrentComponentPath(), udfPath: "inline" },
+          {},
+          refOnlyQuery,
+          refOnlyMutation,
+          refOnlyAction,
         );
       }
       const functionPath = await getFunctionPathFromReference(
