@@ -5,13 +5,8 @@ import { convexTest } from "../index";
 import { api, internal, components } from "./_generated/api";
 import schema from "./schema";
 import type { GenericDataModel, GenericMutationCtx } from "convex/server";
+import counterSchema from "../counter/component/schema.ts";
 
-const counterSchemaModules = import.meta.glob("../counter/component/**/*.ts", {
-  eager: true,
-});
-const counterSchema = (
-  counterSchemaModules["../counter/component/schema.ts"] as any
-).default;
 const counterModules = import.meta.glob("../counter/component/**/*.ts");
 
 test("t.ctx.runQuery can call queries", async () => {
