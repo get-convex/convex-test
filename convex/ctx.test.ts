@@ -2,7 +2,7 @@
 
 import { expect, test } from "vitest";
 import { convexTest } from "../index";
-import { api, internal, components } from "./_generated/api.js";
+import { api, internal, components } from "./_generated/api";
 import schema from "./schema";
 import type { GenericDataModel, GenericMutationCtx } from "convex/server";
 import counterSchema from "../counter/component/schema";
