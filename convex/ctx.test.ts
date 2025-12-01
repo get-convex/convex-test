@@ -9,8 +9,9 @@ import type { GenericDataModel, GenericMutationCtx } from "convex/server";
 const counterSchemaModule = import.meta.glob("../counter/component/schema.ts", {
   eager: true,
 });
+const counterSchemaKey = Object.keys(counterSchemaModule)[0];
 const counterSchema = (
-  counterSchemaModule["../counter/component/schema.ts"] as {
+  counterSchemaModule[counterSchemaKey] as {
     default: unknown;
   }
 ).default;
