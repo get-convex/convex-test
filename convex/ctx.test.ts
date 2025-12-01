@@ -2,10 +2,9 @@
 
 import { expect, test } from "vitest";
 import { convexTest } from "../index";
-import { api, internal, components } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import schema from "./schema";
 import type { GenericDataModel, GenericMutationCtx } from "convex/server";
-import counterSchema from "../counter/component/schema";
 
 const counterModules = import.meta.glob("../counter/component/**/*.ts");
 
@@ -80,7 +79,7 @@ test("t.ctx works with multiple function calls", async () => {
 
 async function counterHelperFunction(
   ctx: Pick<GenericMutationCtx<GenericDataModel>, "runMutation" | "runQuery">,
-  component: typeof components.counter,
+  component: any,
 ) {
   await ctx.runMutation(component.public.add, {
     name: "beans",
@@ -93,6 +92,11 @@ async function counterHelperFunction(
 }
 
 test("t.ctx can be passed to helper functions with components", async () => {
+  const { default: counterSchema } = await import(
+    "../counter/component/schema"
+  );
+  const { components } = await import("./_generated/api");
+
   const t = convexTest(schema);
   t.registerComponent("counter", counterSchema, counterModules);
 
@@ -101,12 +105,17 @@ test("t.ctx can be passed to helper functions with components", async () => {
 });
 
 test("t.ctx works with component helper functions and multiple calls", async () => {
+  const { default: counterSchema } = await import(
+    "../counter/component/schema"
+  );
+  const { components } = await import("./_generated/api");
+
   const t = convexTest(schema);
   t.registerComponent("counter", counterSchema, counterModules);
 
   async function multiCallHelper(
     ctx: Pick<GenericMutationCtx<GenericDataModel>, "runMutation" | "runQuery">,
-    component: typeof components.counter,
+    component: any,
   ) {
     await ctx.runMutation(component.public.add, {
       name: "pennies",
@@ -128,6 +137,11 @@ test("t.ctx works with component helper functions and multiple calls", async () 
 });
 
 test("t.ctx can call component functions directly", async () => {
+  const { default: counterSchema } = await import(
+    "../counter/component/schema"
+  );
+  const { components } = await import("./_generated/api");
+
   const t = convexTest(schema);
   t.registerComponent("counter", counterSchema, counterModules);
 
