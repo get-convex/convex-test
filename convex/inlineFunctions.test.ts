@@ -149,7 +149,10 @@ test("inline action calling function reference via ctx.runQuery", async () => {
 test("inline action calling function reference via ctx.runMutation", async () => {
   const t = convexTest(schema);
   await t.action(async (ctx) => {
-    await ctx.runMutation(api.mutations.insert, { author: "action", body: "test" });
+    await ctx.runMutation(api.mutations.insert, {
+      author: "action",
+      body: "test",
+    });
   });
   const messages = await t.query(async (ctx) => {
     return await ctx.db.query("messages").collect();
