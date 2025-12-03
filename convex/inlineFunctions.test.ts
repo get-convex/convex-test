@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { convexTest } from "../index";
+import { api } from "./_generated/api";
 import schema from "./schema";
 
 test("inline query", async () => {
@@ -115,4 +116,53 @@ test("inline mutation returns inserted id", async () => {
   });
   expect(typeof id).toBe("string");
   expect(id).toContain("messages");
+});
+
+test("inline action basic", async () => {
+  const t = convexTest(schema);
+  const result = await t.action(async () => {
+    return "hello from action";
+  });
+  expect(result).toBe("hello from action");
+});
+
+test("inline action with return value", async () => {
+  const t = convexTest(schema);
+  const result = await t.action(async () => {
+    return { count: 42, message: "success" };
+  });
+  expect(result).toEqual({ count: 42, message: "success" });
+});
+
+test("inline action calling function reference via ctx.runQuery", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello" });
+  });
+  const result = await t.action(async (ctx) => {
+    const messages = await ctx.runQuery(api.queries.list);
+    return messages;
+  });
+  expect(result).toMatchObject([{ author: "sarah", body: "hello" }]);
+});
+
+test("inline action calling function reference via ctx.runMutation", async () => {
+  const t = convexTest(schema);
+  await t.action(async (ctx) => {
+    await ctx.runMutation(api.mutations.insert, { author: "action", body: "test" });
+  });
+  const messages = await t.query(async (ctx) => {
+    return await ctx.db.query("messages").collect();
+  });
+  expect(messages).toMatchObject([{ author: "action", body: "test" }]);
+});
+
+test("inline action with identity", async () => {
+  const t = convexTest(schema);
+  const identity = await t
+    .withIdentity({ name: "Action User" })
+    .action(async (ctx) => {
+      return await ctx.auth.getUserIdentity();
+    });
+  expect(identity).toMatchObject({ name: "Action User" });
 });
