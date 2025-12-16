@@ -1217,6 +1217,13 @@ function asyncSyscallImpl() {
             ),
           );
         }
+        if (udfType === "action") {
+          return JSON.stringify(
+            convexToJson(
+              await withAuth().actionFromPath(functionPath, udfArgs),
+            ),
+          );
+        }
         throw new Error(
           `\`convexTest\` does not support udf type: "${udfType}"`,
         );
@@ -1446,29 +1453,37 @@ async function blobSha(blob: Blob) {
 
 async function waitForInProgressScheduledFunctions(): Promise<boolean> {
   let hadScheduledFunctions = false;
-  for (const componentPath of Object.keys(getConvexGlobal().components)) {
-    const inProgressJobs = (await withAuth().runInComponent(
-      componentPath,
-      async (ctx) => {
-        return (
-          await ctx.db.system.query("_scheduled_functions").collect()
-        ).filter((job: ScheduledFunction) => job.state.kind === "inProgress");
-      },
-    )) as ScheduledFunction[];
-    let numRemaining = inProgressJobs.length;
-    if (numRemaining === 0) {
-      continue;
-    }
-    hadScheduledFunctions = true;
 
-    await new Promise<void>((resolve) => {
-      getDbForComponent(componentPath).jobListener = () => {
-        numRemaining -= 1;
-        if (numRemaining === 0) {
-          resolve();
-        }
-      };
-    });
+  while (true) {
+    let anyComponentsHadScheduledFunctions = false;
+    for (const componentPath of Object.keys(getConvexGlobal().components)) {
+      const inProgressJobs = (await withAuth().runInComponent(
+        componentPath,
+        async (ctx) => {
+          return (
+            await ctx.db.system.query("_scheduled_functions").collect()
+          ).filter((job: ScheduledFunction) => job.state.kind === "inProgress");
+        },
+      )) as ScheduledFunction[];
+      let numRemaining = inProgressJobs.length;
+      if (numRemaining === 0) {
+        continue;
+      }
+      hadScheduledFunctions = true;
+      anyComponentsHadScheduledFunctions = true;
+
+      await new Promise<void>((resolve) => {
+        getDbForComponent(componentPath).jobListener = () => {
+          numRemaining -= 1;
+          if (numRemaining === 0) {
+            resolve();
+          }
+        };
+      });
+    }
+    if (!anyComponentsHadScheduledFunctions) {
+      break;
+    }
   }
   return hadScheduledFunctions;
 }
@@ -1947,6 +1962,8 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     },
   };
 
+  // Top-level adapters that always use isNested=false.
+  // Used for t.query, t.mutation, t.action, scheduled functions (fun), fetch, etc.
   const byType = {
     query: async (functionReference: any, args: any) => {
       const functionPath =
@@ -1974,6 +1991,72 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       return await byTypeWithPath.actionFromPath(functionPath, args);
     },
   };
+
+  // Nested adapters that always use isNested=true.
+  // Used inside t.run so that ctx.runQuery/runMutation/runAction
+  // share the transaction context and don't deadlock.
+  // We need to define nestedActionFromPath first, then nestedByType,
+  // because nestedByType.action calls nestedActionFromPath.
+  const nestedActionFromPath = async (
+    functionPath: FunctionPath,
+    args: any,
+  ) => {
+    const func = await getFunctionFromPath(functionPath, "action");
+    validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
+
+    const a = actionGeneric({
+      handler: (ctx: any, a: any) => {
+        const testCtx = {
+          ...ctx,
+          // Use nestedByType so any further calls stay in the nested world
+          runQuery: nestedByType.query,
+          runMutation: nestedByType.mutation,
+          runAction: nestedByType.action,
+          auth,
+        };
+        return getHandler(func)(testCtx, a);
+      },
+    });
+    getTransactionManager().beginAction(functionPath);
+    // Real backend uses different ID format
+    const requestId = "" + Math.random();
+    const rawResult = await (
+      a as unknown as {
+        invokeAction: (requestId: string, args: string) => Promise<string>;
+      }
+    ).invokeAction(requestId, JSON.stringify(convexToJson([parseArgs(args)])));
+    getTransactionManager().finishAction();
+    return jsonToConvex(JSON.parse(rawResult));
+  };
+
+  const nestedByType = {
+    query: async (functionReference: any, args: any) => {
+      const functionPath =
+        await getFunctionPathFromReference(functionReference);
+      return await byTypeWithPath.queryFromPath(
+        functionPath,
+        /* isNested */ true,
+        args,
+      );
+    },
+
+    mutation: async (functionReference: any, args: any): Promise<Value> => {
+      const functionPath =
+        await getFunctionPathFromReference(functionReference);
+      return await byTypeWithPath.mutationFromPath(
+        functionPath,
+        /* isNested */ true,
+        args,
+      );
+    },
+
+    action: async (functionReference: any, args: any) => {
+      const functionPath =
+        await getFunctionPathFromReference(functionReference);
+      return await nestedActionFromPath(functionPath, args);
+    },
+  };
+
   const run = async <T>(
     componentPath: string,
     handler: (ctx: any) => T,
@@ -1986,9 +2069,12 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           {},
           {
             storage: ctx.storage,
-            // ActionCtx support was added in 0.0.40, removed in 0.0.41, should be added back in the future.
-            // runAction: ctx.runAction.bind(ctx),
-            // vectorSearch: ctx.vectorSearch.bind(ctx),
+            // Wire runQuery/runMutation/runAction to nested adapters
+            // that use isNested=true to share the transaction context
+            runQuery: nestedByType.query,
+            runMutation: nestedByType.mutation,
+            runAction: nestedByType.action,
+            vectorSearch: ctx.vectorSearch.bind(ctx),
           },
           // Fake mutation path.
           {
