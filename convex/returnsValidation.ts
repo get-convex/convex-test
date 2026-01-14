@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { action, mutation, query } from "./_generated/server";
 
 // Query that returns a document but the return validator is INCOMPLETE
 // (missing _creationTime which Convex auto-adds to all documents)
@@ -117,5 +117,31 @@ export const queryReturningArrayWithIncompleteValidator = query({
   ),
   handler: async (ctx) => {
     return await ctx.db.query("messages").collect();
+  },
+});
+
+// Action with incomplete return validator
+// Returns object with extra field not in validator
+export const actionWithIncompleteReturnValidator = action({
+  args: {},
+  returns: v.object({
+    name: v.string(),
+    // extraField: v.string(), <-- INTENTIONALLY MISSING from validator
+  }),
+  handler: async () => {
+    // Return object with extra field that validator doesn't expect
+    return { name: "test", extraField: "unexpected" } as { name: string };
+  },
+});
+
+// Action with correct return validator
+export const actionWithCorrectReturnValidator = action({
+  args: {},
+  returns: v.object({
+    name: v.string(),
+    value: v.number(),
+  }),
+  handler: async () => {
+    return { name: "test", value: 42 };
   },
 });

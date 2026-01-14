@@ -30,6 +30,12 @@ const api = {
     queryReturningArrayWithIncompleteValidator: makeFunctionReference<"query">(
       "returnsValidation:queryReturningArrayWithIncompleteValidator",
     ),
+    actionWithIncompleteReturnValidator: makeFunctionReference<"action">(
+      "returnsValidation:actionWithIncompleteReturnValidator",
+    ),
+    actionWithCorrectReturnValidator: makeFunctionReference<"action">(
+      "returnsValidation:actionWithCorrectReturnValidator",
+    ),
   },
 };
 
@@ -137,5 +143,24 @@ describe("return value validation", () => {
         {},
       ),
     ).rejects.toThrowError(/Validator error|extra field/i);
+  });
+
+  test("action with incomplete return validator should fail", async () => {
+    const t = convexTest(schema);
+
+    // This action returns an object with extraField but validator doesn't expect it
+    await expect(
+      t.action(api.returnsValidation.actionWithIncompleteReturnValidator, {}),
+    ).rejects.toThrowError(/Validator error|extra field/i);
+  });
+
+  test("action with correct return validator should pass", async () => {
+    const t = convexTest(schema);
+
+    const result = await t.action(
+      api.returnsValidation.actionWithCorrectReturnValidator,
+      {},
+    );
+    expect(result).toEqual({ name: "test", value: 42 });
   });
 });
