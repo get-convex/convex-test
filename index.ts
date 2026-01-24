@@ -10,6 +10,7 @@ import {
   GenericDataModel,
   GenericDocument,
   GenericMutationCtx,
+  GenericQueryCtx,
   GenericSchema,
   HttpRouter,
   OptionalRestArgs,
@@ -1158,7 +1159,7 @@ function asyncSyscallImpl() {
         const { name, args: queryArgs } = args;
         return JSON.stringify(
           convexToJson(
-            await withAuth().query(makeFunctionReference(name), queryArgs),
+            await withAuth().runQuery(makeFunctionReference(name), queryArgs),
           ),
         );
       }
@@ -1166,7 +1167,7 @@ function asyncSyscallImpl() {
         const { name, args: mutationArgs } = args;
         return JSON.stringify(
           convexToJson(
-            await withAuth().mutation(
+            await withAuth().runMutation(
               makeFunctionReference(name),
               mutationArgs,
             ),
@@ -1177,7 +1178,7 @@ function asyncSyscallImpl() {
         const { name, args: actionArgs } = args;
         return JSON.stringify(
           convexToJson(
-            await withAuth().action(makeFunctionReference(name), actionArgs),
+            await withAuth().runAction(makeFunctionReference(name), actionArgs),
           ),
         );
       }
@@ -1478,43 +1479,61 @@ export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
 
 export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   /**
-   * Call a public or internal query.
+   * Call a public or internal query, or run an inline query function.
    *
-   * @param query A {@link FunctionReference} for the query.
+   * @param query A {@link FunctionReference} for the query, or an inline
+   *   async function that receives a query context.
    * @param args  An arguments object for the query. If this is omitted,
-   *   the arguments will be `{}`.
+   *   the arguments will be `{}`. Not used for inline functions.
    * @returns A `Promise` of the query's result.
    */
-  query: <Query extends FunctionReference<"query", any>>(
-    query: Query,
-    ...args: OptionalRestArgs<Query>
-  ) => Promise<FunctionReturnType<Query>>;
+  query: {
+    <Query extends FunctionReference<"query", any>>(
+      query: Query,
+      ...args: OptionalRestArgs<Query>
+    ): Promise<FunctionReturnType<Query>>;
+    <Output>(
+      func: (ctx: GenericQueryCtx<DataModel>) => Promise<Output>,
+    ): Promise<Output>;
+  };
 
   /**
-   * Call a public or internal mutation.
+   * Call a public or internal mutation, or run an inline mutation function.
    *
-   * @param mutation A {@link FunctionReference} for the mutation.
+   * @param mutation A {@link FunctionReference} for the mutation, or an inline
+   *   async function that receives a mutation context.
    * @param args  An arguments object for the mutation. If this is omitted,
-   *   the arguments will be `{}`.
+   *   the arguments will be `{}`. Not used for inline functions.
    * @returns A `Promise` of the mutation's result.
    */
-  mutation: <Mutation extends FunctionReference<"mutation", any>>(
-    mutation: Mutation,
-    ...args: OptionalRestArgs<Mutation>
-  ) => Promise<FunctionReturnType<Mutation>>;
+  mutation: {
+    <Mutation extends FunctionReference<"mutation", any>>(
+      mutation: Mutation,
+      ...args: OptionalRestArgs<Mutation>
+    ): Promise<FunctionReturnType<Mutation>>;
+    <Output>(
+      func: (ctx: GenericMutationCtx<DataModel>) => Promise<Output>,
+    ): Promise<Output>;
+  };
 
   /**
-   * Call a public or internal action.
+   * Call a public or internal action, or run an inline action function.
    *
-   * @param action A {@link FunctionReference} for the action.
+   * @param action A {@link FunctionReference} for the action, or an inline
+   *   async function that receives an action context.
    * @param args  An arguments object for the action. If this is omitted,
-   *   the arguments will be `{}`.
+   *   the arguments will be `{}`. Not used for inline functions.
    * @returns A `Promise` of the action's result.
    */
-  action: <Action extends FunctionReference<"action", any>>(
-    action: Action,
-    ...args: OptionalRestArgs<Action>
-  ) => Promise<FunctionReturnType<Action>>;
+  action: {
+    <Action extends FunctionReference<"action", any>>(
+      action: Action,
+      ...args: OptionalRestArgs<Action>
+    ): Promise<FunctionReturnType<Action>>;
+    <Output>(
+      func: (ctx: GenericActionCtx<DataModel>) => Promise<Output>,
+    ): Promise<Output>;
+  };
 
   /**
    * Read from and write to the mock backend.
@@ -1872,6 +1891,65 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     }
   };
 
+  // Shared helper to run a query with a given handler and transaction context
+  // Used by both queryFromPath (for function references) and inline queries
+  const runQueryWithHandler = async <T>(
+    handler: (ctx: any, args: any) => T,
+    args: any,
+    functionPath: FunctionPath,
+    isNested: boolean,
+  ): Promise<T> => {
+    const q = queryGeneric({
+      handler: (ctx: any, a: any) => {
+        const testCtx = { ...ctx, auth };
+        return handler(testCtx, a);
+      },
+    });
+    const transactionManager = getTransactionManager();
+    await transactionManager.begin(functionPath, isNested);
+    try {
+      const rawResult = await (
+        q as unknown as { invokeQuery: (args: string) => Promise<string> }
+      ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
+      return jsonToConvex(JSON.parse(rawResult)) as T;
+    } finally {
+      transactionManager.rollback(isNested);
+    }
+  };
+
+  // Shared helper to run an action with a given handler
+  // Used by both actionFromPath (for function references) and inline actions
+  const runActionWithHandler = async <T>(
+    handler: (ctx: any, args: any) => T,
+    args: any,
+    functionPath: FunctionPath,
+    ctxRunQuery: any,
+    ctxRunMutation: any,
+    ctxRunAction: any,
+  ): Promise<T> => {
+    const a = actionGeneric({
+      handler: (ctx: any, innerArgs: any) => {
+        const testCtx = {
+          ...ctx,
+          runQuery: ctxRunQuery,
+          runMutation: ctxRunMutation,
+          runAction: ctxRunAction,
+          auth,
+        };
+        return handler(testCtx, innerArgs);
+      },
+    });
+    getTransactionManager().beginAction(functionPath);
+    const requestId = "" + Math.random();
+    const rawResult = await (
+      a as unknown as {
+        invokeAction: (requestId: string, args: string) => Promise<string>;
+      }
+    ).invokeAction(requestId, JSON.stringify(convexToJson([parseArgs(args)])));
+    getTransactionManager().finishAction();
+    return jsonToConvex(JSON.parse(rawResult)) as T;
+  };
+
   const byTypeWithPath = {
     queryFromPath: async (
       functionPath: FunctionPath,
@@ -1880,22 +1958,13 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     ) => {
       const func = await getFunctionFromPath(functionPath, "query");
       validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
-      const q = queryGeneric({
-        handler: (ctx: any, a: any) => {
-          const testCtx = { ...ctx, auth };
-          return getHandler(func)(testCtx, a);
-        },
-      });
-      const transactionManager = getTransactionManager();
-      await transactionManager.begin(functionPath, isNested);
-      try {
-        const rawResult = await (
-          q as unknown as { invokeQuery: (args: string) => Promise<string> }
-        ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
-        return jsonToConvex(JSON.parse(rawResult));
-      } finally {
-        transactionManager.rollback(isNested);
-      }
+
+      return await runQueryWithHandler(
+        (ctx, a) => getHandler(func)(ctx, a),
+        args,
+        functionPath,
+        isNested,
+      );
     },
 
     mutationFromPath: async (
@@ -1919,38 +1988,51 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       const func = await getFunctionFromPath(functionPath, "action");
       validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
 
-      const a = actionGeneric({
-        handler: (ctx: any, a: any) => {
-          const testCtx = {
-            ...ctx,
-            runQuery: byType.query,
-            runMutation: byType.mutation,
-            runAction: byType.action,
-            auth,
-          };
-          return getHandler(func)(testCtx, a);
-        },
-      });
-      getTransactionManager().beginAction(functionPath);
-      // Real backend uses different ID format
-      const requestId = "" + Math.random();
-      const rawResult = await (
-        a as unknown as {
-          invokeAction: (requestId: string, args: string) => Promise<string>;
-        }
-      ).invokeAction(
-        requestId,
-        JSON.stringify(convexToJson([parseArgs(args)])),
+      return await runActionWithHandler(
+        getHandler(func),
+        args,
+        functionPath,
+        byTypeWithPath.runQuery,
+        byTypeWithPath.runMutation,
+        byTypeWithPath.runAction,
       );
-      getTransactionManager().finishAction();
-      return jsonToConvex(JSON.parse(rawResult));
+    },
+    runQuery: async (
+      functionReference: FunctionReference<any, any, any, any>,
+      args: any,
+    ) => {
+      const refPath = await getFunctionPathFromReference(functionReference);
+      return await byTypeWithPath.queryFromPath(refPath, false, args);
+    },
+    runMutation: async (
+      functionReference: FunctionReference<any, any, any, any>,
+      args: any,
+    ) => {
+      const refPath = await getFunctionPathFromReference(functionReference);
+      return await byTypeWithPath.mutationFromPath(refPath, false, args);
+    },
+    runAction: async (
+      functionReference: FunctionReference<any, any, any, any>,
+      args: any,
+    ) => {
+      const refPath = await getFunctionPathFromReference(functionReference);
+      return await byTypeWithPath.actionFromPath(refPath, args);
     },
   };
 
   const byType = {
-    query: async (functionReference: any, args: any) => {
-      const functionPath =
-        await getFunctionPathFromReference(functionReference);
+    query: async (functionReferenceOrHandler: any, args?: any) => {
+      if (typeof functionReferenceOrHandler === "function") {
+        return await runQueryWithHandler(
+          functionReferenceOrHandler,
+          args ?? {},
+          { componentPath: getCurrentComponentPath(), udfPath: "inline" },
+          /* isNested */ false,
+        );
+      }
+      const functionPath = await getFunctionPathFromReference(
+        functionReferenceOrHandler,
+      );
       return await byTypeWithPath.queryFromPath(
         functionPath,
         /* isNested */ false,
@@ -1958,9 +2040,22 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       );
     },
 
-    mutation: async (functionReference: any, args: any): Promise<Value> => {
-      const functionPath =
-        await getFunctionPathFromReference(functionReference);
+    mutation: async (
+      functionReferenceOrHandler: any,
+      args?: any,
+    ): Promise<Value> => {
+      if (typeof functionReferenceOrHandler === "function") {
+        return await runTransaction(
+          functionReferenceOrHandler,
+          args ?? {},
+          /* extraCtx */ {},
+          { componentPath: getCurrentComponentPath(), udfPath: "inline" },
+          /* isNested */ false,
+        );
+      }
+      const functionPath = await getFunctionPathFromReference(
+        functionReferenceOrHandler,
+      );
       return await byTypeWithPath.mutationFromPath(
         functionPath,
         /* isNested */ false,
@@ -1968,9 +2063,20 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       );
     },
 
-    action: async (functionReference: any, args: any) => {
-      const functionPath =
-        await getFunctionPathFromReference(functionReference);
+    action: async (functionReferenceOrHandler: any, args?: any) => {
+      if (typeof functionReferenceOrHandler === "function") {
+        return await runActionWithHandler(
+          functionReferenceOrHandler,
+          args ?? {},
+          { componentPath: getCurrentComponentPath(), udfPath: "inline" },
+          byTypeWithPath.runQuery,
+          byTypeWithPath.runMutation,
+          byTypeWithPath.runAction,
+        );
+      }
+      const functionPath = await getFunctionPathFromReference(
+        functionReferenceOrHandler,
+      );
       return await byTypeWithPath.actionFromPath(functionPath, args);
     },
   };
