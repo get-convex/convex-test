@@ -1191,7 +1191,7 @@ function asyncSyscallImpl() {
           args: udfArgsJson,
         } = args;
         const udfArgs = jsonToConvex(udfArgsJson);
-        const functionPath = await getFunctionPathFromAddress({
+        const functionPath = getFunctionPathFromAddress({
           name,
           reference,
           functionHandle,
@@ -1224,7 +1224,7 @@ function asyncSyscallImpl() {
       }
       case "1.0/createFunctionHandle": {
         const { name, reference, functionHandle } = args;
-        const functionPath = await getFunctionPathFromAddress({
+        const functionPath = getFunctionPathFromAddress({
           name,
           reference,
           functionHandle,
@@ -1246,7 +1246,7 @@ function asyncSyscallImpl() {
           args: fnArgs,
           ts: tsInSecs,
         } = args;
-        const functionPath = await getFunctionPathFromAddress({
+        const functionPath = getFunctionPathFromAddress({
           name,
           reference,
           functionHandle,
@@ -2231,12 +2231,12 @@ function parseFunctionHandle(handle: string) {
   return { componentPath, udfPath };
 }
 
-async function getFunctionPathFromAddress(
+function getFunctionPathFromAddress(
   functionAddress:
     | { name: string; reference: undefined; functionHandle: undefined }
     | { reference: string; name: undefined; functionHandle: undefined }
     | { functionHandle: string; name: undefined; reference: undefined },
-): Promise<FunctionPath> {
+): FunctionPath {
   if (functionAddress.functionHandle !== undefined) {
     return parseFunctionHandle(functionAddress.functionHandle);
   }
@@ -2276,7 +2276,7 @@ async function getFunctionPathFromReference(
   // { reference: "_reference/childComponent/aggregate/path/to/file/functionName" }
   // { functionHandle: "function://<id>/<path>" }
   const functionAddress = getFunctionAddress(functionReference);
-  return await getFunctionPathFromAddress(functionAddress);
+  return getFunctionPathFromAddress(functionAddress);
 }
 
 type RegisteredFunctions = {
