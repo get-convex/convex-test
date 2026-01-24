@@ -85,12 +85,22 @@ test("inline mutation transaction rollback", async () => {
 
 test("inline functions with identity", async () => {
   const t = convexTest(schema);
-  const identity = await t
-    .withIdentity({ name: "Test User" })
-    .query(async (ctx) => {
-      return await ctx.auth.getUserIdentity();
-    });
+  const authT = t.withIdentity({ name: "Test User" });
+  const identity = await authT.query(async (ctx) => {
+    return await ctx.auth.getUserIdentity();
+  });
   expect(identity).toMatchObject({ name: "Test User" });
+  await authT.mutation(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello" });
+  });
+  const messages = await authT.query(async (ctx) => {
+    return await ctx.db.query("messages").collect();
+  });
+  const withoutAuth = await t.query(async (ctx) => {
+    return await ctx.db.query("messages").collect();
+  });
+  expect(messages).toMatchObject([{ author: "sarah", body: "hello" }]);
+  expect(withoutAuth).toMatchObject(messages);
 });
 
 test("inline query returns value", async () => {
@@ -103,19 +113,6 @@ test("inline query returns value", async () => {
     return messages.length + 41;
   });
   expect(count).toBe(42);
-});
-
-test("inline mutation returns inserted id", async () => {
-  const t = convexTest(schema);
-  const id = await t.mutation(async (ctx) => {
-    const insertedId = await ctx.db.insert("messages", {
-      author: "sarah",
-      body: "hello",
-    });
-    return insertedId;
-  });
-  expect(typeof id).toBe("string");
-  expect(id).toContain("messages");
 });
 
 test("inline action basic", async () => {
