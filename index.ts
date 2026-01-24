@@ -1941,13 +1941,19 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     });
     getTransactionManager().beginAction(functionPath);
     const requestId = "" + Math.random();
-    const rawResult = await (
-      a as unknown as {
-        invokeAction: (requestId: string, args: string) => Promise<string>;
-      }
-    ).invokeAction(requestId, JSON.stringify(convexToJson([parseArgs(args)])));
-    getTransactionManager().finishAction();
-    return jsonToConvex(JSON.parse(rawResult)) as T;
+    try {
+      const rawResult = await (
+        a as unknown as {
+          invokeAction: (requestId: string, args: string) => Promise<string>;
+        }
+      ).invokeAction(
+        requestId,
+        JSON.stringify(convexToJson([parseArgs(args)])),
+      );
+      return jsonToConvex(JSON.parse(rawResult)) as T;
+    } finally {
+      getTransactionManager().finishAction();
+    }
   };
 
   const byTypeWithPath = {
