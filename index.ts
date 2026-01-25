@@ -1934,16 +1934,24 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       getTransactionManager().beginAction(functionPath);
       // Real backend uses different ID format
       const requestId = "" + Math.random();
-      const rawResult = await (
-        a as unknown as {
-          invokeAction: (requestId: string, args: string) => Promise<string>;
-        }
-      ).invokeAction(
-        requestId,
-        JSON.stringify(convexToJson([parseArgs(args)])),
-      );
-      getTransactionManager().finishAction();
-      return jsonToConvex(JSON.parse(rawResult));
+      try {
+        const rawResult = await (
+          a as unknown as {
+            invokeAction: (requestId: string, args: string) => Promise<string>;
+          }
+        ).invokeAction(
+          requestId,
+          JSON.stringify(convexToJson([parseArgs(args)])),
+        );
+        return jsonToConvex(JSON.parse(rawResult));
+      } catch (e) {
+        console.error(
+          `Error in action ${functionPath.udfPath}: ${JSON.stringify(e)}`,
+        );
+        throw e;
+      } finally {
+        getTransactionManager().finishAction();
+      }
     },
   };
 
