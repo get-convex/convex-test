@@ -1892,7 +1892,19 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         const rawResult = await (
           q as unknown as { invokeQuery: (args: string) => Promise<string> }
         ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
-        return jsonToConvex(JSON.parse(rawResult));
+        const result = jsonToConvex(JSON.parse(rawResult));
+        // Validate return value against returns validator
+        const returnsValidator = JSON.parse((func as any).exportReturns());
+        if (returnsValidator !== null) {
+          try {
+            validateValidator(returnsValidator, result);
+          } catch (e) {
+            throw new Error(
+              `Return value validation failed for query "${functionPath.udfPath}":\n${(e as Error).message}`,
+            );
+          }
+        }
+        return result;
       } finally {
         transactionManager.rollback(isNested);
       }
@@ -1906,13 +1918,25 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       const func = await getFunctionFromPath(functionPath, "mutation");
       validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
 
-      return await runTransaction(
+      const result = await runTransaction(
         getHandler(func),
         args,
         {},
         functionPath,
         isNested,
       );
+      // Validate return value against returns validator
+      const returnsValidator = JSON.parse((func as any).exportReturns());
+      if (returnsValidator !== null) {
+        try {
+          validateValidator(returnsValidator, result);
+        } catch (e) {
+          throw new Error(
+            `Return value validation failed for mutation "${functionPath.udfPath}":\n${(e as Error).message}`,
+          );
+        }
+      }
+      return result;
     },
 
     actionFromPath: async (functionPath: FunctionPath, args: any) => {
@@ -1943,7 +1967,19 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         JSON.stringify(convexToJson([parseArgs(args)])),
       );
       getTransactionManager().finishAction();
-      return jsonToConvex(JSON.parse(rawResult));
+      const result = jsonToConvex(JSON.parse(rawResult));
+      // Validate return value against returns validator
+      const returnsValidator = JSON.parse((func as any).exportReturns());
+      if (returnsValidator !== null) {
+        try {
+          validateValidator(returnsValidator, result);
+        } catch (e) {
+          throw new Error(
+            `Return value validation failed for action "${functionPath.udfPath}":\n${(e as Error).message}`,
+          );
+        }
+      }
+      return result;
     },
   };
 
