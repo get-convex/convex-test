@@ -1112,6 +1112,130 @@ class AuthFake {
   }
 }
 
+/**
+ * Schedule a drain of the scheduled job queue at the next due time.
+ * Runs all jobs with scheduledTime <= now in (scheduledTime, insertionOrder)
+ * to preserve deterministic ordering and avoid generation mismatches.
+ */
+function scheduleDrain() {
+  const convex = getConvexGlobal();
+  const queue = convex.scheduledJobQueue;
+  if (queue.length === 0) {
+    return;
+  }
+  if (convex.nextDrainTimerId !== null) {
+    clearTimeout(convex.nextDrainTimerId);
+    convex.nextDrainTimerId = null;
+  }
+  const now = Date.now();
+  const nextDue = Math.min(...queue.map((j) => j.scheduledTime));
+  const delay = Math.max(0, nextDue - now);
+  convex.nextDrainTimerId = setTimeout(() => {
+    convex.nextDrainTimerId = null;
+    void drainScheduledJobs();
+  }, delay);
+}
+
+/**
+ * Run all due scheduled jobs in (scheduledTime, insertionOrder).
+ * New jobs added while draining are included in the same drain pass.
+ * Only one drain runs at a time; a timer firing while we're awaiting a job
+ * will return early so the same job is never run twice (inProgress error).
+ */
+async function drainScheduledJobs() {
+  const convex = getConvexGlobal();
+  if (convex.drainInProgress) {
+    return;
+  }
+  convex.drainInProgress = true;
+  try {
+    const queue = convex.scheduledJobQueue;
+    const now = Date.now();
+    while (true) {
+      const due = queue
+        .filter((j) => j.scheduledTime <= now)
+        .sort(
+          (a, b) =>
+            a.scheduledTime - b.scheduledTime ||
+            a.insertionOrder - b.insertionOrder,
+        );
+      if (due.length === 0) {
+        break;
+      }
+      for (const job of due) {
+        const idx = queue.indexOf(job);
+        if (idx !== -1) {
+          queue.splice(idx, 1);
+        }
+        await runOneScheduledJob(job);
+      }
+    }
+  } finally {
+    convex.drainInProgress = false;
+    scheduleDrain();
+  }
+}
+
+async function runOneScheduledJob(job: ScheduledJobEntry): Promise<void> {
+  const db = getDbForComponent(job.componentPath);
+  const canceled = await withAuth().runInComponent(
+    job.componentPath,
+    async () => {
+      const scheduledJob = db.get(
+        "_scheduled_functions",
+        job.jobId,
+      ) as ScheduledFunction;
+      if (scheduledJob.state.kind === "canceled") {
+        return true;
+      }
+      // Already inProgress: duplicate queue entry or concurrent drain (should not happen with drainInProgress lock); skip running.
+      if (scheduledJob.state.kind === "inProgress") {
+        return true;
+      }
+      if (scheduledJob.state.kind !== "pending") {
+        throw new Error(
+          `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${scheduledJob.state.kind}`,
+        );
+      }
+      db.patch("_scheduled_functions", job.jobId, {
+        state: { kind: "inProgress" },
+      });
+      return false;
+    },
+  );
+  if (canceled) {
+    return;
+  }
+  try {
+    await withAuth().fun(job.functionPath, job.parsedArgs);
+  } catch (error) {
+    console.error(`Error when running scheduled function ${job.name}`, error);
+    await withAuth().runInComponent(job.componentPath, async () => {
+      db.patch("_scheduled_functions", job.jobId, {
+        state: { kind: "failed" },
+        completedTime: Date.now(),
+      });
+    });
+    db.jobFinished(job.jobId);
+    return;
+  }
+  await withAuth().runInComponent(job.componentPath, async () => {
+    const scheduledJob = db.get(
+      "_scheduled_functions",
+      job.jobId,
+    ) as ScheduledFunction;
+    if (scheduledJob.state.kind !== "inProgress") {
+      throw new Error(
+        `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${scheduledJob.state.kind}`,
+      );
+    }
+    db.patch("_scheduled_functions", job.jobId, {
+      state: { kind: "success" },
+    });
+  });
+  db.jobFinished(job.jobId);
+}
+
 function asyncSyscallImpl() {
   return async (op: string, jsonArgs: string): Promise<string> => {
     const args = JSON.parse(jsonArgs);
@@ -1252,73 +1376,25 @@ function asyncSyscallImpl() {
         });
         // Convert args to a Convex value before storing them or passing them to the function
         const parsedArgs = jsonToConvex(fnArgs);
+        const scheduledTime = tsInSecs * 1000;
         const jobId = db.insert("_scheduled_functions", {
           args: [parsedArgs],
           name: functionPath.udfPath,
-          scheduledTime: tsInSecs * 1000,
+          scheduledTime,
           state: { kind: "pending" },
         });
         const componentPath = getCurrentComponentPath();
-        setTimeout(
-          (async () => {
-            const canceled = await withAuth().runInComponent(
-              componentPath,
-              async () => {
-                const job = db.get(
-                  "_scheduled_functions",
-                  jobId,
-                ) as ScheduledFunction;
-                if (job.state.kind === "canceled") {
-                  return true;
-                }
-                if (job.state.kind !== "pending") {
-                  throw new Error(
-                    `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
-                  );
-                }
-                db.patch("_scheduled_functions", jobId, {
-                  state: { kind: "inProgress" },
-                });
-                return false;
-              },
-            );
-            if (canceled) {
-              return;
-            }
-            try {
-              await withAuth().fun(functionPath, parsedArgs);
-            } catch (error) {
-              console.error(
-                `Error when running scheduled function ${name}`,
-                error,
-              );
-              await withAuth().runInComponent(componentPath, async () => {
-                db.patch("_scheduled_functions", jobId, {
-                  state: { kind: "failed" },
-                  completedTime: Date.now(),
-                });
-              });
-              db.jobFinished(jobId);
-              return;
-            }
-            await withAuth().runInComponent(componentPath, async () => {
-              const job = db.get(
-                "_scheduled_functions",
-                jobId,
-              ) as ScheduledFunction;
-              if (job.state.kind !== "inProgress") {
-                throw new Error(
-                  `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
-                );
-              }
-              db.patch("_scheduled_functions", jobId, {
-                state: { kind: "success" },
-              });
-            });
-            db.jobFinished(jobId);
-          }) as () => void,
-          tsInSecs * 1000 - Date.now(),
-        );
+        const convex = getConvexGlobal();
+        convex.scheduledJobQueue.push({
+          scheduledTime,
+          insertionOrder: convex.scheduledJobInsertionCounter++,
+          componentPath,
+          functionPath,
+          parsedArgs,
+          jobId,
+          name,
+        });
+        scheduleDrain();
         return JSON.stringify(convexToJson(jobId));
       }
       case "1.0/actions/cancel_job": {
@@ -1570,8 +1646,13 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    * @param advanceTimers Function that advances timers,
    *   usually `vi.runAllTimers`. This function will be called in a loop
    *   with `finishInProgressScheduledFunctions()`.
+   * @param maxIterations The maximum number of iterations to run.
+   *   This is to avoid infinite loops. If not provided, it will default to 500.
    */
-  finishAllScheduledFunctions: (advanceTimers: () => void) => Promise<void>;
+  finishAllScheduledFunctions: (
+    advanceTimers: () => void,
+    maxIterations?: number,
+  ) => Promise<void>;
 };
 
 export type TestConvexForDataModelAndIdentity<
@@ -1691,12 +1772,27 @@ type FunctionPath = {
   udfPath: string;
 };
 
+type ScheduledJobEntry = {
+  scheduledTime: number;
+  insertionOrder: number;
+  componentPath: string;
+  functionPath: FunctionPath;
+  parsedArgs: Value;
+  jobId: DocumentId;
+  name: string;
+};
+
 type ConvexGlobal = {
   components: Record<string, ComponentInfo>;
   transactionManager: TransactionManager;
   syscall: (op: string, args: any) => any;
   asyncSyscall: (op: string, args: any) => Promise<any>;
   jsSyscall: (op: string, args: any) => Promise<any>;
+  scheduledJobQueue: ScheduledJobEntry[];
+  nextDrainTimerId: ReturnType<typeof setTimeout> | null;
+  scheduledJobInsertionCounter: number;
+  /** Prevents concurrent drains; a second timer firing while we're awaiting a job would otherwise run the same job twice. */
+  drainInProgress: boolean;
 };
 
 function getConvexGlobal(): ConvexGlobal {
@@ -1816,6 +1912,10 @@ export const convexTest = <Schema extends GenericSchema>(
     syscall: syscallImpl(),
     asyncSyscall: asyncSyscallImpl(),
     jsSyscall: jsSyscallImpl(),
+    scheduledJobQueue: [],
+    nextDrainTimerId: null,
+    scheduledJobInsertionCounter: 0,
+    drainInProgress: false,
   });
 
   return {
@@ -1934,16 +2034,19 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       getTransactionManager().beginAction(functionPath);
       // Real backend uses different ID format
       const requestId = "" + Math.random();
-      const rawResult = await (
-        a as unknown as {
-          invokeAction: (requestId: string, args: string) => Promise<string>;
-        }
-      ).invokeAction(
-        requestId,
-        JSON.stringify(convexToJson([parseArgs(args)])),
-      );
-      getTransactionManager().finishAction();
-      return jsonToConvex(JSON.parse(rawResult));
+      try {
+        const rawResult = await (
+          a as unknown as {
+            invokeAction: (requestId: string, args: string) => Promise<string>;
+          }
+        ).invokeAction(
+          requestId,
+          JSON.stringify(convexToJson([parseArgs(args)])),
+        );
+        return jsonToConvex(JSON.parse(rawResult));
+      } finally {
+        getTransactionManager().finishAction();
+      }
     },
   };
 
@@ -2078,7 +2181,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
 
     finishAllScheduledFunctions: async (
       advanceTimers: () => void,
-      maxIterations: number = 100,
+      maxIterations: number = 500,
     ): Promise<void> => {
       // Wait for all scheduled functions to finish, advancing time in between
       // each function.
