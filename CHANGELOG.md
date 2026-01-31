@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.42 alpha
+
+- Supports running inline functions via `t.action((ctx) => {...})` to aid in testing
+  code that expects an action environment. Also works in t.query and t.mutation
+
 ## 0.0.41
 
 - Removes ActionCtx support for now. Calling component actions was not working correctly.
