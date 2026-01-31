@@ -6,7 +6,7 @@ import { actionCallingActionHandler } from "./actions";
 
 test("action calling query", async () => {
   const t = convexTest(schema);
-  await t.run(async (ctx) => {
+  await t.mutation(async (ctx) => {
     await ctx.db.insert("messages", { body: "foo", author: "test" });
   });
   const result = await t.action(internal.actions.actionCallingQuery);
@@ -28,15 +28,12 @@ test("action calling action", async () => {
   expect(result.called).toEqual(2);
 });
 
-test.skip("calling action from t.run()", async () => {
+test("action calling action via handler helper", async () => {
   const t = convexTest(schema);
-  await t.run(async (ctx) => {
-    // @ts-expect-error -- ActionCtx support was added in 0.0.40, removed in 0.0.41, should be added back in the future.
-    const result = await actionCallingActionHandler(ctx, {
-      count: 2,
-    });
-    expect(result.called).toEqual(2);
+  const result = await t.action(async (ctx) => {
+    return await actionCallingActionHandler(ctx, { count: 2 });
   });
+  expect(result.called).toEqual(2);
 });
 
 test("action calling mutations concurrently", async () => {
