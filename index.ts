@@ -936,8 +936,52 @@ type ValidatorJSON =
     }
   | { type: "id"; tableName: string }
   | { type: "array"; value: ValidatorJSON }
-  | { type: "object"; value: Record<string, ObjectFieldType> }
+  | {
+      type: "object";
+      value: Record<string, ObjectFieldType>;
+      unknownKeys?: "strict" | "strip";
+    }
   | { type: "union"; value: ValidatorJSON[] };
+
+function hasStripObjectValidator(validator: ValidatorJSON): boolean {
+  switch (validator.type) {
+    case "object": {
+      if (validator.unknownKeys === "strip") {
+        return true;
+      }
+      return Object.values(validator.value).some(({ fieldType }) =>
+        hasStripObjectValidator(fieldType),
+      );
+    }
+    case "array": {
+      return hasStripObjectValidator(validator.value);
+    }
+    case "union": {
+      return validator.value.some(hasStripObjectValidator);
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+function copyValidatedValueIntoTarget(target: any, source: any) {
+  if (Array.isArray(target) && Array.isArray(source)) {
+    target.length = 0;
+    target.push(...source);
+    return;
+  }
+  if (isSimpleObject(target) && isSimpleObject(source)) {
+    for (const key of Object.keys(target)) {
+      if (!(key in source)) {
+        delete target[key];
+      }
+    }
+    for (const [key, sourceValue] of Object.entries(source)) {
+      target[key] = sourceValue;
+    }
+  }
+}
 
 function validateValidator(validator: ValidatorJSON, value: any) {
   switch (validator.type) {
@@ -1025,22 +1069,49 @@ function validateValidator(validator: ValidatorJSON, value: any) {
       return;
     }
     case "union": {
-      let isValid = false;
-      for (const v of validator.value) {
+      const tryValidate = (member: ValidatorJSON): boolean => {
+        const shouldIsolateMutation =
+          hasStripObjectValidator(member) &&
+          (isSimpleObject(value) || Array.isArray(value));
+        const candidateValue = shouldIsolateMutation
+          ? structuredClone(value)
+          : value;
         try {
-          validateValidator(v, value);
-          isValid = true;
-          break;
+          validateValidator(member, candidateValue);
+          if (shouldIsolateMutation) {
+            copyValidatedValueIntoTarget(value, candidateValue);
+          }
+          return true;
         } catch {
-          // Ignore
+          return false;
+        }
+      };
+
+      for (const member of validator.value) {
+        const isStripObject =
+          member.type === "object" && member.unknownKeys === "strip";
+        if (isStripObject) {
+          continue;
+        }
+        if (tryValidate(member)) {
+          return;
         }
       }
-      if (!isValid) {
-        throw new Error(
-          `Validator error: Expected one of ${validator.value.map((v) => v.type).join(", ")}, got \`${JSON.stringify(convexToJson(value))}\``,
-        );
+
+      for (const member of validator.value) {
+        const isStripObject =
+          member.type === "object" && member.unknownKeys === "strip";
+        if (!isStripObject) {
+          continue;
+        }
+        if (tryValidate(member)) {
+          return;
+        }
       }
-      return;
+
+      throw new Error(
+        `Validator error: Expected one of ${validator.value.map((v) => v.type).join(", ")}, got \`${JSON.stringify(convexToJson(value))}\``,
+      );
     }
     case "object": {
       if (typeof value !== "object") {
@@ -1066,12 +1137,22 @@ function validateValidator(validator: ValidatorJSON, value: any) {
           validateValidator(fieldType, value[k]);
         }
       }
+      const keysToStrip: string[] = [];
       for (const k of Object.keys(value)) {
         if (validator.value[k] === undefined) {
-          throw new Error(
-            `Validator error: Unexpected field \`${k}\` in object`,
-          );
+          if (validator.unknownKeys === "strip") {
+            keysToStrip.push(k);
+          } else {
+            throw new Error(
+              `Validator error: Unexpected field \`${k}\` in object`,
+            );
+          }
         }
+      }
+      // Defer deletions until after all validation passes, so that
+      // union variants that try-and-fail don't corrupt the shared value.
+      for (const k of keysToStrip) {
+        delete value[k];
       }
       return;
     }
