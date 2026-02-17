@@ -65,3 +65,65 @@ export const queryWithUnionArg = query({
     return "ok";
   },
 });
+
+export const queryWithStripObjectArg = query({
+  args: v.object({ a: v.number() }),
+  handler: (_, args) => {
+    return args;
+  },
+});
+
+export const mutationWithStripObjectArg = mutation({
+  args: v.object({ a: v.number() }),
+  handler: (_, args) => {
+    return args;
+  },
+});
+
+export const actionWithStripObjectArg = action({
+  args: v.object({ a: v.number() }),
+  handler: (_, args) => {
+    return args;
+  },
+});
+
+export const queryWithUnionStripNarrowFirstArg = query({
+  args: {
+    obj: v.union(
+      v.object({ a: v.number() }),
+      v.object({ a: v.number(), b: v.number() }),
+    ),
+  },
+  handler: (_, args) => {
+    return args.obj;
+  },
+});
+
+export const queryWithUnionStripWideFirstArg = query({
+  args: {
+    obj: v.union(
+      v.object({ a: v.number(), b: v.number() }),
+      v.object({ a: v.number() }),
+    ),
+  },
+  handler: (_, args) => {
+    return args.obj;
+  },
+});
+
+export const queryWithUnionNestedStripFailureArg = query({
+  args: {
+    obj: v.union(
+      v.object({
+        inner: v.object({ a: v.number() }),
+        must: v.string(),
+      }),
+      v.object({
+        inner: v.object({ a: v.number(), extra: v.string() }),
+      }),
+    ),
+  },
+  handler: (_, args) => {
+    return args.obj;
+  },
+});
