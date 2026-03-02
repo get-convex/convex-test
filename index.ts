@@ -559,7 +559,7 @@ class DatabaseFake {
     limit: number | null;
   } {
     const source = query.source;
-    let results: GenericDocument[] = [];
+    const results: GenericDocument[] = [];
     let fieldPathsToSortBy: string[];
     let order: "asc" | "desc";
     switch (source.type) {
