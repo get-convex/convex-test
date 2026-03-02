@@ -1302,6 +1302,19 @@ function asyncSyscallImpl() {
         db.delete(table, id);
         return JSON.stringify({});
       }
+      case "1.0/getConsumption": {
+        const tracker = getTransactionManager().getBandwidthTracker();
+        if (tracker) {
+          return JSON.stringify(convexToJson(tracker.getConsumption()));
+        }
+        return JSON.stringify(
+          convexToJson({
+            reads: { bytes: 0, documents: 0, ranges: 0 },
+            writes: { bytes: 0, documents: 0 },
+            scheduledFunctions: { bytes: 0, count: 0 },
+          }),
+        );
+      }
       case "1.0/actions/query": {
         const { name, args: queryArgs } = args;
         return JSON.stringify(
