@@ -127,3 +127,23 @@ test("limits accumulate within a transaction", async () => {
     }),
   ).rejects.toThrow(/Scanned too many documents/);
 });
+
+test("getConsumption returns bandwidth stats", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello" });
+    await ctx.db.insert("messages", { author: "michal", body: "world" });
+  });
+  const consumption = await t.query(async (ctx) => {
+    await ctx.db.query("messages").collect();
+    // Access the consumption syscall through the global
+    const syscalls = (global as any).Convex;
+    return JSON.parse(
+      await syscalls.asyncSyscall("1.0/getConsumption", JSON.stringify({})),
+    );
+  });
+  // Should have read some bytes and documents
+  expect(consumption.reads.documents).toBeGreaterThan(0);
+  expect(consumption.reads.bytes).toBeGreaterThan(0);
+  expect(consumption.reads.ranges).toBeGreaterThan(0);
+});
