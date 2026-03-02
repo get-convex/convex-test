@@ -69,3 +69,41 @@ test("component nested query", async () => {
   const x = await t.mutation(internal.component.mutationWithNestedQuery);
   expect(x).toEqual(3);
 });
+
+function testWithTwoCounters() {
+  const t = convexTest(schema);
+  t.registerComponent("counter", counterSchema, counterModules);
+  t.registerComponent("counter2", counterSchema, counterModules);
+  return t;
+}
+
+test("parallel queries on different components", async () => {
+  const t = testWithTwoCounters();
+  await Promise.all([
+    t.mutation(components.counter.public.add, {
+      name: "beans",
+      count: 3,
+    }),
+    t.mutation(components.counter2.public.add, {
+      name: "beans",
+      count: 5,
+    }),
+  ]);
+  const result = await t.mutation(internal.component.parallelComponentQueries);
+  expect(result).toMatchObject({ count1: 3, count2: 5 });
+});
+
+test("parallel mutations on different components", async () => {
+  const t = testWithTwoCounters();
+  await t.mutation(internal.component.parallelComponentMutations);
+  const [count1, count2] = await Promise.all([
+    t.query(components.counter.public.count, {
+      name: "beans",
+    }),
+    t.query(components.counter2.public.count, {
+      name: "beans",
+    }),
+  ]);
+  expect(count1).toEqual(1);
+  expect(count2).toEqual(1);
+});

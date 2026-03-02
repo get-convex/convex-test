@@ -92,3 +92,31 @@ export const scheduleHandle = internalMutation({
     );
   },
 });
+
+export const parallelComponentQueries = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ count1: number; count2: number }> => {
+    const [count1, count2] = await Promise.all([
+      ctx.runQuery(components.counter.public.count, { name: "beans" }),
+      ctx.runQuery(components.counter2.public.count, { name: "beans" }),
+    ]);
+    return { count1, count2 };
+  },
+});
+
+export const parallelComponentMutations = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<null> => {
+    await Promise.all([
+      ctx.runMutation(components.counter.public.add, {
+        name: "beans",
+        count: 1,
+      }),
+      ctx.runMutation(components.counter2.public.add, {
+        name: "beans",
+        count: 1,
+      }),
+    ]);
+    return null;
+  },
+});
