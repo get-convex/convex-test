@@ -16,3 +16,12 @@ export const list = query({
       .paginate(args.paginationOptions);
   },
 });
+
+export const listAll = query({
+  args: {
+    paginationOptions: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.query("messages").paginate(args.paginationOptions);
+  },
+});

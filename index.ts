@@ -33,6 +33,7 @@ import {
   JSONValue,
   Value,
   convexToJson,
+  getDocumentSize,
   jsonToConvex,
 } from "convex/values";
 import { compareValues } from "./compare.js";
@@ -421,41 +422,108 @@ class DatabaseFake {
   paginate({
     query,
     cursor,
+    endCursor,
     pageSize,
+    maximumRowsRead,
+    maximumBytesRead,
   }: {
     query: SerializedQuery;
     cursor: string | null;
+    endCursor?: string | null;
     pageSize: number;
+    maximumRowsRead?: number | null;
+    maximumBytesRead?: number | null;
   }) {
-    const queryId = this.startQuery(query);
-    const page = [];
+    const { sortedDocs, filterFn } = this._resolveQuerySource(query);
+
+    const page: GenericDocument[] = [];
     let isInPage = cursor === null;
     let isDone = false;
-    let continueCursor = null;
-    for (;;) {
-      const { value, done } = this.queryNext(queryId);
-      if (done) {
-        isDone = true;
-        // We have reached the end of the query. Return a cursor that indicates
-        // "end query", which we can do with any string that isn't a valid _id.
-        continueCursor = "_end_cursor";
-        break;
+    let continueCursor: string | null = null;
+    let splitCursor: string | null = null;
+    let pageStatus: "SplitRecommended" | "SplitRequired" | null = null;
+    let rowsRead = 0;
+    let bytesRead = 0;
+    const readDocIds: string[] = [];
+
+    for (const doc of sortedDocs) {
+      if (!isInPage) {
+        if ((doc._id as string) === cursor) {
+          isInPage = true;
+        }
+        continue;
       }
-      if (isInPage) {
-        page.push(value);
-        if (page.length >= pageSize) {
-          continueCursor = value!._id;
+
+      // endCursor: stop when we reach this document (inclusive boundary)
+      if (endCursor && endCursor !== "_end_cursor") {
+        if ((doc._id as string) === endCursor) {
+          // Include this doc if it passes filter, then stop
+          rowsRead += 1;
+          bytesRead += getDocumentSize(doc);
+          readDocIds.push(doc._id as string);
+          if (filterFn(doc)) {
+            page.push(doc);
+          }
+          continueCursor = doc._id as string;
           break;
         }
       }
-      if (value!._id === cursor) {
-        isInPage = true;
+
+      rowsRead += 1;
+      bytesRead += getDocumentSize(doc);
+      readDocIds.push(doc._id as string);
+
+      // Check bandwidth limits
+      let hitLimit = false;
+      if (maximumRowsRead && rowsRead >= maximumRowsRead) {
+        hitLimit = true;
+      }
+      if (maximumBytesRead && bytesRead >= maximumBytesRead) {
+        hitLimit = true;
+      }
+
+      if (filterFn(doc)) {
+        page.push(doc);
+      }
+
+      if (hitLimit) {
+        pageStatus = "SplitRequired";
+        continueCursor = doc._id as string;
+        break;
+      }
+
+      if (!endCursor && page.length >= pageSize) {
+        continueCursor = doc._id as string;
+        break;
       }
     }
+
+    if (continueCursor === null) {
+      isDone = true;
+      continueCursor = "_end_cursor";
+    }
+
+    // Compute splitCursor at midpoint when limits are hit
+    if (pageStatus === "SplitRequired" && readDocIds.length >= 2) {
+      const midIdx = Math.floor((readDocIds.length - 1) / 2);
+      splitCursor = readDocIds[midIdx];
+    } else if (
+      pageStatus === null &&
+      rowsRead > pageSize + 1 &&
+      readDocIds.length >= 2
+    ) {
+      // Recommend split when we had to scan significantly more rows than pageSize
+      pageStatus = "SplitRecommended";
+      const midIdx = Math.floor((readDocIds.length - 1) / 2);
+      splitCursor = readDocIds[midIdx];
+    }
+
     return {
       page,
       isDone,
       continueCursor,
+      splitCursor,
+      pageStatus,
     };
   }
 
@@ -478,7 +546,18 @@ class DatabaseFake {
     }
   }
 
-  private _evaluateQuery(query: SerializedQuery): Array<GenericDocument> {
+  /**
+   * Resolves the query source: loads documents matching the source (table scan,
+   * index range, or search), sorts them, and returns along with the compiled
+   * operator filter function. This separates "rows entering the pipeline"
+   * (sortedDocs) from "rows exiting" (after filterFn), which is needed for
+   * maximumRowsRead tracking in paginate().
+   */
+  private _resolveQuerySource(query: SerializedQuery): {
+    sortedDocs: GenericDocument[];
+    filterFn: (doc: GenericDocument) => boolean;
+    limit: number | null;
+  } {
     const source = query.source;
     let results: GenericDocument[] = [];
     let fieldPathsToSortBy: string[];
@@ -543,6 +622,7 @@ class DatabaseFake {
         break;
       }
     }
+
     const filters = query.operators
       .filter(
         (operator): operator is { filter: FilterJson } => "filter" in operator,
@@ -553,8 +633,6 @@ class DatabaseFake {
       query.operators.filter(
         (operator): operator is { limit: number } => "limit" in operator,
       )[0] ?? null;
-
-    results = results.filter((v) => filters.every((f) => evaluateFilter(v, f)));
 
     results.sort((a, b) => {
       const orderMultiplier = order === "asc" ? 1 : -1;
@@ -568,10 +646,22 @@ class DatabaseFake {
       return v * orderMultiplier;
     });
 
-    if (limit !== null) {
-      return results.slice(0, limit.limit);
-    }
+    const filterFn = (doc: GenericDocument) =>
+      filters.every((f) => evaluateFilter(doc, f));
 
+    return {
+      sortedDocs: results,
+      filterFn,
+      limit: limit?.limit ?? null,
+    };
+  }
+
+  private _evaluateQuery(query: SerializedQuery): Array<GenericDocument> {
+    const { sortedDocs, filterFn, limit } = this._resolveQuerySource(query);
+    let results = sortedDocs.filter(filterFn);
+    if (limit !== null) {
+      results = results.slice(0, limit);
+    }
     return results;
   }
 
@@ -1128,13 +1218,32 @@ function asyncSyscallImpl() {
         return JSON.stringify(convexToJson({ value, done }));
       }
       case "1.0/queryPage": {
-        const { query, cursor, pageSize } = args;
-        const { page, isDone, continueCursor } = db.paginate({
+        const {
           query,
           cursor,
+          endCursor,
           pageSize,
-        });
-        return JSON.stringify(convexToJson({ page, isDone, continueCursor }));
+          maximumRowsRead,
+          maximumBytesRead,
+        } = args;
+        const { page, isDone, continueCursor, splitCursor, pageStatus } =
+          db.paginate({
+            query,
+            cursor,
+            endCursor,
+            pageSize,
+            maximumRowsRead,
+            maximumBytesRead,
+          });
+        return JSON.stringify(
+          convexToJson({
+            page,
+            isDone,
+            continueCursor,
+            splitCursor,
+            pageStatus,
+          }),
+        );
       }
       case "1.0/insert": {
         const _id = db.insert(args.table, jsonToConvex(args.value));
