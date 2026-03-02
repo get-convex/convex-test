@@ -108,4 +108,39 @@ export declare const components: {
       >;
     };
   };
+  counter2: {
+    public: {
+      add: FunctionReference<
+        "mutation",
+        "internal",
+        { count: number; name: string; shards?: number },
+        null
+      >;
+      count: FunctionReference<"query", "internal", { name: string }, number>;
+      countMany: FunctionReference<
+        "action",
+        "internal",
+        { names: Array<string> },
+        Array<number>
+      >;
+      mutationWithNestedQuery: FunctionReference<
+        "mutation",
+        "internal",
+        {},
+        any
+      >;
+      mutationWithNumberArg: FunctionReference<
+        "mutation",
+        "internal",
+        { a: number },
+        any
+      >;
+      schedule: FunctionReference<
+        "mutation",
+        "internal",
+        { name: string },
+        any
+      >;
+    };
+  };
 };
