@@ -4,6 +4,9 @@
 
 - Supports running inline functions via `t.action((ctx) => {...})` to aid in testing
   code that expects an action environment. Also works in t.query and t.mutation
+- Adds full PaginationOptions support to .paginate
+- Supports parallel calls to child components from nested transactions
+- Tracks bandwidth in query/mutations to enforce custom limits
 
 ## 0.0.41
 
