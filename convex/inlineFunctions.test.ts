@@ -166,3 +166,14 @@ test("inline action with identity", async () => {
     });
   expect(identity).toMatchObject({ name: "Action User" });
 });
+
+test("inline action using storage", async () => {
+  const t = convexTest(schema);
+  const result = await t.action(async (ctx) => {
+    const id = await ctx.storage.store(new Blob(["hello"]));
+    const blob = await ctx.storage.get(id);
+    const text = await blob?.text();
+    return text;
+  });
+  expect(result).toEqual("hello");
+});
