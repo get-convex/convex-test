@@ -1307,12 +1307,9 @@ function asyncSyscallImpl() {
         if (tracker) {
           return JSON.stringify(convexToJson(tracker.getTransactionHeadroom()));
         }
-        return JSON.stringify(
-          convexToJson({
-            reads: { bytes: 0, documents: 0, queries: 0 },
-            write: { bytes: 0, documents: 0 },
-            schedule: { bytes: 0, functions: 0 },
-          }),
+        throw new Error(
+          "getTransactionHeadroom() can only be called from a query or mutation. " +
+            "It is not available in actions or outside of a Convex function.",
         );
       }
       case "1.0/actions/query": {
@@ -1891,38 +1888,27 @@ function setConvexGlobal(convex: ConvexGlobal) {
   (global as unknown as { Convex: ConvexGlobal }).Convex = convex;
 }
 
-type TransactionLimits = {
-  read: {
-    documents: number;
-    bytes: number;
-    queries: number;
-  };
-  write: {
-    documents: number;
-    bytes: number;
-  };
-  schedule: {
-    functions: number;
-    bytes: number;
-  };
+// TODO: replace with TransactionHeadroom from convex/server
+type TransactionHeadroom = {
+  bytesRead: number;
+  bytesWritten: number;
+  databaseQueries: number;
+  documentsRead: number;
+  documentsWritten: number;
+  functionsScheduled: number;
+  scheduledFunctionArgsBytes: number;
 };
 
 const MiB = 1 << 20;
 
-const DEFAULT_TRANSACTION_LIMITS: TransactionLimits = {
-  read: {
-    bytes: 16 * MiB, // 16 MiB
-    documents: 32_000,
-    queries: 4_096,
-  },
-  write: {
-    bytes: 16 * MiB, // 16 MiB
-    documents: 16_000,
-  },
-  schedule: {
-    functions: 1000,
-    bytes: 16 * MiB,
-  },
+const DEFAULT_TRANSACTION_LIMITS: TransactionHeadroom = {
+  bytesRead: 16 * MiB,
+  bytesWritten: 16 * MiB,
+  documentsRead: 32_000,
+  databaseQueries: 4_096,
+  documentsWritten: 16_000,
+  functionsScheduled: 1000,
+  scheduledFunctionArgsBytes: 16 * MiB,
 };
 
 class BandwidthTracker {
@@ -1931,22 +1917,18 @@ class BandwidthTracker {
   private _documentsScanned = 0;
   private _documentsWritten = 0;
   private _indexRangesRead = 0;
-  private _limits: TransactionLimits;
+  private _limits: TransactionHeadroom;
   private _enforceLimits: boolean;
 
-  constructor(limits: Partial<TransactionLimits> | false) {
+  constructor(limits: Partial<TransactionHeadroom> | false) {
     if (limits === false) {
       this._enforceLimits = false;
       this._limits = DEFAULT_TRANSACTION_LIMITS;
     } else {
       this._enforceLimits = true;
       this._limits = {
-        read: { ...DEFAULT_TRANSACTION_LIMITS.read, ...limits.read },
-        write: { ...DEFAULT_TRANSACTION_LIMITS.write, ...limits.write },
-        schedule: {
-          ...DEFAULT_TRANSACTION_LIMITS.schedule,
-          ...limits.schedule,
-        },
+        ...DEFAULT_TRANSACTION_LIMITS,
+        ...limits,
       };
     }
   }
@@ -1955,15 +1937,15 @@ class BandwidthTracker {
     this._bytesRead += docSizeBytes;
     this._documentsScanned += 1;
     if (this._enforceLimits) {
-      if (this._bytesRead > this._limits.read.bytes) {
+      if (this._bytesRead > this._limits.bytesRead) {
         throw new Error(
-          `Read too much data in a single function execution (limit: ${this._limits.read.bytes} bytes). ` +
+          `Read too much data in a single function execution (limit: ${this._limits.bytesRead} bytes). ` +
             `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
         );
       }
-      if (this._documentsScanned > this._limits.read.documents) {
+      if (this._documentsScanned > this._limits.documentsRead) {
         throw new Error(
-          `Scanned too many documents in a single function execution (limit: ${this._limits.read.documents}). ` +
+          `Scanned too many documents in a single function execution (limit: ${this._limits.documentsRead}). ` +
             `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
         );
       }
@@ -1974,15 +1956,15 @@ class BandwidthTracker {
     this._bytesWritten += docSizeBytes;
     this._documentsWritten += 1;
     if (this._enforceLimits) {
-      if (this._bytesWritten > this._limits.write.bytes) {
+      if (this._bytesWritten > this._limits.bytesWritten) {
         throw new Error(
-          `Wrote too much data in a single function execution (limit: ${this._limits.write.bytes} bytes). ` +
+          `Wrote too much data in a single function execution (limit: ${this._limits.bytesWritten} bytes). ` +
             `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
         );
       }
-      if (this._documentsWritten > this._limits.write.documents) {
+      if (this._documentsWritten > this._limits.documentsWritten) {
         throw new Error(
-          `Wrote too many documents in a single function execution (limit: ${this._limits.write.documents}). ` +
+          `Wrote too many documents in a single function execution (limit: ${this._limits.documentsWritten}). ` +
             `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
         );
       }
@@ -1992,9 +1974,9 @@ class BandwidthTracker {
   trackIndexRange() {
     this._indexRangesRead += 1;
     if (this._enforceLimits) {
-      if (this._indexRangesRead > this._limits.read.queries) {
+      if (this._indexRangesRead > this._limits.databaseQueries) {
         throw new Error(
-          `Too many index ranges read in a single function execution (limit: ${this._limits.read.queries}). ` +
+          `Too many index ranges read in a single function execution (limit: ${this._limits.databaseQueries}). ` +
             `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
         );
       }
@@ -2003,19 +1985,15 @@ class BandwidthTracker {
 
   getTransactionHeadroom() {
     return {
-      read: {
-        bytes: this._limits.read.bytes - this._bytesRead,
-        documents: this._limits.read.documents - this._documentsScanned,
-        queries: this._limits.read.queries - this._indexRangesRead,
-      },
-      write: {
-        bytes: this._limits.write.bytes - this._bytesWritten,
-        documents: this._limits.write.documents - this._documentsWritten,
-      },
-      schedule: {
-        functions: this._limits.schedule.functions, // not implemented yet
-        bytes: this._limits.schedule.bytes, // not implemented yet
-      },
+      bytesRead: this._limits.bytesRead - this._bytesRead,
+      documentsRead: this._limits.documentsRead - this._documentsScanned,
+      databaseQueries: this._limits.databaseQueries - this._indexRangesRead,
+      bytesWritten: this._limits.bytesWritten - this._bytesWritten,
+      documentsWritten: this._limits.documentsWritten - this._documentsWritten,
+      // not implemented yet
+      functionsScheduled: this._limits.functionsScheduled,
+      // not implemented yet
+      scheduledFunctionArgsBytes: this._limits.scheduledFunctionArgsBytes,
     };
   }
 }
@@ -2032,9 +2010,9 @@ class TransactionManager {
 
   // Bandwidth tracking
   private _bandwidthTracker: BandwidthTracker | null = null;
-  private _limitsConfig: Partial<TransactionLimits> | false;
+  private _limitsConfig: Partial<TransactionHeadroom> | false;
 
-  constructor(limitsConfig: Partial<TransactionLimits> | false = false) {
+  constructor(limitsConfig: Partial<TransactionHeadroom> | false = false) {
     this._limitsConfig = limitsConfig;
   }
 
@@ -2132,7 +2110,7 @@ export const convexTest = <Schema extends GenericSchema>(
      * - `{}`: enforce default Convex cloud limits
      * - `{ read: { bytes: 1024 } }`: override specific limits
      */
-    transactionLimits?: Partial<TransactionLimits> | false;
+    transactionLimits?: Partial<TransactionHeadroom> | false;
   },
 ): TestConvex<SchemaDefinition<Schema, boolean>> => {
   const limitsConfig = options?.transactionLimits ?? false;
