@@ -37,7 +37,7 @@
   "author": "Sarah Shader & Michal Srb <srb@convex.dev>",
   "license": "Apache-2.0",
   "peerDependencies": {
-    "convex": "^1.25.4"
+    "convex": "^1.32.0"
   },
   "devDependencies": {
     "@edge-runtime/vm": "^3.2.0",
@@ -47,7 +47,7 @@
     "@typescript-eslint/eslint-plugin": "^8.47.0",
     "@typescript-eslint/parser": "^8.47.0",
     "@vitest/coverage-v8": "^1.6.0",
-    "convex": "^1.31.0",
+    "convex": "^1.32.0",
     "eslint": "^9.39.1",
     "globals": "^16.5.0",
     "pkg-pr-new": "^0.0.54",
