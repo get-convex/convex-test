@@ -23,7 +23,7 @@ test("default: limits disabled, no throws", async () => {
 test("read byte limit exceeded throws", async () => {
   const t = convexTest(schema, undefined, {
     transactionLimits: {
-      reads: { bytes: 500, documents: 100000, ranges: 100 },
+      read: { bytes: 500, documents: 100000, queries: 100 },
     },
   });
   await t.run(async (ctx) => {
@@ -44,7 +44,7 @@ test("read byte limit exceeded throws", async () => {
 test("read document limit exceeded throws", async () => {
   const t = convexTest(schema, undefined, {
     transactionLimits: {
-      reads: { bytes: 16 * 1024 * 1024, documents: 5, ranges: 100 },
+      read: { bytes: 16 * 1024 * 1024, documents: 5, queries: 100 },
     },
   });
   await t.run(async (ctx) => {
@@ -61,7 +61,7 @@ test("read document limit exceeded throws", async () => {
 
 test("write byte limit exceeded throws", async () => {
   const t = convexTest(schema, undefined, {
-    transactionLimits: { writes: { bytes: 500, documents: 100000 } },
+    transactionLimits: { write: { bytes: 500, documents: 100000 } },
   });
   await expect(
     t.mutation(async (ctx) => {
@@ -77,7 +77,7 @@ test("write byte limit exceeded throws", async () => {
 
 test("write document limit exceeded throws", async () => {
   const t = convexTest(schema, undefined, {
-    transactionLimits: { writes: { bytes: 16 * 1024 * 1024, documents: 3 } },
+    transactionLimits: { write: { bytes: 16 * 1024 * 1024, documents: 3 } },
   });
   await expect(
     t.mutation(async (ctx) => {
@@ -91,7 +91,7 @@ test("write document limit exceeded throws", async () => {
 test("index range limit exceeded throws", async () => {
   const t = convexTest(schema, undefined, {
     transactionLimits: {
-      reads: { bytes: 16 * 1024 * 1024, documents: 100000, ranges: 2 },
+      read: { bytes: 16 * 1024 * 1024, documents: 100000, queries: 2 },
     },
   });
   await t.run(async (ctx) => {
@@ -111,7 +111,7 @@ test("index range limit exceeded throws", async () => {
 test("limits accumulate within a transaction", async () => {
   const t = convexTest(schema, undefined, {
     transactionLimits: {
-      reads: { bytes: 16 * 1024 * 1024, documents: 5, ranges: 100 },
+      read: { bytes: 16 * 1024 * 1024, documents: 5, queries: 100 },
     },
   });
   await t.run(async (ctx) => {
@@ -128,7 +128,7 @@ test("limits accumulate within a transaction", async () => {
   ).rejects.toThrow(/Scanned too many documents/);
 });
 
-test("getConsumption returns bandwidth stats", async () => {
+test("getTransactionHeadroom returns bandwidth stats", async () => {
   const t = convexTest(schema);
   await t.run(async (ctx) => {
     await ctx.db.insert("messages", { author: "sarah", body: "hello" });
@@ -139,11 +139,11 @@ test("getConsumption returns bandwidth stats", async () => {
     // Access the consumption syscall through the global
     const syscalls = (global as any).Convex;
     return JSON.parse(
-      await syscalls.asyncSyscall("1.0/getConsumption", JSON.stringify({})),
+      await syscalls.asyncSyscall("1.0/headroom", JSON.stringify({})),
     );
   });
   // Should have read some bytes and documents
-  expect(consumption.reads.documents).toBeGreaterThan(0);
-  expect(consumption.reads.bytes).toBeGreaterThan(0);
-  expect(consumption.reads.ranges).toBeGreaterThan(0);
+  expect(consumption.read.documents).toBeGreaterThan(0);
+  expect(consumption.read.bytes).toBeGreaterThan(0);
+  expect(consumption.read.queries).toBeGreaterThan(0);
 });
