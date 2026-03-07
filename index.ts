@@ -1965,12 +1965,32 @@ class TransactionManager {
   private _waitOnCurrentFunction: Promise<void> | null = null;
   private _markTransactionDone: (() => void) | null = null;
   public functionStack: FunctionPath[] = [];
+  // Nested lock: serializes parallel nested sub-transactions
+  // (e.g. Promise.all of ctx.runQuery calls to different components)
+  // to prevent functionStack and transaction level corruption.
+  private _nestedLock: Promise<void> | null = null;
+  private _releaseNestedLock: (() => void) | null = null;
 
   private _headroomTracker: HeadroomTracker | null = null;
   private _limitsConfig: Partial<TransactionMetrics> | boolean;
 
   constructor(limitsConfig: Partial<TransactionMetrics> | boolean = false) {
     this._limitsConfig = limitsConfig;
+  }
+
+  async acquireNestedLock() {
+    while (this._nestedLock !== null) {
+      await this._nestedLock;
+    }
+    this._nestedLock = new Promise((resolve) => {
+      this._releaseNestedLock = resolve;
+    });
+  }
+
+  releaseNestedLockMethod() {
+    this._nestedLock = null;
+    this._releaseNestedLock!();
+    this._releaseNestedLock = null;
   }
 
   async begin(functionPath: FunctionPath, isNested: boolean) {
