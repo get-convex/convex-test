@@ -159,7 +159,7 @@ test("getTransactionHeadroom returns bandwidth stats", async () => {
     );
   });
   // Should have read some bytes and documents
-  expect(consumption.documentsRead).toBeGreaterThan(0);
-  expect(consumption.bytesRead).toBeGreaterThan(0);
-  expect(consumption.databaseQueries).toBeGreaterThan(0);
+  expect(consumption.documentsRead.used).toBeGreaterThan(0);
+  expect(consumption.bytesRead.used).toBeGreaterThan(0);
+  expect(consumption.databaseQueries.used).toBeGreaterThan(0);
 });
