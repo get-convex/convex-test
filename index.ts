@@ -2193,7 +2193,7 @@ export function convexTest<Schema extends GenericSchema>(
 }
 
 function withAuth(auth: AuthFake = new AuthFake()) {
-  const runTransaction = async <T>(
+  const runMutationWithHandler = async <T>(
     handler: (ctx: any, args: any) => T,
     args: any,
     extraCtx: any = {},
@@ -2354,7 +2354,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       const func = await getFunctionFromPath(functionPath, "mutation");
       validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
 
-      return await runTransaction(
+      return await runMutationWithHandler(
         getHandler(func),
         args,
         {},
@@ -2424,7 +2424,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       args?: any,
     ): Promise<Value> => {
       if (typeof functionReferenceOrHandler === "function") {
-        return await runTransaction(
+        return await runMutationWithHandler(
           functionReferenceOrHandler,
           args ?? {},
           /* extraCtx */ {},
@@ -2466,7 +2466,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     // Grab StorageActionWriter from action ctx
     const a = actionGeneric({
       handler: async (ctx: GenericActionCtx<any>) => {
-        return await runTransaction(
+        return await runMutationWithHandler(
           handler,
           {},
           {
