@@ -3,7 +3,7 @@ import { convexTest } from "../index";
 import schema from "./schema";
 
 test("default: limits disabled, no throws", async () => {
-  const t = convexTest(schema);
+  const t = convexTest({ schema });
   // Insert many docs without hitting limits (default is disabled)
   await t.run(async (ctx) => {
     for (let i = 0; i < 100; i++) {
@@ -21,7 +21,8 @@ test("default: limits disabled, no throws", async () => {
 });
 
 test("read byte limit exceeded throws", async () => {
-  const t = convexTest(schema, undefined, {
+  const t = convexTest({
+    schema,
     transactionLimits: {
       bytesRead: 500,
       documentsRead: 100000,
@@ -46,7 +47,8 @@ test("read byte limit exceeded throws", async () => {
 const MiB = 1 << 20;
 
 test("read document limit exceeded throws", async () => {
-  const t = convexTest(schema, undefined, {
+  const t = convexTest({
+    schema,
     transactionLimits: {
       bytesRead: 16 * MiB,
       documentsRead: 5,
@@ -66,7 +68,8 @@ test("read document limit exceeded throws", async () => {
 });
 
 test("write byte limit exceeded throws", async () => {
-  const t = convexTest(schema, undefined, {
+  const t = convexTest({
+    schema,
     transactionLimits: {
       bytesWritten: 500,
       documentsWritten: 100000,
@@ -85,7 +88,8 @@ test("write byte limit exceeded throws", async () => {
 });
 
 test("write document limit exceeded throws", async () => {
-  const t = convexTest(schema, undefined, {
+  const t = convexTest({
+    schema,
     transactionLimits: {
       bytesWritten: 16 * MiB,
       documentsWritten: 3,
@@ -101,7 +105,8 @@ test("write document limit exceeded throws", async () => {
 });
 
 test("index range limit exceeded throws", async () => {
-  const t = convexTest(schema, undefined, {
+  const t = convexTest({
+    schema,
     transactionLimits: {
       bytesRead: 16 * MiB,
       documentsRead: 100000,
@@ -123,7 +128,8 @@ test("index range limit exceeded throws", async () => {
 });
 
 test("limits accumulate within a transaction", async () => {
-  const t = convexTest(schema, undefined, {
+  const t = convexTest({
+    schema,
     transactionLimits: {
       bytesRead: 16 * MiB,
       documentsRead: 5,
@@ -145,7 +151,7 @@ test("limits accumulate within a transaction", async () => {
 });
 
 test("getTransactionHeadroom returns bandwidth stats", async () => {
-  const t = convexTest(schema);
+  const t = convexTest({ schema });
   await t.run(async (ctx) => {
     await ctx.db.insert("messages", { author: "sarah", body: "hello" });
     await ctx.db.insert("messages", { author: "michal", body: "world" });

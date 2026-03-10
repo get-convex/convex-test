@@ -2155,27 +2155,84 @@ class TransactionManager {
  *
  * @param schema The default export from your "schema.ts" file.
  * @param modules If you have a custom `functions` path
- *   in convex.json, provide the module map with your functions
- *   by calling `import.meta.glob` with the appropriate glob pattern
- *   for paths relative to the file where you call it.
+ *     in convex.json, provide the function modules map by calling
+ *     `import.meta.glob("./**\/*.*s")` from a file at the root of
+ *     your Convex functions directory.
  * @returns an object which is by convention stored in the `t` variable
  *   and which provides methods for exercising your Convex functions.
  */
-export const convexTest = <Schema extends GenericSchema>(
+export function convexTest<Schema extends GenericSchema>(
   schema?: SchemaDefinition<Schema, boolean>,
-  // For example `import.meta.glob("./**/*.*s")`
+  /** For example `import.meta.glob("./**\/*.*s")` */
   modules?: Record<string, () => Promise<any>>,
-  options?: {
-    /**
-     * Configure per-transaction bandwidth limits.
-     * - `false` (default): limits are not enforced (but consumption is still tracked)
-     * - `{}`: enforce default Convex cloud limits
-     * - `{ read: { bytes: 1024 } }`: override specific limits
-     */
-    transactionLimits?: Partial<TransactionMetrics> | false;
-  },
-): TestConvex<SchemaDefinition<Schema, boolean>> => {
-  const limitsConfig = options?.transactionLimits ?? false;
+): TestConvex<SchemaDefinition<Schema, boolean>>;
+/**
+ * Call this function at the start of each of your tests.
+ *
+ * @param options An optional configuration object with:
+ *   - `schema`: The default export from your "schema.ts" file.
+ *   - `modules`: If you have a custom `functions` path
+ *     in convex.json, provide the function modules map by calling
+ *     `import.meta.glob("./**\/*.*s")` from a file at the root of
+ *     your Convex functions directory.
+ *   - `transactionLimits`: Configure per-transaction bandwidth limits.
+ *     - `false` (default): limits are not enforced
+ *     - `true` or `{}`: enforce default Convex limits
+ *     - `{ bytesRead: 1024 }`: override specific limits
+ *
+ * @returns an object which is by convention stored in the `t` variable
+ *   and which provides methods for exercising your Convex functions.
+ *
+ * @example
+ * const t = convexTest({ schema });
+ * const t = convexTest({ schema, modules });
+ */
+export function convexTest<Schema extends GenericSchema>(options: {
+  schema?: SchemaDefinition<Schema, boolean>;
+  // For example `import.meta.glob("./**/*.*s")`
+  modules?: Record<string, () => Promise<any>>;
+  transactionLimits?: Partial<TransactionMetrics> | boolean;
+}): TestConvex<SchemaDefinition<Schema, boolean>>;
+export function convexTest<Schema extends GenericSchema>(
+  schemaOrOptions?:
+    | SchemaDefinition<Schema, boolean>
+    | {
+        schema?: SchemaDefinition<Schema, boolean>;
+        modules?: Record<string, () => Promise<any>>;
+        transactionLimits?: Partial<TransactionMetrics> | boolean;
+      },
+  legacyModules?: Record<string, () => Promise<any>>,
+): TestConvex<SchemaDefinition<Schema, boolean>> {
+  let schema: SchemaDefinition<Schema, boolean> | undefined;
+  let modules: Record<string, () => Promise<any>> | undefined;
+  let limitsConfig: Partial<TransactionMetrics> | boolean = false;
+
+  // Detect legacy API by checking for schema's "tables" property
+  function isSchemaDefinition(
+    schemaOrOptions: unknown,
+  ): schemaOrOptions is SchemaDefinition<Schema, boolean> {
+    return (
+      schemaOrOptions !== null &&
+      typeof schemaOrOptions === "object" &&
+      "tables" in schemaOrOptions &&
+      typeof (schemaOrOptions as any).tables === "object"
+    );
+  }
+
+  if (schemaOrOptions === undefined) {
+    // convexTest() - no arguments
+  } else if (isSchemaDefinition(schemaOrOptions)) {
+    // convexTest(schema, modules?)
+    schema = schemaOrOptions;
+    modules = legacyModules;
+  } else {
+    // convexTest({ schema?, modules?, transactionLimits? })
+    const opts = schemaOrOptions;
+    schema = opts.schema;
+    modules = opts.modules;
+    limitsConfig = opts.transactionLimits ?? false;
+  }
+
   const rootDb = new DatabaseFake(schema ?? null, ROOT_COMPONENT_PATH);
   setConvexGlobal({
     components: {
@@ -2214,7 +2271,7 @@ export const convexTest = <Schema extends GenericSchema>(
       getConvexGlobal().components[componentPath] = componentInfo;
     },
   } as any;
-};
+}
 
 function withAuth(auth: AuthFake = new AuthFake()) {
   const runTransaction = async <T>(
