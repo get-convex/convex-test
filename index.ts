@@ -1924,7 +1924,7 @@ class BandwidthTracker {
   private _limits: TransactionMetrics;
   private _enforceLimits: boolean;
 
-  constructor(limits: Partial<TransactionMetrics> | false) {
+  constructor(limits: Partial<TransactionMetrics> | boolean) {
     this._metrics = {
       bytesRead: 0,
       bytesWritten: 0,
@@ -1937,6 +1937,9 @@ class BandwidthTracker {
 
     if (limits === false) {
       this._enforceLimits = false;
+      this._limits = DEFAULT_TRANSACTION_LIMITS;
+    } else if (limits === true) {
+      this._enforceLimits = true;
       this._limits = DEFAULT_TRANSACTION_LIMITS;
     } else {
       this._enforceLimits = true;
@@ -2069,9 +2072,9 @@ class TransactionManager {
 
   // Bandwidth tracking
   private _bandwidthTracker: BandwidthTracker | null = null;
-  private _limitsConfig: Partial<TransactionMetrics> | false;
+  private _limitsConfig: Partial<TransactionMetrics> | boolean;
 
-  constructor(limitsConfig: Partial<TransactionMetrics> | false = false) {
+  constructor(limitsConfig: Partial<TransactionMetrics> | boolean = false) {
     this._limitsConfig = limitsConfig;
   }
 
