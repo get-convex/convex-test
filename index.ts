@@ -32,12 +32,12 @@ import {
   GenericId,
   JSONValue,
   Value,
+  compareValues,
   convexToJson,
   getConvexSize,
   getDocumentSize,
   jsonToConvex,
 } from "convex/values";
-import { compareValues } from "./compare.js";
 import { HeadroomTracker, TransactionMetrics } from "./headroom.js";
 
 type FilterJson =
