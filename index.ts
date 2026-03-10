@@ -38,6 +38,7 @@ import {
   jsonToConvex,
 } from "convex/values";
 import { compareValues } from "./compare.js";
+import { HeadroomTracker, TransactionMetrics } from "./headroom.js";
 
 type FilterJson =
   | { $eq: [FilterJson, FilterJson] }
@@ -1176,7 +1177,7 @@ function syscallImpl() {
     switch (op) {
       case "1.0/queryStream": {
         const { query } = args;
-        const tracker = getTransactionManager().getBandwidthTracker();
+        const tracker = getTransactionManager().getHeadroomTracker();
         tracker?.trackIndexRange();
         const queryId = db.startQuery(query);
         return JSON.stringify({ queryId });
@@ -1213,7 +1214,7 @@ function asyncSyscallImpl() {
     switch (op) {
       case "1.0/get": {
         const { table, id } = args;
-        const tracker = getTransactionManager().getBandwidthTracker();
+        const tracker = getTransactionManager().getHeadroomTracker();
         tracker?.trackIndexRange();
         const doc = db.get(table, id);
         if (doc !== null) {
@@ -1224,7 +1225,7 @@ function asyncSyscallImpl() {
       case "1.0/queryStreamNext": {
         const { value, done } = db.queryNext(args.queryId);
         if (!done && value !== null) {
-          const tracker = getTransactionManager().getBandwidthTracker();
+          const tracker = getTransactionManager().getHeadroomTracker();
           tracker?.trackRead(getDocumentSize(value));
         }
         return JSON.stringify(convexToJson({ value, done }));
@@ -1247,7 +1248,7 @@ function asyncSyscallImpl() {
             maximumRowsRead,
             maximumBytesRead,
           });
-        const tracker = getTransactionManager().getBandwidthTracker();
+        const tracker = getTransactionManager().getHeadroomTracker();
         if (tracker) {
           tracker.trackIndexRange();
           for (const doc of page) {
@@ -1266,7 +1267,7 @@ function asyncSyscallImpl() {
       }
       case "1.0/insert": {
         const _id = db.insert(args.table, jsonToConvex(args.value));
-        const tracker = getTransactionManager().getBandwidthTracker();
+        const tracker = getTransactionManager().getHeadroomTracker();
         if (tracker) {
           const insertedDoc = db.get(args.table, _id);
           if (insertedDoc) tracker.trackWrite(getDocumentSize(insertedDoc));
@@ -1276,7 +1277,7 @@ function asyncSyscallImpl() {
       case "1.0/shallowMerge": {
         const { table, id, value } = args;
         db.patch(table, id, value);
-        const tracker = getTransactionManager().getBandwidthTracker();
+        const tracker = getTransactionManager().getHeadroomTracker();
         if (tracker) {
           const patchedDoc = db.get(table, id);
           if (patchedDoc) tracker.trackWrite(getDocumentSize(patchedDoc));
@@ -1286,7 +1287,7 @@ function asyncSyscallImpl() {
       case "1.0/replace": {
         const { table, id, value } = args;
         db.replace(table, id, value);
-        const tracker = getTransactionManager().getBandwidthTracker();
+        const tracker = getTransactionManager().getHeadroomTracker();
         if (tracker) {
           const replacedDoc = db.get(table, id);
           if (replacedDoc) tracker.trackWrite(getDocumentSize(replacedDoc));
@@ -1295,7 +1296,7 @@ function asyncSyscallImpl() {
       }
       case "1.0/remove": {
         const { table, id } = args;
-        const tracker = getTransactionManager().getBandwidthTracker();
+        const tracker = getTransactionManager().getHeadroomTracker();
         if (tracker) {
           const docToDelete = db.get(table, id);
           if (docToDelete) tracker.trackWrite(getDocumentSize(docToDelete));
@@ -1304,7 +1305,7 @@ function asyncSyscallImpl() {
         return JSON.stringify({});
       }
       case "1.0/headroom": {
-        const tracker = getTransactionManager().getBandwidthTracker();
+        const tracker = getTransactionManager().getHeadroomTracker();
         if (tracker) {
           return JSON.stringify(convexToJson(tracker.getTransactionHeadroom()));
         }
@@ -1413,7 +1414,7 @@ function asyncSyscallImpl() {
         const parsedArgs = jsonToConvex(fnArgs);
 
         // Track scheduled function metrics
-        const tracker = getTransactionManager().getBandwidthTracker();
+        const tracker = getTransactionManager().getHeadroomTracker();
         if (tracker) {
           const argsSize = getConvexSize(parsedArgs);
           tracker.trackScheduledFunction(argsSize);
@@ -1897,169 +1898,6 @@ function setConvexGlobal(convex: ConvexGlobal) {
   (global as unknown as { Convex: ConvexGlobal }).Convex = convex;
 }
 
-type TransactionMetrics = {
-  bytesRead: number;
-  bytesWritten: number;
-  databaseQueries: number;
-  documentsRead: number;
-  documentsWritten: number;
-  functionsScheduled: number;
-  scheduledFunctionArgsBytes: number;
-};
-
-const MiB = 1 << 20;
-
-const DEFAULT_TRANSACTION_LIMITS: TransactionMetrics = {
-  bytesRead: 16 * MiB,
-  bytesWritten: 16 * MiB,
-  documentsRead: 32_000,
-  databaseQueries: 4_096,
-  documentsWritten: 16_000,
-  functionsScheduled: 1000,
-  scheduledFunctionArgsBytes: 16 * MiB,
-};
-
-class BandwidthTracker {
-  private _metrics: TransactionMetrics;
-  private _limits: TransactionMetrics;
-  private _enforceLimits: boolean;
-
-  constructor(limits: Partial<TransactionMetrics> | boolean) {
-    this._metrics = {
-      bytesRead: 0,
-      bytesWritten: 0,
-      documentsRead: 0,
-      documentsWritten: 0,
-      databaseQueries: 0,
-      functionsScheduled: 0,
-      scheduledFunctionArgsBytes: 0,
-    };
-
-    if (limits === false) {
-      this._enforceLimits = false;
-      this._limits = DEFAULT_TRANSACTION_LIMITS;
-    } else if (limits === true) {
-      this._enforceLimits = true;
-      this._limits = DEFAULT_TRANSACTION_LIMITS;
-    } else {
-      this._enforceLimits = true;
-      this._limits = {
-        ...DEFAULT_TRANSACTION_LIMITS,
-        ...limits,
-      };
-    }
-  }
-
-  trackRead(docSizeBytes: number) {
-    this._metrics.bytesRead += docSizeBytes;
-    this._metrics.documentsRead += 1;
-    if (this._enforceLimits) {
-      if (this._metrics.bytesRead > this._limits.bytesRead) {
-        throw new Error(
-          `Read too much data in a single function execution (limit: ${this._limits.bytesRead} bytes). ` +
-            `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
-        );
-      }
-      if (this._metrics.documentsRead > this._limits.documentsRead) {
-        throw new Error(
-          `Scanned too many documents in a single function execution (limit: ${this._limits.documentsRead}). ` +
-            `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
-        );
-      }
-    }
-  }
-
-  trackWrite(docSizeBytes: number) {
-    this._metrics.bytesWritten += docSizeBytes;
-    this._metrics.documentsWritten += 1;
-    if (this._enforceLimits) {
-      if (this._metrics.bytesWritten > this._limits.bytesWritten) {
-        throw new Error(
-          `Wrote too much data in a single function execution (limit: ${this._limits.bytesWritten} bytes). ` +
-            `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
-        );
-      }
-      if (this._metrics.documentsWritten > this._limits.documentsWritten) {
-        throw new Error(
-          `Wrote too many documents in a single function execution (limit: ${this._limits.documentsWritten}). ` +
-            `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
-        );
-      }
-    }
-  }
-
-  trackIndexRange() {
-    this._metrics.databaseQueries += 1;
-    if (this._enforceLimits) {
-      if (this._metrics.databaseQueries > this._limits.databaseQueries) {
-        throw new Error(
-          `Too many index ranges read in a single function execution (limit: ${this._limits.databaseQueries}). ` +
-            `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
-        );
-      }
-    }
-  }
-
-  trackScheduledFunction(argsSizeBytes: number) {
-    this._metrics.functionsScheduled += 1;
-    this._metrics.scheduledFunctionArgsBytes += argsSizeBytes;
-    if (this._enforceLimits) {
-      if (this._metrics.functionsScheduled > this._limits.functionsScheduled) {
-        throw new Error(
-          `Scheduled too many functions in a single function execution (limit: ${this._limits.functionsScheduled}). ` +
-            `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
-        );
-      }
-      if (
-        this._metrics.scheduledFunctionArgsBytes >
-        this._limits.scheduledFunctionArgsBytes
-      ) {
-        throw new Error(
-          `Scheduled function arguments too large in a single function execution (limit: ${this._limits.scheduledFunctionArgsBytes} bytes). ` +
-            `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
-        );
-      }
-    }
-  }
-
-  getTransactionHeadroom() {
-    return {
-      bytesRead: {
-        used: this._metrics.bytesRead,
-        remaining: this._limits.bytesRead - this._metrics.bytesRead,
-      },
-      bytesWritten: {
-        used: this._metrics.bytesWritten,
-        remaining: this._limits.bytesWritten - this._metrics.bytesWritten,
-      },
-      databaseQueries: {
-        used: this._metrics.databaseQueries,
-        remaining: this._limits.databaseQueries - this._metrics.databaseQueries,
-      },
-      documentsRead: {
-        used: this._metrics.documentsRead,
-        remaining: this._limits.documentsRead - this._metrics.documentsRead,
-      },
-      documentsWritten: {
-        used: this._metrics.documentsWritten,
-        remaining:
-          this._limits.documentsWritten - this._metrics.documentsWritten,
-      },
-      functionsScheduled: {
-        used: this._metrics.functionsScheduled,
-        remaining:
-          this._limits.functionsScheduled - this._metrics.functionsScheduled,
-      },
-      scheduledFunctionArgsBytes: {
-        used: this._metrics.scheduledFunctionArgsBytes,
-        remaining:
-          this._limits.scheduledFunctionArgsBytes -
-          this._metrics.scheduledFunctionArgsBytes,
-      },
-    };
-  }
-}
-
 class TransactionManager {
   // The DatabaseFake is used in the Convex global,
   // and so it restricts `convexTest` to run one function
@@ -2070,8 +1908,7 @@ class TransactionManager {
   private _markTransactionDone: (() => void) | null = null;
   public functionStack: FunctionPath[] = [];
 
-  // Bandwidth tracking
-  private _bandwidthTracker: BandwidthTracker | null = null;
+  private _headroomTracker: HeadroomTracker | null = null;
   private _limitsConfig: Partial<TransactionMetrics> | boolean;
 
   constructor(limitsConfig: Partial<TransactionMetrics> | boolean = false) {
@@ -2093,7 +1930,7 @@ class TransactionManager {
       this._waitOnCurrentFunction = new Promise((resolve) => {
         this._markTransactionDone = resolve;
       });
-      this._bandwidthTracker = new BandwidthTracker(this._limitsConfig);
+      this._headroomTracker = new HeadroomTracker(this._limitsConfig);
     }
     this.functionStack.push(functionPath);
     const convex = getConvexGlobal();
@@ -2116,8 +1953,8 @@ class TransactionManager {
     return this._waitOnCurrentFunction !== null;
   }
 
-  getBandwidthTracker(): BandwidthTracker | null {
-    return this._bandwidthTracker;
+  getHeadroomTracker(): HeadroomTracker | null {
+    return this._headroomTracker;
   }
 
   commit(isNested: boolean) {
@@ -2142,7 +1979,7 @@ class TransactionManager {
     }
     this.functionStack.pop();
     if (!isNested) {
-      this._bandwidthTracker = null;
+      this._headroomTracker = null;
       this._waitOnCurrentFunction = null;
       this._markTransactionDone();
       this._markTransactionDone = null;
