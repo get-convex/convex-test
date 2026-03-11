@@ -1211,21 +1211,24 @@ function asyncSyscallImpl() {
   return async (op: string, jsonArgs: string): Promise<string> => {
     const args = JSON.parse(jsonArgs);
     const db = getDb();
+    const tracker = getTransactionManager().getHeadroomTracker();
+    function getAndTrack(table: string, id: GenericId<string>) {
+      const doc = db.get(table, id);
+      if (doc !== null) {
+        tracker?.trackRead(getDocumentSize(doc));
+      }
+      return doc;
+    }
     switch (op) {
       case "1.0/get": {
         const { table, id } = args;
-        const tracker = getTransactionManager().getHeadroomTracker();
         tracker?.trackIndexRange();
-        const doc = db.get(table, id);
-        if (doc !== null) {
-          tracker?.trackRead(getDocumentSize(doc));
-        }
+        const doc = getAndTrack(table, id);
         return JSON.stringify(convexToJson(doc));
       }
       case "1.0/queryStreamNext": {
         const { value, done } = db.queryNext(args.queryId);
         if (!done && value !== null) {
-          const tracker = getTransactionManager().getHeadroomTracker();
           tracker?.trackRead(getDocumentSize(value));
         }
         return JSON.stringify(convexToJson({ value, done }));
@@ -1248,7 +1251,6 @@ function asyncSyscallImpl() {
             maximumRowsRead,
             maximumBytesRead,
           });
-        const tracker = getTransactionManager().getHeadroomTracker();
         if (tracker) {
           tracker.trackIndexRange();
           for (const doc of page) {
@@ -1267,45 +1269,31 @@ function asyncSyscallImpl() {
       }
       case "1.0/insert": {
         const _id = db.insert(args.table, jsonToConvex(args.value));
-        const tracker = getTransactionManager().getHeadroomTracker();
-        if (tracker) {
-          const insertedDoc = db.get(args.table, _id);
-          if (insertedDoc) tracker.trackWrite(getDocumentSize(insertedDoc));
-        }
+        tracker?.trackWrite(getConvexSize(db.get(args.table, _id)));
         return JSON.stringify({ _id });
       }
       case "1.0/shallowMerge": {
         const { table, id, value } = args;
+        getAndTrack(table, id);
         db.patch(table, id, value);
-        const tracker = getTransactionManager().getHeadroomTracker();
-        if (tracker) {
-          const patchedDoc = db.get(table, id);
-          if (patchedDoc) tracker.trackWrite(getDocumentSize(patchedDoc));
-        }
+        tracker?.trackWrite(getConvexSize(db.get(table, id)));
         return JSON.stringify({});
       }
       case "1.0/replace": {
         const { table, id, value } = args;
+        getAndTrack(table, id);
         db.replace(table, id, value);
-        const tracker = getTransactionManager().getHeadroomTracker();
-        if (tracker) {
-          const replacedDoc = db.get(table, id);
-          if (replacedDoc) tracker.trackWrite(getDocumentSize(replacedDoc));
-        }
+        tracker?.trackWrite(getConvexSize(db.get(table, id)));
         return JSON.stringify({});
       }
       case "1.0/remove": {
         const { table, id } = args;
-        const tracker = getTransactionManager().getHeadroomTracker();
-        if (tracker) {
-          const docToDelete = db.get(table, id);
-          if (docToDelete) tracker.trackWrite(getDocumentSize(docToDelete));
-        }
+        getAndTrack(table, id);
         db.delete(table, id);
+        tracker?.trackWrite(0);
         return JSON.stringify({});
       }
       case "1.0/headroom": {
-        const tracker = getTransactionManager().getHeadroomTracker();
         if (tracker) {
           return JSON.stringify(convexToJson(tracker.getTransactionHeadroom()));
         }
@@ -1413,12 +1401,7 @@ function asyncSyscallImpl() {
         // Convert args to a Convex value before storing them or passing them to the function
         const parsedArgs = jsonToConvex(fnArgs);
 
-        // Track scheduled function metrics
-        const tracker = getTransactionManager().getHeadroomTracker();
-        if (tracker) {
-          const argsSize = getConvexSize(parsedArgs);
-          tracker.trackScheduledFunction(argsSize);
-        }
+        tracker?.trackScheduledFunction(getConvexSize(parsedArgs));
 
         const jobId = db.insert("_scheduled_functions", {
           args: [parsedArgs],
