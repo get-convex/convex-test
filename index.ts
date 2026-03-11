@@ -421,6 +421,30 @@ class DatabaseFake {
     }
   }
 
+  private _encodeCursor(
+    doc: GenericDocument,
+    fieldPaths: string[],
+  ): string {
+    const keys = fieldPaths.map((fp) => evaluateFieldPath(fp, doc));
+    return JSON.stringify(keys);
+  }
+
+  private _docIsAfterCursor(
+    doc: GenericDocument,
+    cursorKeys: any[],
+    fieldPaths: string[],
+    order: "asc" | "desc",
+  ): number {
+    const orderMultiplier = order === "asc" ? 1 : -1;
+    for (let i = 0; i < fieldPaths.length; i++) {
+      const docVal = evaluateFieldPath(fieldPaths[i], doc);
+      const cursorVal = cursorKeys[i];
+      const cmp = compareValues(docVal, cursorVal);
+      if (cmp !== 0) return cmp * orderMultiplier;
+    }
+    return 0;
+  }
+
   paginate({
     query,
     cursor,
@@ -436,9 +460,31 @@ class DatabaseFake {
     maximumRowsRead?: number | null;
     maximumBytesRead?: number | null;
   }) {
-    const { sortedDocs, filterFn } = this._resolveQuerySource(query);
+
+    const { sortedDocs, filterFn, fieldPathsToSortBy, order } =
+      this._resolveQuerySource(query);
+
+    // Always include _id in sort key fields for uniqueness
+    const cursorFields = fieldPathsToSortBy.includes("_id")
+      ? fieldPathsToSortBy
+      : [...fieldPathsToSortBy, "_id"];
+
+    const parseCursor = (c: string | null | undefined) => {
+      if (!c || c === "_end_cursor") return null;
+      try {
+        return JSON.parse(c) as any[];
+      } catch {
+        return null;
+      }
+    };
+
+    const cursorKeys = parseCursor(cursor);
+    // _end_cursor as endCursor means "to the end of the range" — no boundary
+    const hasEndBoundary = !!endCursor && endCursor !== "_end_cursor";
+    const endCursorKeys = hasEndBoundary ? parseCursor(endCursor) : null;
 
     const page: GenericDocument[] = [];
+    // null cursor = start of range
     let isInPage = cursor === null;
     let isDone = false;
     let continueCursor: string | null = null;
@@ -446,34 +492,61 @@ class DatabaseFake {
     let pageStatus: "SplitRecommended" | "SplitRequired" | null = null;
     let rowsRead = 0;
     let bytesRead = 0;
-    const readDocIds: string[] = [];
+    const readDocCursors: string[] = [];
 
-    for (const doc of sortedDocs) {
+    for (let i = 0; i < sortedDocs.length; i++) {
+      const doc = sortedDocs[i];
+      const isLastDoc = i === sortedDocs.length - 1;
+
       if (!isInPage) {
-        if ((doc._id as string) === cursor) {
-          isInPage = true;
+        if (cursorKeys) {
+          // Sort-key-based cursor: skip docs at or before cursor position
+          if (this._docIsAfterCursor(doc, cursorKeys, cursorFields, order) > 0) {
+            isInPage = true;
+          } else {
+            continue;
+          }
+        } else if (cursor !== null) {
+          // Legacy fallback: plain _id cursor
+          if ((doc._id as string) === cursor) {
+            isInPage = true;
+          }
+          continue;
         }
-        continue;
       }
 
-      // endCursor: stop when we reach this document (inclusive boundary)
-      if (endCursor && endCursor !== "_end_cursor") {
-        if ((doc._id as string) === endCursor) {
-          // Include this doc if it passes filter, then stop
+      // endCursor: stop when we reach or pass this position (inclusive boundary)
+      if (hasEndBoundary) {
+        if (endCursorKeys) {
+          const cmp = this._docIsAfterCursor(doc, endCursorKeys, cursorFields, order);
+          if (cmp >= 0) {
+            // At or past end cursor — include this doc if exactly at cursor, then stop
+            if (cmp === 0) {
+              rowsRead += 1;
+              bytesRead += getDocumentSize(doc);
+              readDocCursors.push(this._encodeCursor(doc, cursorFields));
+              if (filterFn(doc)) {
+                page.push(doc);
+              }
+              continueCursor = this._encodeCursor(doc, cursorFields);
+            }
+            break;
+          }
+        } else if ((doc._id as string) === endCursor) {
           rowsRead += 1;
           bytesRead += getDocumentSize(doc);
-          readDocIds.push(doc._id as string);
+          readDocCursors.push(this._encodeCursor(doc, cursorFields));
           if (filterFn(doc)) {
             page.push(doc);
           }
-          continueCursor = doc._id as string;
+          continueCursor = this._encodeCursor(doc, cursorFields);
           break;
         }
       }
 
       rowsRead += 1;
       bytesRead += getDocumentSize(doc);
-      readDocIds.push(doc._id as string);
+      readDocCursors.push(this._encodeCursor(doc, cursorFields));
 
       // Check bandwidth limits
       let hitLimit = false;
@@ -490,12 +563,16 @@ class DatabaseFake {
 
       if (hitLimit) {
         pageStatus = "SplitRequired";
-        continueCursor = doc._id as string;
+        continueCursor = this._encodeCursor(doc, cursorFields);
         break;
       }
 
       if (!endCursor && page.length >= pageSize) {
-        continueCursor = doc._id as string;
+        if (isLastDoc) {
+          // No more docs — don't set continueCursor so isDone becomes true
+        } else {
+          continueCursor = this._encodeCursor(doc, cursorFields);
+        }
         break;
       }
     }
@@ -506,18 +583,18 @@ class DatabaseFake {
     }
 
     // Compute splitCursor at midpoint when limits are hit
-    if (pageStatus === "SplitRequired" && readDocIds.length >= 2) {
-      const midIdx = Math.floor((readDocIds.length - 1) / 2);
-      splitCursor = readDocIds[midIdx];
+    if (pageStatus === "SplitRequired" && readDocCursors.length >= 2) {
+      const midIdx = Math.floor((readDocCursors.length - 1) / 2);
+      splitCursor = readDocCursors[midIdx];
     } else if (
       pageStatus === null &&
       rowsRead > pageSize + 1 &&
-      readDocIds.length >= 2
+      readDocCursors.length >= 2
     ) {
       // Recommend split when we had to scan significantly more rows than pageSize
       pageStatus = "SplitRecommended";
-      const midIdx = Math.floor((readDocIds.length - 1) / 2);
-      splitCursor = readDocIds[midIdx];
+      const midIdx = Math.floor((readDocCursors.length - 1) / 2);
+      splitCursor = readDocCursors[midIdx];
     }
 
     return {
@@ -559,6 +636,8 @@ class DatabaseFake {
     sortedDocs: GenericDocument[];
     filterFn: (doc: GenericDocument) => boolean;
     limit: number | null;
+    fieldPathsToSortBy: string[];
+    order: "asc" | "desc";
   } {
     const source = query.source;
     const results: GenericDocument[] = [];
@@ -655,6 +734,8 @@ class DatabaseFake {
       sortedDocs: results,
       filterFn,
       limit: limit?.limit ?? null,
+      fieldPathsToSortBy,
+      order,
     };
   }
 
