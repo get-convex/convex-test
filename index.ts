@@ -2000,7 +2000,7 @@ class TransactionManager {
  */
 export function convexTest<Schema extends GenericSchema>(
   schema?: SchemaDefinition<Schema, boolean>,
-  /** For example `import.meta.glob("./**\/*.*s")` */
+  // For example `import.meta.glob("./**/*.*s")`
   modules?: Record<string, () => Promise<any>>,
 ): TestConvex<SchemaDefinition<Schema, boolean>>;
 /**
@@ -2026,7 +2026,7 @@ export function convexTest<Schema extends GenericSchema>(
  */
 export function convexTest<Schema extends GenericSchema>(options: {
   schema?: SchemaDefinition<Schema, boolean>;
-  // For example `import.meta.glob("./**/*.*s")`
+  /** For example `import.meta.glob("./**\/*.*s")` */
   modules?: Record<string, () => Promise<any>>;
   transactionLimits?: Partial<TransactionMetrics> | boolean;
 }): TestConvex<SchemaDefinition<Schema, boolean>>;
@@ -2038,10 +2038,9 @@ export function convexTest<Schema extends GenericSchema>(
         modules?: Record<string, () => Promise<any>>;
         transactionLimits?: Partial<TransactionMetrics> | boolean;
       },
-  legacyModules?: Record<string, () => Promise<any>>,
+  modules?: Record<string, () => Promise<any>>,
 ): TestConvex<SchemaDefinition<Schema, boolean>> {
-  let schema: SchemaDefinition<Schema, boolean> | undefined;
-  let modules: Record<string, () => Promise<any>> | undefined;
+  let schema: SchemaDefinition<Schema, boolean> | undefined = undefined;
   let limitsConfig: Partial<TransactionMetrics> | boolean = false;
 
   // Detect legacy API by checking for schema's "tables" property
@@ -2061,7 +2060,6 @@ export function convexTest<Schema extends GenericSchema>(
   } else if (isSchemaDefinition(schemaOrOptions)) {
     // convexTest(schema, modules?)
     schema = schemaOrOptions;
-    modules = legacyModules;
   } else {
     // convexTest({ schema?, modules?, transactionLimits? })
     const opts = schemaOrOptions;
