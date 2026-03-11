@@ -33,10 +33,12 @@ import {
   JSONValue,
   Value,
   convexToJson,
+  getConvexSize,
   getDocumentSize,
   jsonToConvex,
 } from "convex/values";
 import { compareValues } from "./compare.js";
+import { HeadroomTracker, TransactionMetrics } from "./headroom.js";
 
 type FilterJson =
   | { $eq: [FilterJson, FilterJson] }
@@ -1175,6 +1177,8 @@ function syscallImpl() {
     switch (op) {
       case "1.0/queryStream": {
         const { query } = args;
+        const tracker = getTransactionManager().getHeadroomTracker();
+        tracker?.trackIndexRange();
         const queryId = db.startQuery(query);
         return JSON.stringify({ queryId });
       }
@@ -1207,14 +1211,26 @@ function asyncSyscallImpl() {
   return async (op: string, jsonArgs: string): Promise<string> => {
     const args = JSON.parse(jsonArgs);
     const db = getDb();
+    const tracker = getTransactionManager().getHeadroomTracker();
+    function getAndTrack(table: string, id: GenericId<string>) {
+      const doc = db.get(table, id);
+      if (doc !== null) {
+        tracker?.trackRead(getDocumentSize(doc));
+      }
+      return doc;
+    }
     switch (op) {
       case "1.0/get": {
         const { table, id } = args;
-        const doc = db.get(table, id);
+        tracker?.trackIndexRange();
+        const doc = getAndTrack(table, id);
         return JSON.stringify(convexToJson(doc));
       }
       case "1.0/queryStreamNext": {
         const { value, done } = db.queryNext(args.queryId);
+        if (!done && value !== null) {
+          tracker?.trackRead(getDocumentSize(value));
+        }
         return JSON.stringify(convexToJson({ value, done }));
       }
       case "1.0/queryPage": {
@@ -1235,6 +1251,12 @@ function asyncSyscallImpl() {
             maximumRowsRead,
             maximumBytesRead,
           });
+        if (tracker) {
+          tracker.trackIndexRange();
+          for (const doc of page) {
+            tracker.trackRead(getDocumentSize(doc));
+          }
+        }
         return JSON.stringify(
           convexToJson({
             page,
@@ -1247,22 +1269,38 @@ function asyncSyscallImpl() {
       }
       case "1.0/insert": {
         const _id = db.insert(args.table, jsonToConvex(args.value));
+        tracker?.trackWrite(getConvexSize(db.get(args.table, _id)));
         return JSON.stringify({ _id });
       }
       case "1.0/shallowMerge": {
         const { table, id, value } = args;
+        getAndTrack(table, id);
         db.patch(table, id, value);
+        tracker?.trackWrite(getConvexSize(db.get(table, id)));
         return JSON.stringify({});
       }
       case "1.0/replace": {
         const { table, id, value } = args;
+        getAndTrack(table, id);
         db.replace(table, id, value);
+        tracker?.trackWrite(getConvexSize(db.get(table, id)));
         return JSON.stringify({});
       }
       case "1.0/remove": {
         const { table, id } = args;
+        getAndTrack(table, id);
         db.delete(table, id);
+        tracker?.trackWrite(0);
         return JSON.stringify({});
+      }
+      case "1.0/headroom": {
+        if (tracker) {
+          return JSON.stringify(convexToJson(tracker.getTransactionHeadroom()));
+        }
+        throw new Error(
+          "getTransactionHeadroom() can only be called from a query or mutation. " +
+            "It is not available in actions or outside of a Convex function.",
+        );
       }
       case "1.0/actions/query": {
         const { name, args: queryArgs } = args;
@@ -1362,6 +1400,9 @@ function asyncSyscallImpl() {
         });
         // Convert args to a Convex value before storing them or passing them to the function
         const parsedArgs = jsonToConvex(fnArgs);
+
+        tracker?.trackScheduledFunction(getConvexSize(parsedArgs));
+
         const jobId = db.insert("_scheduled_functions", {
           args: [parsedArgs],
           name: functionPath.udfPath,
@@ -1850,6 +1891,13 @@ class TransactionManager {
   private _markTransactionDone: (() => void) | null = null;
   public functionStack: FunctionPath[] = [];
 
+  private _headroomTracker: HeadroomTracker | null = null;
+  private _limitsConfig: Partial<TransactionMetrics> | boolean;
+
+  constructor(limitsConfig: Partial<TransactionMetrics> | boolean = false) {
+    this._limitsConfig = limitsConfig;
+  }
+
   async begin(functionPath: FunctionPath, isNested: boolean) {
     // Take a lock only for the top-level of each transaction.
     // Nested transactions are not isolated so if you `Promise.all` on multiple
@@ -1865,6 +1913,7 @@ class TransactionManager {
       this._waitOnCurrentFunction = new Promise((resolve) => {
         this._markTransactionDone = resolve;
       });
+      this._headroomTracker = new HeadroomTracker(this._limitsConfig);
     }
     this.functionStack.push(functionPath);
     const convex = getConvexGlobal();
@@ -1885,6 +1934,10 @@ class TransactionManager {
   // environment.
   isInTransaction() {
     return this._waitOnCurrentFunction !== null;
+  }
+
+  getHeadroomTracker(): HeadroomTracker | null {
+    return this._headroomTracker;
   }
 
   commit(isNested: boolean) {
@@ -1909,6 +1962,7 @@ class TransactionManager {
     }
     this.functionStack.pop();
     if (!isNested) {
+      this._headroomTracker = null;
       this._waitOnCurrentFunction = null;
       this._markTransactionDone();
       this._markTransactionDone = null;
@@ -1921,17 +1975,82 @@ class TransactionManager {
  *
  * @param schema The default export from your "schema.ts" file.
  * @param modules If you have a custom `functions` path
- *   in convex.json, provide the module map with your functions
- *   by calling `import.meta.glob` with the appropriate glob pattern
- *   for paths relative to the file where you call it.
+ *     in convex.json, provide the function modules map by calling
+ *     `import.meta.glob("./**\/*.*s")` from a file at the root of
+ *     your Convex functions directory.
  * @returns an object which is by convention stored in the `t` variable
  *   and which provides methods for exercising your Convex functions.
  */
-export const convexTest = <Schema extends GenericSchema>(
+export function convexTest<Schema extends GenericSchema>(
   schema?: SchemaDefinition<Schema, boolean>,
   // For example `import.meta.glob("./**/*.*s")`
   modules?: Record<string, () => Promise<any>>,
-): TestConvex<SchemaDefinition<Schema, boolean>> => {
+): TestConvex<SchemaDefinition<Schema, boolean>>;
+/**
+ * Call this function at the start of each of your tests.
+ *
+ * @param options An optional configuration object with:
+ *   - `schema`: The default export from your "schema.ts" file.
+ *   - `modules`: If you have a custom `functions` path
+ *     in convex.json, provide the function modules map by calling
+ *     `import.meta.glob("./**\/*.*s")` from a file at the root of
+ *     your Convex functions directory.
+ *   - `transactionLimits`: Configure per-transaction bandwidth limits.
+ *     - `false` (default): limits are not enforced
+ *     - `true` or `{}`: enforce default Convex limits
+ *     - `{ bytesRead: 1024 }`: override specific limits
+ *
+ * @returns an object which is by convention stored in the `t` variable
+ *   and which provides methods for exercising your Convex functions.
+ *
+ * @example
+ * const t = convexTest({ schema });
+ * const t = convexTest({ schema, modules });
+ */
+export function convexTest<Schema extends GenericSchema>(options: {
+  schema?: SchemaDefinition<Schema, boolean>;
+  /** For example `import.meta.glob("./**\/*.*s")` */
+  modules?: Record<string, () => Promise<any>>;
+  transactionLimits?: Partial<TransactionMetrics> | boolean;
+}): TestConvex<SchemaDefinition<Schema, boolean>>;
+export function convexTest<Schema extends GenericSchema>(
+  schemaOrOptions?:
+    | SchemaDefinition<Schema, boolean>
+    | {
+        schema?: SchemaDefinition<Schema, boolean>;
+        modules?: Record<string, () => Promise<any>>;
+        transactionLimits?: Partial<TransactionMetrics> | boolean;
+      },
+  modules?: Record<string, () => Promise<any>>,
+): TestConvex<SchemaDefinition<Schema, boolean>> {
+  let schema: SchemaDefinition<Schema, boolean> | undefined = undefined;
+  let limitsConfig: Partial<TransactionMetrics> | boolean = false;
+
+  // Detect legacy API by checking for schema's "tables" property
+  function isSchemaDefinition(
+    schemaOrOptions: unknown,
+  ): schemaOrOptions is SchemaDefinition<Schema, boolean> {
+    return (
+      schemaOrOptions !== null &&
+      typeof schemaOrOptions === "object" &&
+      "tables" in schemaOrOptions &&
+      typeof (schemaOrOptions as any).tables === "object"
+    );
+  }
+
+  if (schemaOrOptions === undefined) {
+    // convexTest() - no arguments
+  } else if (isSchemaDefinition(schemaOrOptions)) {
+    // convexTest(schema, modules?)
+    schema = schemaOrOptions;
+  } else {
+    // convexTest({ schema?, modules?, transactionLimits? })
+    const opts = schemaOrOptions;
+    schema = opts.schema;
+    modules = opts.modules;
+    limitsConfig = opts.transactionLimits ?? false;
+  }
+
   const rootDb = new DatabaseFake(schema ?? null, ROOT_COMPONENT_PATH);
   setConvexGlobal({
     components: {
@@ -1940,7 +2059,7 @@ export const convexTest = <Schema extends GenericSchema>(
         modules: moduleCache(modules),
       },
     },
-    transactionManager: new TransactionManager(),
+    transactionManager: new TransactionManager(limitsConfig),
     syscall: syscallImpl(),
     asyncSyscall: asyncSyscallImpl(),
     jsSyscall: jsSyscallImpl(),
@@ -1970,7 +2089,7 @@ export const convexTest = <Schema extends GenericSchema>(
       getConvexGlobal().components[componentPath] = componentInfo;
     },
   } as any;
-};
+}
 
 function withAuth(auth: AuthFake = new AuthFake()) {
   const runTransaction = async <T>(
