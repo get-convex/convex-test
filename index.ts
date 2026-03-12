@@ -504,45 +504,28 @@ class DatabaseFake {
           } else {
             continue;
           }
-        } else if (cursor !== null) {
-          // Legacy fallback: plain _id cursor
-          if ((doc._id as string) === cursor) {
-            isInPage = true;
-          }
-          continue;
         }
       }
 
       // endCursor: stop when we reach or pass this position (inclusive boundary)
-      if (hasEndBoundary) {
-        if (endCursorKeys) {
-          const cmp = this._docIsAfterCursor(
-            doc,
-            endCursorKeys,
-            cursorFields,
-            order,
-          );
-          if (cmp >= 0) {
-            // At or past end cursor — include this doc if exactly at cursor, then stop
-            if (cmp === 0) {
-              rowsRead += 1;
-              bytesRead += getDocumentSize(doc);
-              readDocCursors.push(this._encodeCursor(doc, cursorFields));
-              if (filterFn(doc)) {
-                page.push(doc);
-              }
-              continueCursor = this._encodeCursor(doc, cursorFields);
+      if (hasEndBoundary && endCursorKeys) {
+        const cmp = this._docIsAfterCursor(
+          doc,
+          endCursorKeys,
+          cursorFields,
+          order,
+        );
+        if (cmp >= 0) {
+          // At or past end cursor — include this doc if exactly at cursor, then stop
+          if (cmp === 0) {
+            rowsRead += 1;
+            bytesRead += getDocumentSize(doc);
+            readDocCursors.push(this._encodeCursor(doc, cursorFields));
+            if (filterFn(doc)) {
+              page.push(doc);
             }
-            break;
+            continueCursor = this._encodeCursor(doc, cursorFields);
           }
-        } else if ((doc._id as string) === endCursor) {
-          rowsRead += 1;
-          bytesRead += getDocumentSize(doc);
-          readDocCursors.push(this._encodeCursor(doc, cursorFields));
-          if (filterFn(doc)) {
-            page.push(doc);
-          }
-          continueCursor = this._encodeCursor(doc, cursorFields);
           break;
         }
       }
