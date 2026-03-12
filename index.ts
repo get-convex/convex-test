@@ -423,7 +423,14 @@ class DatabaseFake {
 
   private _encodeCursor(doc: GenericDocument, fieldPaths: string[]): string {
     const keys = fieldPaths.map((fp) => evaluateFieldPath(fp, doc));
-    return JSON.stringify(keys);
+    // null sentinel in the array = undefined field value.
+    // Everything else is JSON.stringify(convexToJson(k)) producing a string,
+    // so null vs string is unambiguous on decode.
+    return JSON.stringify(
+      keys.map((k) =>
+        k === undefined ? null : JSON.stringify(convexToJson(k)),
+      ),
+    );
   }
 
   private _docIsAfterCursor(
@@ -466,15 +473,14 @@ class DatabaseFake {
       : [...fieldPathsToSortBy, "_id"];
 
     const parseCursor = (c: string | null | undefined) => {
-      if (!c || c === "_end_cursor") return null;
-      try {
-        return JSON.parse(c) as any[];
-      } catch {
-        return null;
-      }
+      if (!c) return null;
+      // null = undefined field; strings are JSON.stringify(convexToJson(v))
+      return (JSON.parse(c) as any[]).map((k) =>
+        k === null ? undefined : jsonToConvex(JSON.parse(k)),
+      );
     };
 
-    const cursorKeys = parseCursor(cursor);
+    const cursorKeys = cursor !== "_end_cursor" ? parseCursor(cursor) : null;
     // _end_cursor as endCursor means "to the end of the range" — no boundary
     const hasEndBoundary = !!endCursor && endCursor !== "_end_cursor";
     const endCursorKeys = hasEndBoundary ? parseCursor(endCursor) : null;
@@ -483,7 +489,7 @@ class DatabaseFake {
     // null cursor = start of range
     let isInPage = cursor === null;
     let isDone = false;
-    let continueCursor: string | null = null;
+    let continueCursor: string = "_end_cursor";
     let splitCursor: string | null = null;
     let pageStatus: "SplitRecommended" | "SplitRequired" | null = null;
     let rowsRead = 0;
@@ -495,7 +501,10 @@ class DatabaseFake {
       const isLastDoc = i === sortedDocs.length - 1;
 
       if (!isInPage) {
-        if (cursorKeys) {
+        if (cursor === "_end_cursor") {
+          // Past the end — no doc is after the end cursor
+          continue;
+        } else if (cursorKeys) {
           // Sort-key-based cursor: skip docs at or before cursor position
           if (
             this._docIsAfterCursor(doc, cursorKeys, cursorFields, order) > 0
@@ -563,9 +572,8 @@ class DatabaseFake {
       }
     }
 
-    if (continueCursor === null) {
+    if (continueCursor === "_end_cursor") {
       isDone = true;
-      continueCursor = "_end_cursor";
     }
 
     // Compute splitCursor at midpoint when limits are hit

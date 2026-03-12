@@ -39,6 +39,19 @@ export const listWithIndex = query({
   },
 });
 
+export const listWithOptionalFieldIndex = query({
+  args: {
+    author: v.string(),
+    paginationOptions: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("messages")
+      .withIndex("author_score", (q) => q.eq("author", args.author))
+      .paginate(args.paginationOptions);
+  },
+});
+
 export const listWithCompositeIndex = query({
   args: {
     author: v.string(),

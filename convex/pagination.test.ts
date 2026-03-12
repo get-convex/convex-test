@@ -192,6 +192,56 @@ test("paginate with endCursor", async () => {
   // Should get the same docs as result2
   expect(result3.page.length).toEqual(result2.page.length);
 });
+test("paginate with index on optional field with undefined values", async () => {
+  const t = convexTest(schema);
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", {
+      author: "sarah",
+      body: "hello1",
+      score: 10,
+    });
+    await ctx.db.insert("messages", { author: "sarah", body: "hello2" }); // score undefined
+    await ctx.db.insert("messages", {
+      author: "sarah",
+      body: "hello3",
+      score: 5,
+    });
+    await ctx.db.insert("messages", { author: "sarah", body: "hello4" }); // score undefined
+  });
+  const { continueCursor, isDone, page } = await t.query(
+    api.pagination.listWithOptionalFieldIndex,
+    {
+      author: "sarah",
+      paginationOptions: {
+        cursor: null,
+        numItems: 2,
+      },
+    },
+  );
+  // undefined scores should sort before defined scores
+  expect(page).toMatchObject([
+    { author: "sarah", body: "hello2" }, // score undefined
+    { author: "sarah", body: "hello4" }, // score undefined
+  ]);
+  expect(isDone).toEqual(false);
+  const { isDone: isDone2, page: page2 } = await t.query(
+    api.pagination.listWithOptionalFieldIndex,
+    {
+      author: "sarah",
+      paginationOptions: {
+        cursor: continueCursor,
+        numItems: 4,
+      },
+    },
+  );
+  // then defined scores in ascending order
+  expect(page2).toMatchObject([
+    { author: "sarah", body: "hello3", score: 5 },
+    { author: "sarah", body: "hello1", score: 10 },
+  ]);
+  expect(isDone2).toEqual(true);
+});
+
 test("paginate with deletes", async () => {
   const t = convexTest(schema);
   await t.run(async (ctx) => {
