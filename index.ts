@@ -421,10 +421,7 @@ class DatabaseFake {
     }
   }
 
-  private _encodeCursor(
-    doc: GenericDocument,
-    fieldPaths: string[],
-  ): string {
+  private _encodeCursor(doc: GenericDocument, fieldPaths: string[]): string {
     const keys = fieldPaths.map((fp) => evaluateFieldPath(fp, doc));
     return JSON.stringify(keys);
   }
@@ -460,7 +457,6 @@ class DatabaseFake {
     maximumRowsRead?: number | null;
     maximumBytesRead?: number | null;
   }) {
-
     const { sortedDocs, filterFn, fieldPathsToSortBy, order } =
       this._resolveQuerySource(query);
 
@@ -501,7 +497,9 @@ class DatabaseFake {
       if (!isInPage) {
         if (cursorKeys) {
           // Sort-key-based cursor: skip docs at or before cursor position
-          if (this._docIsAfterCursor(doc, cursorKeys, cursorFields, order) > 0) {
+          if (
+            this._docIsAfterCursor(doc, cursorKeys, cursorFields, order) > 0
+          ) {
             isInPage = true;
           } else {
             continue;
@@ -518,7 +516,12 @@ class DatabaseFake {
       // endCursor: stop when we reach or pass this position (inclusive boundary)
       if (hasEndBoundary) {
         if (endCursorKeys) {
-          const cmp = this._docIsAfterCursor(doc, endCursorKeys, cursorFields, order);
+          const cmp = this._docIsAfterCursor(
+            doc,
+            endCursorKeys,
+            cursorFields,
+            order,
+          );
           if (cmp >= 0) {
             // At or past end cursor — include this doc if exactly at cursor, then stop
             if (cmp === 0) {
