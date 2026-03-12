@@ -1,9 +1,14 @@
 # Changelog
 
-## 0.0.42 alpha
+## 0.0.42
 
 - Supports running inline functions via `t.action((ctx) => {...})` to aid in testing
   code that expects an action environment. Also works in t.query and t.mutation
+- Support for PaginationOptions maximumRowsRead & maximumBytesRead, as well as
+  page splitting.
+- Supports setting and enforcing transaction read/write limits within tests.
+- Fix: Finish actions cleanly when they throw
+- Replaces the compareValues implementation with the one now in "convex/values"
 
 ## 0.0.41
 
