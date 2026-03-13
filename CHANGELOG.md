@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.43-alpha.0
+
+- Support pagination when documents may be deleted by using the values as the cursor
+  instead of the ID.
+
 ## 0.0.42
 
 - Supports running inline functions via `t.action((ctx) => {...})` to aid in testing
