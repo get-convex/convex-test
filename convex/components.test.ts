@@ -93,6 +93,24 @@ test("parallel queries on different components", async () => {
   expect(result).toMatchObject({ count1: 3, count2: 5 });
 });
 
+test("scheduled mutations on components don't conflict with nested locks", async () => {
+  vi.useFakeTimers();
+  const t = testWithTwoCounters();
+  // Schedule mutations on both components in parallel (nested sub-transactions)
+  await t.mutation(internal.component.scheduleOnBothComponents);
+  // Run all scheduled functions - these execute as top-level transactions
+  // and should not deadlock with the nested lock system
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  // Verify both scheduled mutations completed
+  const [count1, count2] = await Promise.all([
+    t.query(components.counter.public.count, { name: "beans" }),
+    t.query(components.counter2.public.count, { name: "beans" }),
+  ]);
+  expect(count1).toEqual(1);
+  expect(count2).toEqual(1);
+  vi.useRealTimers();
+});
+
 test("parallel mutations on different components", async () => {
   const t = testWithTwoCounters();
   await t.mutation(internal.component.parallelComponentMutations);
