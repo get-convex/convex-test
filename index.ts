@@ -2213,7 +2213,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     // Each level gets its own lock via AsyncLocalStorage so nested-within-nested
     // parallel calls also serialize correctly within their own level.
     const parentLock = isNested
-      ? nestedTxStorage.getStore() ?? transactionManager.rootNestedLock
+      ? (nestedTxStorage.getStore() ?? transactionManager.rootNestedLock)
       : null;
     if (parentLock) {
       await parentLock.acquire();
@@ -2263,7 +2263,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
 
     // Serialize nested calls at each nesting level (same pattern as runTransaction).
     const parentLock = isNested
-      ? nestedTxStorage.getStore() ?? transactionManager.rootNestedLock
+      ? (nestedTxStorage.getStore() ?? transactionManager.rootNestedLock)
       : null;
     if (parentLock) {
       await parentLock.acquire();
