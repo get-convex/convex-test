@@ -114,7 +114,27 @@ type DocumentId = GenericId<TableName>;
 
 const ROOT_COMPONENT_PATH = "";
 
-const nestedTxStorage = new AsyncLocalStorage<true>();
+class NestedLock {
+  private _lock: Promise<void> | null = null;
+  private _release: (() => void) | null = null;
+
+  async acquire() {
+    while (this._lock !== null) {
+      await this._lock;
+    }
+    this._lock = new Promise((resolve) => {
+      this._release = resolve;
+    });
+  }
+
+  release() {
+    this._lock = null;
+    this._release!();
+    this._release = null;
+  }
+}
+
+const nestedTxStorage = new AsyncLocalStorage<NestedLock>();
 
 class DatabaseFake {
   private _componentPath: string;
@@ -1968,32 +1988,15 @@ class TransactionManager {
   private _waitOnCurrentFunction: Promise<void> | null = null;
   private _markTransactionDone: (() => void) | null = null;
   public functionStack: FunctionPath[] = [];
-  // Nested lock: serializes parallel nested sub-transactions
-  // (e.g. Promise.all of ctx.runQuery calls to different components)
-  // to prevent functionStack and transaction level corruption.
-  private _nestedLock: Promise<void> | null = null;
-  private _releaseNestedLock: (() => void) | null = null;
+  // Root-level nested lock: serializes the first layer of nested sub-transactions.
+  // Deeper layers get their own locks via AsyncLocalStorage.
+  public readonly rootNestedLock = new NestedLock();
 
   private _headroomTracker: HeadroomTracker | null = null;
   private _limitsConfig: Partial<TransactionMetrics> | boolean;
 
   constructor(limitsConfig: Partial<TransactionMetrics> | boolean = false) {
     this._limitsConfig = limitsConfig;
-  }
-
-  async acquireNestedLock() {
-    while (this._nestedLock !== null) {
-      await this._nestedLock;
-    }
-    this._nestedLock = new Promise((resolve) => {
-      this._releaseNestedLock = resolve;
-    });
-  }
-
-  releaseNestedLockMethod() {
-    this._nestedLock = null;
-    this._releaseNestedLock!();
-    this._releaseNestedLock = null;
   }
 
   async begin(functionPath: FunctionPath, isNested: boolean) {
@@ -2205,15 +2208,20 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     });
     const transactionManager = getTransactionManager();
 
-    // Serialize non-re-entrant nested calls to prevent functionStack
+    // Serialize nested calls at each nesting level to prevent functionStack
     // and transaction level corruption from parallel component sub-calls.
-    const acquiredNestedLock = isNested && !nestedTxStorage.getStore();
-    if (acquiredNestedLock) {
-      await transactionManager.acquireNestedLock();
+    // Each level gets its own lock via AsyncLocalStorage so nested-within-nested
+    // parallel calls also serialize correctly within their own level.
+    const parentLock = isNested
+      ? nestedTxStorage.getStore() ?? transactionManager.rootNestedLock
+      : null;
+    if (parentLock) {
+      await parentLock.acquire();
     }
 
     await transactionManager.begin(functionPath, isNested);
     try {
+      const childLock = new NestedLock();
       const invokeInContext = () =>
         (
           m as unknown as {
@@ -2222,7 +2230,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
 
       const rawResult = isNested
-        ? await nestedTxStorage.run(true, invokeInContext)
+        ? await nestedTxStorage.run(childLock, invokeInContext)
         : await invokeInContext();
 
       transactionManager.commit(isNested);
@@ -2231,8 +2239,8 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       transactionManager.rollback(isNested);
       throw e;
     } finally {
-      if (acquiredNestedLock) {
-        transactionManager.releaseNestedLockMethod();
+      if (parentLock) {
+        parentLock.release();
       }
     }
   };
@@ -2253,29 +2261,31 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     });
     const transactionManager = getTransactionManager();
 
-    // Serialize non-re-entrant nested calls to prevent functionStack
-    // and transaction level corruption from parallel component sub-calls.
-    const acquiredNestedLock = isNested && !nestedTxStorage.getStore();
-    if (acquiredNestedLock) {
-      await transactionManager.acquireNestedLock();
+    // Serialize nested calls at each nesting level (same pattern as runTransaction).
+    const parentLock = isNested
+      ? nestedTxStorage.getStore() ?? transactionManager.rootNestedLock
+      : null;
+    if (parentLock) {
+      await parentLock.acquire();
     }
 
     await transactionManager.begin(functionPath, isNested);
     try {
+      const childLock = new NestedLock();
       const invokeInContext = () =>
         (
           q as unknown as { invokeQuery: (args: string) => Promise<string> }
         ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
 
       const rawResult = isNested
-        ? await nestedTxStorage.run(true, invokeInContext)
+        ? await nestedTxStorage.run(childLock, invokeInContext)
         : await invokeInContext();
 
       return jsonToConvex(JSON.parse(rawResult)) as T;
     } finally {
       transactionManager.rollback(isNested);
-      if (acquiredNestedLock) {
-        transactionManager.releaseNestedLockMethod();
+      if (parentLock) {
+        parentLock.release();
       }
     }
   };
