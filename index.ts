@@ -1838,7 +1838,9 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    *   usually `vi.runAllTimers`. This function will be called in a loop
    *   with `finishInProgressScheduledFunctions()`.
    */
-  finishAllScheduledFunctions: (advanceTimers: () => void) => Promise<void>;
+  finishAllScheduledFunctions: (
+    advanceTimers: (() => void) | (() => Promise<void>),
+  ) => Promise<void>;
 };
 
 export type TestConvexForDataModelAndIdentity<
@@ -2577,16 +2579,32 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     },
 
     finishAllScheduledFunctions: async (
-      advanceTimers: () => void,
+      advanceTimers: (() => void) | (() => Promise<void>),
       maxIterations: number = 100,
     ): Promise<void> => {
       // Wait for all scheduled functions to finish, advancing time in between
       // each function.
       // Stop after a fixed number of iterations to avoid infinite loops.
       for (let i = 0; i < maxIterations; i++) {
-        advanceTimers();
-        const hadScheduledFunctions =
-          await waitForInProgressScheduledFunctions();
+        await advanceTimers();
+        // Keep advancing timers while waiting for scheduled functions.
+        // Actions may use setTimeout internally (e.g. for delays), and those
+        // timers need to be fired for the action to complete.
+        let done = false;
+        const waitPromise = waitForInProgressScheduledFunctions().then(
+          (had) => {
+            done = true;
+            return had;
+          },
+        );
+        // Pump timers while waiting for in-progress functions to finish.
+        // Limit pumps to avoid infinite loops with sync advanceTimers.
+        for (let pump = 0; pump < 1000 && !done; pump++) {
+          await advanceTimers();
+          // Yield to microtask queue to let job completion propagate
+          await new Promise<void>((r) => queueMicrotask(r));
+        }
+        const hadScheduledFunctions = await waitPromise;
         if (!hadScheduledFunctions) {
           return;
         }
