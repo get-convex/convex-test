@@ -135,6 +135,7 @@ class NestedLock {
 }
 
 const nestedTxStorage = new AsyncLocalStorage<NestedLock>();
+const authStorage = new AsyncLocalStorage<AuthFake>();
 
 class DatabaseFake {
   private _componentPath: string;
@@ -1509,63 +1510,66 @@ function asyncSyscallImpl() {
         });
         const componentPath = getCurrentComponentPath();
         setTimeout(
-          (async () => {
-            const canceled = await withAuth().runInComponent(
-              componentPath,
-              async () => {
+          // Scheduled functions run without auth context, even if
+          // they were scheduled from an authenticated function.
+          (() =>
+            authStorage.run(new AuthFake(), async () => {
+              const canceled = await withAuth().runInComponent(
+                componentPath,
+                async () => {
+                  const job = db.get(
+                    "_scheduled_functions",
+                    jobId,
+                  ) as ScheduledFunction;
+                  if (job.state.kind === "canceled") {
+                    return true;
+                  }
+                  if (job.state.kind !== "pending") {
+                    throw new Error(
+                      `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+                    );
+                  }
+                  db.patch("_scheduled_functions", jobId, {
+                    state: { kind: "inProgress" },
+                  });
+                  return false;
+                },
+              );
+              if (canceled) {
+                return;
+              }
+              try {
+                await withAuth().fun(functionPath, parsedArgs);
+              } catch (error) {
+                console.error(
+                  `Error when running scheduled function ${name}`,
+                  error,
+                );
+                await withAuth().runInComponent(componentPath, async () => {
+                  db.patch("_scheduled_functions", jobId, {
+                    state: { kind: "failed" },
+                    completedTime: Date.now(),
+                  });
+                });
+                db.jobFinished(jobId);
+                return;
+              }
+              await withAuth().runInComponent(componentPath, async () => {
                 const job = db.get(
                   "_scheduled_functions",
                   jobId,
                 ) as ScheduledFunction;
-                if (job.state.kind === "canceled") {
-                  return true;
-                }
-                if (job.state.kind !== "pending") {
+                if (job.state.kind !== "inProgress") {
                   throw new Error(
-                    `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+                    `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
                   );
                 }
                 db.patch("_scheduled_functions", jobId, {
-                  state: { kind: "inProgress" },
-                });
-                return false;
-              },
-            );
-            if (canceled) {
-              return;
-            }
-            try {
-              await withAuth().fun(functionPath, parsedArgs);
-            } catch (error) {
-              console.error(
-                `Error when running scheduled function ${name}`,
-                error,
-              );
-              await withAuth().runInComponent(componentPath, async () => {
-                db.patch("_scheduled_functions", jobId, {
-                  state: { kind: "failed" },
-                  completedTime: Date.now(),
+                  state: { kind: "success" },
                 });
               });
               db.jobFinished(jobId);
-              return;
-            }
-            await withAuth().runInComponent(componentPath, async () => {
-              const job = db.get(
-                "_scheduled_functions",
-                jobId,
-              ) as ScheduledFunction;
-              if (job.state.kind !== "inProgress") {
-                throw new Error(
-                  `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
-                );
-              }
-              db.patch("_scheduled_functions", jobId, {
-                state: { kind: "success" },
-              });
-            });
-            db.jobFinished(jobId);
-          }) as () => void,
+            })) as () => void,
           tsInSecs * 1000 - Date.now(),
         );
         return JSON.stringify(convexToJson(jobId));
@@ -2202,7 +2206,7 @@ export function convexTest<Schema extends GenericSchema>(
   } as any;
 }
 
-function withAuth(auth: AuthFake = new AuthFake()) {
+function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
   const runMutationWithHandler = async <T>(
     handler: (ctx: any, args: any) => T,
     args: any,
@@ -2232,12 +2236,13 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     await transactionManager.begin(functionPath, isNested);
     try {
       const childLock = new NestedLock();
-      const invokeInContext = () =>
+      const invokeRaw = () =>
         (
           m as unknown as {
             invokeMutation: (args: string) => Promise<string>;
           }
         ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
+      const invokeInContext = () => authStorage.run(auth, invokeRaw);
 
       const rawResult = isNested
         ? await nestedTxStorage.run(childLock, invokeInContext)
@@ -2282,10 +2287,11 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     await transactionManager.begin(functionPath, isNested);
     try {
       const childLock = new NestedLock();
-      const invokeInContext = () =>
+      const invokeRaw = () =>
         (
           q as unknown as { invokeQuery: (args: string) => Promise<string> }
         ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
+      const invokeInContext = () => authStorage.run(auth, invokeRaw);
 
       const rawResult = isNested
         ? await nestedTxStorage.run(childLock, invokeInContext)
@@ -2329,13 +2335,18 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       getTransactionManager().beginAction(functionPath);
       const requestId = "" + Math.random();
       try {
-        const rawResult = await (
-          a as unknown as {
-            invokeAction: (requestId: string, args: string) => Promise<string>;
-          }
-        ).invokeAction(
-          requestId,
-          JSON.stringify(convexToJson([parseArgs(args)])),
+        const rawResult = await authStorage.run(auth, () =>
+          (
+            a as unknown as {
+              invokeAction: (
+                requestId: string,
+                args: string,
+              ) => Promise<string>;
+            }
+          ).invokeAction(
+            requestId,
+            JSON.stringify(convexToJson([parseArgs(args)])),
+          ),
         );
         return jsonToConvex(JSON.parse(rawResult)) as T;
       } finally {
