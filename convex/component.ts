@@ -141,6 +141,27 @@ export const actionOnCounter2 = internalAction({
   },
 });
 
+export const queryComponentAuth = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<string | null> => {
+    return await ctx.runQuery(components.counter.public.getIdentityName);
+  },
+});
+
+export const mutationComponentAuth = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<string | null> => {
+    return await ctx.runQuery(components.counter.public.getIdentityName);
+  },
+});
+
+export const actionComponentAuth = internalAction({
+  args: {},
+  handler: async (ctx): Promise<string | null> => {
+    return await ctx.runQuery(components.counter.public.getIdentityName);
+  },
+});
+
 export const parallelComponentMutations = internalMutation({
   args: {},
   handler: async (ctx): Promise<null> => {

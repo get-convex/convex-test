@@ -123,6 +123,34 @@ test("parallel actions on different components don't corrupt function stacks", a
   expect(count2).toEqual(20);
 });
 
+test("auth does not propagate across component boundaries from query", async () => {
+  const t = testWithCounter();
+  const asSarah = t.withIdentity({ name: "Sarah" });
+  const name = await asSarah.query(internal.component.queryComponentAuth);
+  expect(name).toBeNull();
+});
+
+test("auth does not propagate across component boundaries from mutation", async () => {
+  const t = testWithCounter();
+  const asSarah = t.withIdentity({ name: "Sarah" });
+  const name = await asSarah.mutation(internal.component.mutationComponentAuth);
+  expect(name).toBeNull();
+});
+
+test("auth does not propagate across component boundaries from action", async () => {
+  const t = testWithCounter();
+  const asSarah = t.withIdentity({ name: "Sarah" });
+  const name = await asSarah.action(internal.component.actionComponentAuth);
+  expect(name).toBeNull();
+});
+
+test("auth applies to directly called component function", async () => {
+  const t = testWithCounter();
+  const asSarah = t.withIdentity({ name: "Sarah" });
+  const name = await asSarah.query(components.counter.public.getIdentityName);
+  expect(name).toEqual("Sarah");
+});
+
 test("parallel mutations on different components", async () => {
   const t = testWithTwoCounters();
   await t.mutation(internal.component.parallelComponentMutations);

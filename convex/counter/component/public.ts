@@ -80,6 +80,13 @@ export const mutationWithNestedQuery = mutation({
   },
 });
 
+export const getIdentityName = query({
+  args: {},
+  handler: async (ctx) => {
+    return (await ctx.auth.getUserIdentity())?.name ?? null;
+  },
+});
+
 export const mutationWithNumberArg = mutation({
   args: { a: v.number() },
   handler: async (_ctx, args) => {

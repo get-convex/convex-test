@@ -2207,6 +2207,15 @@ export function convexTest<Schema extends GenericSchema>(
 }
 
 function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
+  // Auth doesn't propagate across component boundaries.
+  // Must be called before begin()/beginAction() which pushes onto functionStack.
+  function authForComponent(componentPath: string) {
+    const isCrossComponent =
+      getTransactionManager().getFunctionStack().length > 0 &&
+      componentPath !== getCurrentComponentPath();
+    return isCrossComponent ? new AuthFake() : auth;
+  }
+
   const runMutationWithHandler = async <T>(
     handler: (ctx: any, args: any) => T,
     args: any,
@@ -2216,7 +2225,11 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
   ): Promise<T> => {
     const m = mutationGeneric({
       handler: (ctx: any, a: any) => {
-        const testCtx = { ...ctx, auth, ...extraCtx };
+        const testCtx = {
+          ...ctx,
+          auth: authStorage.getStore() ?? auth,
+          ...extraCtx,
+        };
         return handler(testCtx, a);
       },
     });
@@ -2233,6 +2246,8 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       await parentLock.acquire();
     }
 
+    const authForChild = authForComponent(functionPath.componentPath);
+
     await transactionManager.begin(functionPath, isNested);
     try {
       const childLock = new NestedLock();
@@ -2242,7 +2257,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
             invokeMutation: (args: string) => Promise<string>;
           }
         ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
-      const invokeInContext = () => authStorage.run(auth, invokeRaw);
+      const invokeInContext = () => authStorage.run(authForChild, invokeRaw);
 
       const rawResult = isNested
         ? await nestedTxStorage.run(childLock, invokeInContext)
@@ -2270,7 +2285,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
   ): Promise<T> => {
     const q = queryGeneric({
       handler: (ctx: any, a: any) => {
-        const testCtx = { ...ctx, auth };
+        const testCtx = { ...ctx, auth: authStorage.getStore() ?? auth };
         return handler(testCtx, a);
       },
     });
@@ -2284,6 +2299,8 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       await parentLock.acquire();
     }
 
+    const authForChild = authForComponent(functionPath.componentPath);
+
     await transactionManager.begin(functionPath, isNested);
     try {
       const childLock = new NestedLock();
@@ -2291,7 +2308,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         (
           q as unknown as { invokeQuery: (args: string) => Promise<string> }
         ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
-      const invokeInContext = () => authStorage.run(auth, invokeRaw);
+      const invokeInContext = () => authStorage.run(authForChild, invokeRaw);
 
       const rawResult = isNested
         ? await nestedTxStorage.run(childLock, invokeInContext)
@@ -2323,7 +2340,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           runQuery: ctxRunQuery,
           runMutation: ctxRunMutation,
           runAction: ctxRunAction,
-          auth,
+          auth: authStorage.getStore() ?? auth,
         };
         return handler(testCtx, innerArgs);
       },
@@ -2332,10 +2349,11 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     // don't corrupt each other's stacks.
     const stack: FunctionPath[] = [];
     return await functionStackStorage.run(stack, async () => {
+      const authForChild = authForComponent(functionPath.componentPath);
       getTransactionManager().beginAction(functionPath);
       const requestId = "" + Math.random();
       try {
-        const rawResult = await authStorage.run(auth, () =>
+        const rawResult = await authStorage.run(authForChild, () =>
           (
             a as unknown as {
               invokeAction: (
