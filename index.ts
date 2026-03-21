@@ -1509,69 +1509,80 @@ function asyncSyscallImpl() {
           state: { kind: "pending" },
         });
         const componentPath = getCurrentComponentPath();
-        setTimeout(
-          // Scheduled functions run without auth context, even if
-          // they were scheduled from an authenticated function.
+        const timers = getConvexGlobal().scheduledTimers;
+        const tm = getTransactionManager();
+        // Scheduled functions run without auth context, even if
+        // they were scheduled from an authenticated function.
+        const timer = setTimeout(
           (() =>
             authStorage.run(new AuthFake(), async () => {
-              const canceled = await withAuth().runInComponent(
-                componentPath,
-                async () => {
+              try {
+                timers.delete(timer);
+                const canceled = await withAuth().runInComponent(
+                  componentPath,
+                  async () => {
+                    const job = db.get(
+                      "_scheduled_functions",
+                      jobId,
+                    ) as ScheduledFunction;
+                    if (job.state.kind === "canceled") {
+                      return true;
+                    }
+                    if (job.state.kind !== "pending") {
+                      throw new Error(
+                        `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+                      );
+                    }
+                    db.patch("_scheduled_functions", jobId, {
+                      state: { kind: "inProgress" },
+                    });
+                    return false;
+                  },
+                );
+                if (canceled) {
+                  return;
+                }
+                try {
+                  await withAuth().fun(functionPath, parsedArgs);
+                } catch (error) {
+                  console.error(
+                    `Error when running scheduled function ${name}`,
+                    error,
+                  );
+                  await withAuth().runInComponent(componentPath, async () => {
+                    db.patch("_scheduled_functions", jobId, {
+                      state: { kind: "failed" },
+                      completedTime: Date.now(),
+                    });
+                  });
+                  db.jobFinished(jobId);
+                  return;
+                }
+                await withAuth().runInComponent(componentPath, async () => {
                   const job = db.get(
                     "_scheduled_functions",
                     jobId,
                   ) as ScheduledFunction;
-                  if (job.state.kind === "canceled") {
-                    return true;
-                  }
-                  if (job.state.kind !== "pending") {
+                  if (job.state.kind !== "inProgress") {
                     throw new Error(
-                      `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+                      `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
                     );
                   }
                   db.patch("_scheduled_functions", jobId, {
-                    state: { kind: "inProgress" },
-                  });
-                  return false;
-                },
-              );
-              if (canceled) {
-                return;
-              }
-              try {
-                await withAuth().fun(functionPath, parsedArgs);
-              } catch (error) {
-                console.error(
-                  `Error when running scheduled function ${name}`,
-                  error,
-                );
-                await withAuth().runInComponent(componentPath, async () => {
-                  db.patch("_scheduled_functions", jobId, {
-                    state: { kind: "failed" },
-                    completedTime: Date.now(),
+                    state: { kind: "success" },
                   });
                 });
                 db.jobFinished(jobId);
-                return;
+              } catch (e) {
+                // If this test instance was disposed (replaced by a new
+                // convexTest()), silently ignore errors from orphaned functions.
+                if (tm.disposed) return;
+                throw e;
               }
-              await withAuth().runInComponent(componentPath, async () => {
-                const job = db.get(
-                  "_scheduled_functions",
-                  jobId,
-                ) as ScheduledFunction;
-                if (job.state.kind !== "inProgress") {
-                  throw new Error(
-                    `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
-                  );
-                }
-                db.patch("_scheduled_functions", jobId, {
-                  state: { kind: "success" },
-                });
-              });
-              db.jobFinished(jobId);
             })) as () => void,
           tsInSecs * 1000 - Date.now(),
         );
+        timers.add(timer);
         return JSON.stringify(convexToJson(jobId));
       }
       case "1.0/actions/cancel_job": {
@@ -1971,6 +1982,7 @@ const functionStackStorage = new AsyncLocalStorage<FunctionPath[]>();
 type ConvexGlobal = {
   components: Record<string, ComponentInfo>;
   transactionManager: TransactionManager;
+  scheduledTimers: Set<ReturnType<typeof setTimeout>>;
   syscall: (op: string, args: any) => any;
   asyncSyscall: (op: string, args: any) => Promise<any>;
   jsSyscall: (op: string, args: any) => Promise<any>;
@@ -1981,9 +1993,18 @@ function getConvexGlobal(): ConvexGlobal {
 }
 
 function setConvexGlobal(convex: ConvexGlobal) {
-  if (getConvexGlobal()) {
-    if (getTransactionManager().isInTransaction()) {
-      throw new Error("test began while previous transaction was still open");
+  const prev = getConvexGlobal();
+  if (prev) {
+    // Cancel any pending scheduled function timers from the previous test.
+    for (const timer of prev.scheduledTimers) {
+      clearTimeout(timer);
+    }
+    prev.scheduledTimers.clear();
+    if (prev.transactionManager.isInTransaction()) {
+      // Force-release the transaction lock so orphaned in-progress scheduled
+      // functions don't block. This is safe because we're replacing the entire
+      // global — the old transaction manager will never be used again.
+      prev.transactionManager.dispose();
     }
   }
   (global as unknown as { Convex: ConvexGlobal }).Convex = convex;
@@ -2027,6 +2048,11 @@ class TransactionManager {
       while (this._waitOnCurrentFunction !== null) {
         await this._waitOnCurrentFunction;
       }
+      if (this._disposed) {
+        throw new Error(
+          "convexTest instance was replaced - a test likely failed to exit cleanly",
+        );
+      }
       this._waitOnCurrentFunction = new Promise((resolve) => {
         this._markTransactionDone = resolve;
       });
@@ -2051,6 +2077,24 @@ class TransactionManager {
   // environment.
   isInTransaction() {
     return this._waitOnCurrentFunction !== null;
+  }
+
+  private _disposed = false;
+
+  get disposed() {
+    return this._disposed;
+  }
+
+  // Mark this transaction manager as disposed. Called when a new convexTest()
+  // replaces the global.
+  dispose() {
+    this._disposed = true;
+    // Release the lock so any awaiting functions can wake up and see _disposed.
+    if (this._markTransactionDone) {
+      this._waitOnCurrentFunction = null;
+      this._markTransactionDone();
+      this._markTransactionDone = null;
+    }
   }
 
   getHeadroomTracker(): HeadroomTracker | null {
@@ -2177,6 +2221,7 @@ export function convexTest<Schema extends GenericSchema>(
       },
     },
     transactionManager: new TransactionManager(limitsConfig),
+    scheduledTimers: new Set(),
     syscall: syscallImpl(),
     asyncSyscall: asyncSyscallImpl(),
     jsSyscall: jsSyscallImpl(),
