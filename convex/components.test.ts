@@ -111,6 +111,18 @@ test("scheduled mutations on components don't conflict with nested locks", async
   vi.useRealTimers();
 });
 
+test("parallel actions on different components don't corrupt function stacks", async () => {
+  const t = testWithTwoCounters();
+  // Run two actions in parallel, each operating on a different component.
+  // Without per-action function stacks, the shared stack would get corrupted.
+  const [count1, count2] = await Promise.all([
+    t.action(internal.component.actionOnCounter1),
+    t.action(internal.component.actionOnCounter2),
+  ]);
+  expect(count1).toEqual(10);
+  expect(count2).toEqual(20);
+});
+
 test("parallel mutations on different components", async () => {
   const t = testWithTwoCounters();
   await t.mutation(internal.component.parallelComponentMutations);

@@ -115,6 +115,32 @@ export const parallelComponentQueries = internalMutation({
   },
 });
 
+export const actionOnCounter1 = internalAction({
+  args: {},
+  handler: async (ctx): Promise<number> => {
+    await ctx.runMutation(components.counter.public.add, {
+      name: "beans",
+      count: 10,
+    });
+    return await ctx.runQuery(components.counter.public.count, {
+      name: "beans",
+    });
+  },
+});
+
+export const actionOnCounter2 = internalAction({
+  args: {},
+  handler: async (ctx): Promise<number> => {
+    await ctx.runMutation(components.counter2.public.add, {
+      name: "beans",
+      count: 20,
+    });
+    return await ctx.runQuery(components.counter2.public.count, {
+      name: "beans",
+    });
+  },
+});
+
 export const parallelComponentMutations = internalMutation({
   args: {},
   handler: async (ctx): Promise<null> => {

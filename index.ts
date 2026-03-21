@@ -1885,7 +1885,7 @@ function getTransactionManager() {
 }
 
 function getCurrentComponentPath() {
-  const functionStack = getTransactionManager().functionStack;
+  const functionStack = getTransactionManager().getFunctionStack();
   const currentFunctionPath = functionStack[functionStack.length - 1];
   return currentFunctionPath?.componentPath ?? ROOT_COMPONENT_PATH;
 }
@@ -1958,6 +1958,10 @@ type FunctionPath = {
   udfPath: string;
 };
 
+// Per-execution-context function stack. Actions create their own context
+// so parallel actions don't corrupt each other's stacks.
+const functionStackStorage = new AsyncLocalStorage<FunctionPath[]>();
+
 type ConvexGlobal = {
   components: Record<string, ComponentInfo>;
   transactionManager: TransactionManager;
@@ -1987,10 +1991,16 @@ class TransactionManager {
   // can run mutations in parallel.
   private _waitOnCurrentFunction: Promise<void> | null = null;
   private _markTransactionDone: (() => void) | null = null;
-  public functionStack: FunctionPath[] = [];
+  // Default function stack used when not inside an action's ALS context.
+  private _functionStack: FunctionPath[] = [];
   // Root-level nested lock: serializes the first layer of nested sub-transactions.
   // Deeper layers get their own locks via AsyncLocalStorage.
   public readonly rootNestedLock = new NestedLock();
+
+  // Returns the per-context function stack (ALS stack for actions, shared stack otherwise).
+  getFunctionStack(): FunctionPath[] {
+    return functionStackStorage.getStore() ?? this._functionStack;
+  }
 
   private _headroomTracker: HeadroomTracker | null = null;
   private _limitsConfig: Partial<TransactionMetrics> | boolean;
@@ -2016,7 +2026,7 @@ class TransactionManager {
       });
       this._headroomTracker = new HeadroomTracker(this._limitsConfig);
     }
-    this.functionStack.push(functionPath);
+    this.getFunctionStack().push(functionPath);
     const convex = getConvexGlobal();
     for (const component of Object.values(convex.components)) {
       component.db.startTransaction();
@@ -2024,11 +2034,11 @@ class TransactionManager {
   }
 
   beginAction(functionPath: FunctionPath) {
-    this.functionStack.push(functionPath);
+    this.getFunctionStack().push(functionPath);
   }
 
   finishAction() {
-    this.functionStack.pop();
+    this.getFunctionStack().pop();
   }
 
   // Used to distinguish between mutation and action execution
@@ -2061,7 +2071,7 @@ class TransactionManager {
     if (this._markTransactionDone === null) {
       throw new Error("Transaction not started");
     }
-    this.functionStack.pop();
+    this.getFunctionStack().pop();
     if (!isNested) {
       this._headroomTracker = null;
       this._waitOnCurrentFunction = null;
@@ -2312,21 +2322,26 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         return handler(testCtx, innerArgs);
       },
     });
-    getTransactionManager().beginAction(functionPath);
-    const requestId = "" + Math.random();
-    try {
-      const rawResult = await (
-        a as unknown as {
-          invokeAction: (requestId: string, args: string) => Promise<string>;
-        }
-      ).invokeAction(
-        requestId,
-        JSON.stringify(convexToJson([parseArgs(args)])),
-      );
-      return jsonToConvex(JSON.parse(rawResult)) as T;
-    } finally {
-      getTransactionManager().finishAction();
-    }
+    // Each action gets its own function stack via ALS so parallel actions
+    // don't corrupt each other's stacks.
+    const stack: FunctionPath[] = [];
+    return await functionStackStorage.run(stack, async () => {
+      getTransactionManager().beginAction(functionPath);
+      const requestId = "" + Math.random();
+      try {
+        const rawResult = await (
+          a as unknown as {
+            invokeAction: (requestId: string, args: string) => Promise<string>;
+          }
+        ).invokeAction(
+          requestId,
+          JSON.stringify(convexToJson([parseArgs(args)])),
+        );
+        return jsonToConvex(JSON.parse(rawResult)) as T;
+      } finally {
+        getTransactionManager().finishAction();
+      }
+    });
   };
 
   const byTypeWithPath = {
