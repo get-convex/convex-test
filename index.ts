@@ -2353,12 +2353,14 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       const func = await getFunctionFromPath(functionPath, "query");
       validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
 
-      return await runQueryWithHandler(
+      const result = await runQueryWithHandler(
         (ctx, a) => getHandler(func)(ctx, a),
         args,
         functionPath,
         isNested,
       );
+      validateReturnValue(func, result, "query", functionPath);
+      return result;
     },
 
     mutationFromPath: async (
@@ -2369,20 +2371,22 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       const func = await getFunctionFromPath(functionPath, "mutation");
       validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
 
-      return await runMutationWithHandler(
+      const result = await runMutationWithHandler(
         getHandler(func),
         args,
         {},
         functionPath,
         isNested,
       );
+      validateReturnValue(func, result, "mutation", functionPath);
+      return result;
     },
 
     actionFromPath: async (functionPath: FunctionPath, args: any) => {
       const func = await getFunctionFromPath(functionPath, "action");
       validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
 
-      return await runActionWithHandler(
+      const result = await runActionWithHandler(
         getHandler(func),
         args,
         functionPath,
@@ -2390,6 +2394,8 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         byTypeWithPath.runMutation,
         byTypeWithPath.runAction,
       );
+      validateReturnValue(func, result, "action", functionPath);
+      return result;
     },
     runQuery: async (
       functionReference: FunctionReference<any, any, any, any>,
@@ -2614,6 +2620,24 @@ function parseArgs(
     );
   }
   return args;
+}
+
+function validateReturnValue(
+  func: any,
+  result: any,
+  functionType: "query" | "mutation" | "action",
+  functionPath: FunctionPath,
+) {
+  const returnsValidator = JSON.parse(func.exportReturns());
+  if (returnsValidator !== null) {
+    try {
+      validateValidator(returnsValidator, result);
+    } catch (e) {
+      throw new Error(
+        `Return value validation failed for ${functionType} "${functionPath.udfPath}":\n${(e as Error).message}`,
+      );
+    }
+  }
 }
 
 function createFunctionHandle(functionPath: FunctionPath) {

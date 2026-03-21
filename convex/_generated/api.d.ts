@@ -19,6 +19,7 @@ import type * as messages from "../messages.js";
 import type * as mutations from "../mutations.js";
 import type * as pagination from "../pagination.js";
 import type * as queries from "../queries.js";
+import type * as returnsValidation from "../returnsValidation.js";
 import type * as scheduler from "../scheduler.js";
 import type * as storage from "../storage.js";
 import type * as textSearch from "../textSearch.js";
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   mutations: typeof mutations;
   pagination: typeof pagination;
   queries: typeof queries;
+  returnsValidation: typeof returnsValidation;
   scheduler: typeof scheduler;
   storage: typeof storage;
   textSearch: typeof textSearch;
