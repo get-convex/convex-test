@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.0.43-alpha.0
+## 0.0.43
 
 - Support pagination when documents may be deleted by using the values as the cursor
   instead of the ID.
