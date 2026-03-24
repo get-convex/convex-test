@@ -2345,11 +2345,13 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         return handler(testCtx, innerArgs);
       },
     });
+    // Check component boundary before entering the action's own stack context,
+    // so we can see the parent's function stack.
+    const authForChild = authForComponent(functionPath.componentPath);
     // Each action gets its own function stack via ALS so parallel actions
     // don't corrupt each other's stacks.
     const stack: FunctionPath[] = [];
     return await functionStackStorage.run(stack, async () => {
-      const authForChild = authForComponent(functionPath.componentPath);
       getTransactionManager().beginAction(functionPath);
       const requestId = "" + Math.random();
       try {
