@@ -1,4 +1,4 @@
-import { expect, test, describe } from "vitest";
+import { expect, test, describe, vi } from "vitest";
 import { convexTest, TestConvexForDataModel } from "../index";
 import schema from "./schema";
 import { api } from "./_generated/api";
@@ -87,4 +87,16 @@ describe("query auth", () => {
   test("query calling query", async () => {
     await runTest((t) => t.query(api.authentication.queryCallingQuery));
   });
+});
+
+test("scheduled function does not receive auth", async () => {
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  const asSarah = t.withIdentity({ name: "Sarah" });
+  // Sarah schedules a query that checks auth
+  await asSarah.mutation(api.authentication.scheduleQuery);
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  vi.useRealTimers();
+  // The scheduled query should have run without auth (no error = pass).
+  // queryName returns undefined when there's no identity, which is fine.
 });

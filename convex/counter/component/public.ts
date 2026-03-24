@@ -87,6 +87,13 @@ export const getIdentityName = query({
   },
 });
 
+export const getIdentityNameAction = action({
+  args: {},
+  handler: async (ctx) => {
+    return (await ctx.auth.getUserIdentity())?.name ?? null;
+  },
+});
+
 export const mutationWithNumberArg = mutation({
   args: { a: v.number() },
   handler: async (_ctx, args) => {

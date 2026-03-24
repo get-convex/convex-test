@@ -144,6 +144,15 @@ test("auth does not propagate across component boundaries from action", async ()
   expect(name).toBeNull();
 });
 
+test("auth does not propagate across component boundaries from action to action", async () => {
+  const t = testWithCounter();
+  const asSarah = t.withIdentity({ name: "Sarah" });
+  const name = await asSarah.action(
+    internal.component.actionCallingComponentAction,
+  );
+  expect(name).toBeNull();
+});
+
 test("auth applies to directly called component function", async () => {
   const t = testWithCounter();
   const asSarah = t.withIdentity({ name: "Sarah" });

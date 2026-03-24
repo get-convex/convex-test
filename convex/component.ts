@@ -162,6 +162,13 @@ export const actionComponentAuth = internalAction({
   },
 });
 
+export const actionCallingComponentAction = internalAction({
+  args: {},
+  handler: async (ctx): Promise<string | null> => {
+    return await ctx.runAction(components.counter.public.getIdentityNameAction);
+  },
+});
+
 export const parallelComponentMutations = internalMutation({
   args: {},
   handler: async (ctx): Promise<null> => {

@@ -93,6 +93,7 @@ export declare const components: {
         Array<number>
       >;
       getIdentityName: FunctionReference<"query", "internal", {}, any>;
+      getIdentityNameAction: FunctionReference<"action", "internal", {}, any>;
       mutationWithNestedQuery: FunctionReference<
         "mutation",
         "internal",
@@ -129,6 +130,7 @@ export declare const components: {
         Array<number>
       >;
       getIdentityName: FunctionReference<"query", "internal", {}, any>;
+      getIdentityNameAction: FunctionReference<"action", "internal", {}, any>;
       mutationWithNestedQuery: FunctionReference<
         "mutation",
         "internal",

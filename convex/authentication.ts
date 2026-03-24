@@ -77,3 +77,10 @@ export const actionName = action({
     return (await ctx.auth.getUserIdentity())?.name ?? null;
   },
 });
+
+export const scheduleQuery = mutation({
+  args: {},
+  async handler(ctx): Promise<void> {
+    await ctx.scheduler.runAfter(0, api.authentication.queryName);
+  },
+});
