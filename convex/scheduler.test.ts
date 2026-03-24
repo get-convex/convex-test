@@ -210,7 +210,6 @@ test("argument serialization", async () => {
   expect(result).toMatchObject([{ body: "through scheduler", author: "AI" }]);
   {
     const jobs = await t.query(internal.scheduler.jobs);
-    console.log(jobs);
     expect(jobs).toMatchObject([{ state: { kind: "success" } }]);
   }
   vi.useRealTimers();

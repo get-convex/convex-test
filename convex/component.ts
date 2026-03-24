@@ -92,3 +92,96 @@ export const scheduleHandle = internalMutation({
     );
   },
 });
+
+export const scheduleOnBothComponents = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<null> => {
+    await Promise.all([
+      ctx.runMutation(components.counter.public.schedule, { name: "beans" }),
+      ctx.runMutation(components.counter2.public.schedule, { name: "beans" }),
+    ]);
+    return null;
+  },
+});
+
+export const parallelComponentQueries = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ count1: number; count2: number }> => {
+    const [count1, count2] = await Promise.all([
+      ctx.runQuery(components.counter.public.count, { name: "beans" }),
+      ctx.runQuery(components.counter2.public.count, { name: "beans" }),
+    ]);
+    return { count1, count2 };
+  },
+});
+
+export const actionOnCounter1 = internalAction({
+  args: {},
+  handler: async (ctx): Promise<number> => {
+    await ctx.runMutation(components.counter.public.add, {
+      name: "beans",
+      count: 10,
+    });
+    return await ctx.runQuery(components.counter.public.count, {
+      name: "beans",
+    });
+  },
+});
+
+export const actionOnCounter2 = internalAction({
+  args: {},
+  handler: async (ctx): Promise<number> => {
+    await ctx.runMutation(components.counter2.public.add, {
+      name: "beans",
+      count: 20,
+    });
+    return await ctx.runQuery(components.counter2.public.count, {
+      name: "beans",
+    });
+  },
+});
+
+export const queryComponentAuth = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<string | null> => {
+    return await ctx.runQuery(components.counter.public.getIdentityName);
+  },
+});
+
+export const mutationComponentAuth = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<string | null> => {
+    return await ctx.runQuery(components.counter.public.getIdentityName);
+  },
+});
+
+export const actionComponentAuth = internalAction({
+  args: {},
+  handler: async (ctx): Promise<string | null> => {
+    return await ctx.runQuery(components.counter.public.getIdentityName);
+  },
+});
+
+export const actionCallingComponentAction = internalAction({
+  args: {},
+  handler: async (ctx): Promise<string | null> => {
+    return await ctx.runAction(components.counter.public.getIdentityNameAction);
+  },
+});
+
+export const parallelComponentMutations = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<null> => {
+    await Promise.all([
+      ctx.runMutation(components.counter.public.add, {
+        name: "beans",
+        count: 1,
+      }),
+      ctx.runMutation(components.counter2.public.add, {
+        name: "beans",
+        count: 1,
+      }),
+    ]);
+    return null;
+  },
+});

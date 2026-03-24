@@ -19,6 +19,7 @@ import type * as messages from "../messages.js";
 import type * as mutations from "../mutations.js";
 import type * as pagination from "../pagination.js";
 import type * as queries from "../queries.js";
+import type * as returnsValidation from "../returnsValidation.js";
 import type * as scheduler from "../scheduler.js";
 import type * as storage from "../storage.js";
 import type * as textSearch from "../textSearch.js";
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   mutations: typeof mutations;
   pagination: typeof pagination;
   queries: typeof queries;
+  returnsValidation: typeof returnsValidation;
   scheduler: typeof scheduler;
   storage: typeof storage;
   textSearch: typeof textSearch;
@@ -90,6 +92,45 @@ export declare const components: {
         { names: Array<string> },
         Array<number>
       >;
+      getIdentityName: FunctionReference<"query", "internal", {}, any>;
+      getIdentityNameAction: FunctionReference<"action", "internal", {}, any>;
+      mutationWithNestedQuery: FunctionReference<
+        "mutation",
+        "internal",
+        {},
+        any
+      >;
+      mutationWithNumberArg: FunctionReference<
+        "mutation",
+        "internal",
+        { a: number },
+        any
+      >;
+      schedule: FunctionReference<
+        "mutation",
+        "internal",
+        { name: string },
+        any
+      >;
+    };
+  };
+  counter2: {
+    public: {
+      add: FunctionReference<
+        "mutation",
+        "internal",
+        { count: number; name: string; shards?: number },
+        null
+      >;
+      count: FunctionReference<"query", "internal", { name: string }, number>;
+      countMany: FunctionReference<
+        "action",
+        "internal",
+        { names: Array<string> },
+        Array<number>
+      >;
+      getIdentityName: FunctionReference<"query", "internal", {}, any>;
+      getIdentityNameAction: FunctionReference<"action", "internal", {}, any>;
       mutationWithNestedQuery: FunctionReference<
         "mutation",
         "internal",

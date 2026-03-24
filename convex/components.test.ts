@@ -69,3 +69,108 @@ test("component nested query", async () => {
   const x = await t.mutation(internal.component.mutationWithNestedQuery);
   expect(x).toEqual(3);
 });
+
+function testWithTwoCounters() {
+  const t = convexTest(schema);
+  t.registerComponent("counter", counterSchema, counterModules);
+  t.registerComponent("counter2", counterSchema, counterModules);
+  return t;
+}
+
+test("parallel queries on different components", async () => {
+  const t = testWithTwoCounters();
+  await Promise.all([
+    t.mutation(components.counter.public.add, {
+      name: "beans",
+      count: 3,
+    }),
+    t.mutation(components.counter2.public.add, {
+      name: "beans",
+      count: 5,
+    }),
+  ]);
+  const result = await t.mutation(internal.component.parallelComponentQueries);
+  expect(result).toMatchObject({ count1: 3, count2: 5 });
+});
+
+test("scheduled mutations on components don't conflict with nested locks", async () => {
+  vi.useFakeTimers();
+  const t = testWithTwoCounters();
+  // Schedule mutations on both components in parallel (nested sub-transactions)
+  await t.mutation(internal.component.scheduleOnBothComponents);
+  // Run all scheduled functions - these execute as top-level transactions
+  // and should not deadlock with the nested lock system
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  // Verify both scheduled mutations completed
+  const [count1, count2] = await Promise.all([
+    t.query(components.counter.public.count, { name: "beans" }),
+    t.query(components.counter2.public.count, { name: "beans" }),
+  ]);
+  expect(count1).toEqual(1);
+  expect(count2).toEqual(1);
+  vi.useRealTimers();
+});
+
+test("parallel actions on different components don't corrupt function stacks", async () => {
+  const t = testWithTwoCounters();
+  // Run two actions in parallel, each operating on a different component.
+  // Without per-action function stacks, the shared stack would get corrupted.
+  const [count1, count2] = await Promise.all([
+    t.action(internal.component.actionOnCounter1),
+    t.action(internal.component.actionOnCounter2),
+  ]);
+  expect(count1).toEqual(10);
+  expect(count2).toEqual(20);
+});
+
+test("auth does not propagate across component boundaries from query", async () => {
+  const t = testWithCounter();
+  const asSarah = t.withIdentity({ name: "Sarah" });
+  const name = await asSarah.query(internal.component.queryComponentAuth);
+  expect(name).toBeNull();
+});
+
+test("auth does not propagate across component boundaries from mutation", async () => {
+  const t = testWithCounter();
+  const asSarah = t.withIdentity({ name: "Sarah" });
+  const name = await asSarah.mutation(internal.component.mutationComponentAuth);
+  expect(name).toBeNull();
+});
+
+test("auth does not propagate across component boundaries from action", async () => {
+  const t = testWithCounter();
+  const asSarah = t.withIdentity({ name: "Sarah" });
+  const name = await asSarah.action(internal.component.actionComponentAuth);
+  expect(name).toBeNull();
+});
+
+test("auth does not propagate across component boundaries from action to action", async () => {
+  const t = testWithCounter();
+  const asSarah = t.withIdentity({ name: "Sarah" });
+  const name = await asSarah.action(
+    internal.component.actionCallingComponentAction,
+  );
+  expect(name).toBeNull();
+});
+
+test("auth applies to directly called component function", async () => {
+  const t = testWithCounter();
+  const asSarah = t.withIdentity({ name: "Sarah" });
+  const name = await asSarah.query(components.counter.public.getIdentityName);
+  expect(name).toEqual("Sarah");
+});
+
+test("parallel mutations on different components", async () => {
+  const t = testWithTwoCounters();
+  await t.mutation(internal.component.parallelComponentMutations);
+  const [count1, count2] = await Promise.all([
+    t.query(components.counter.public.count, {
+      name: "beans",
+    }),
+    t.query(components.counter2.public.count, {
+      name: "beans",
+    }),
+  ]);
+  expect(count1).toEqual(1);
+  expect(count2).toEqual(1);
+});

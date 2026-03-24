@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   DataModelFromSchemaDefinition,
   DefaultFunctionArgs,
@@ -112,6 +113,29 @@ type TableName = string;
 type DocumentId = GenericId<TableName>;
 
 const ROOT_COMPONENT_PATH = "";
+
+class NestedLock {
+  private _lock: Promise<void> | null = null;
+  private _release: (() => void) | null = null;
+
+  async acquire() {
+    while (this._lock !== null) {
+      await this._lock;
+    }
+    this._lock = new Promise((resolve) => {
+      this._release = resolve;
+    });
+  }
+
+  release() {
+    this._lock = null;
+    this._release!();
+    this._release = null;
+  }
+}
+
+const nestedTxStorage = new AsyncLocalStorage<NestedLock>();
+const authStorage = new AsyncLocalStorage<AuthFake>();
 
 class DatabaseFake {
   private _componentPath: string;
@@ -1486,63 +1510,66 @@ function asyncSyscallImpl() {
         });
         const componentPath = getCurrentComponentPath();
         setTimeout(
-          (async () => {
-            const canceled = await withAuth().runInComponent(
-              componentPath,
-              async () => {
+          // Scheduled functions run without auth context, even if
+          // they were scheduled from an authenticated function.
+          (() =>
+            authStorage.run(new AuthFake(), async () => {
+              const canceled = await withAuth().runInComponent(
+                componentPath,
+                async () => {
+                  const job = db.get(
+                    "_scheduled_functions",
+                    jobId,
+                  ) as ScheduledFunction;
+                  if (job.state.kind === "canceled") {
+                    return true;
+                  }
+                  if (job.state.kind !== "pending") {
+                    throw new Error(
+                      `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+                    );
+                  }
+                  db.patch("_scheduled_functions", jobId, {
+                    state: { kind: "inProgress" },
+                  });
+                  return false;
+                },
+              );
+              if (canceled) {
+                return;
+              }
+              try {
+                await withAuth().fun(functionPath, parsedArgs);
+              } catch (error) {
+                console.error(
+                  `Error when running scheduled function ${name}`,
+                  error,
+                );
+                await withAuth().runInComponent(componentPath, async () => {
+                  db.patch("_scheduled_functions", jobId, {
+                    state: { kind: "failed" },
+                    completedTime: Date.now(),
+                  });
+                });
+                db.jobFinished(jobId);
+                return;
+              }
+              await withAuth().runInComponent(componentPath, async () => {
                 const job = db.get(
                   "_scheduled_functions",
                   jobId,
                 ) as ScheduledFunction;
-                if (job.state.kind === "canceled") {
-                  return true;
-                }
-                if (job.state.kind !== "pending") {
+                if (job.state.kind !== "inProgress") {
                   throw new Error(
-                    `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+                    `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
                   );
                 }
                 db.patch("_scheduled_functions", jobId, {
-                  state: { kind: "inProgress" },
-                });
-                return false;
-              },
-            );
-            if (canceled) {
-              return;
-            }
-            try {
-              await withAuth().fun(functionPath, parsedArgs);
-            } catch (error) {
-              console.error(
-                `Error when running scheduled function ${name}`,
-                error,
-              );
-              await withAuth().runInComponent(componentPath, async () => {
-                db.patch("_scheduled_functions", jobId, {
-                  state: { kind: "failed" },
-                  completedTime: Date.now(),
+                  state: { kind: "success" },
                 });
               });
               db.jobFinished(jobId);
-              return;
-            }
-            await withAuth().runInComponent(componentPath, async () => {
-              const job = db.get(
-                "_scheduled_functions",
-                jobId,
-              ) as ScheduledFunction;
-              if (job.state.kind !== "inProgress") {
-                throw new Error(
-                  `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
-                );
-              }
-              db.patch("_scheduled_functions", jobId, {
-                state: { kind: "success" },
-              });
-            });
-            db.jobFinished(jobId);
-          }) as () => void,
+            })) as () => void,
           tsInSecs * 1000 - Date.now(),
         );
         return JSON.stringify(convexToJson(jobId));
@@ -1862,7 +1889,7 @@ function getTransactionManager() {
 }
 
 function getCurrentComponentPath() {
-  const functionStack = getTransactionManager().functionStack;
+  const functionStack = getTransactionManager().getFunctionStack();
   const currentFunctionPath = functionStack[functionStack.length - 1];
   return currentFunctionPath?.componentPath ?? ROOT_COMPONENT_PATH;
 }
@@ -1935,6 +1962,10 @@ type FunctionPath = {
   udfPath: string;
 };
 
+// Per-execution-context function stack. Actions create their own context
+// so parallel actions don't corrupt each other's stacks.
+const functionStackStorage = new AsyncLocalStorage<FunctionPath[]>();
+
 type ConvexGlobal = {
   components: Record<string, ComponentInfo>;
   transactionManager: TransactionManager;
@@ -1964,7 +1995,16 @@ class TransactionManager {
   // can run mutations in parallel.
   private _waitOnCurrentFunction: Promise<void> | null = null;
   private _markTransactionDone: (() => void) | null = null;
-  public functionStack: FunctionPath[] = [];
+  // Default function stack used when not inside an action's ALS context.
+  private _functionStack: FunctionPath[] = [];
+  // Root-level nested lock: serializes the first layer of nested sub-transactions.
+  // Deeper layers get their own locks via AsyncLocalStorage.
+  public readonly rootNestedLock = new NestedLock();
+
+  // Returns the per-context function stack (ALS stack for actions, shared stack otherwise).
+  getFunctionStack(): FunctionPath[] {
+    return functionStackStorage.getStore() ?? this._functionStack;
+  }
 
   private _headroomTracker: HeadroomTracker | null = null;
   private _limitsConfig: Partial<TransactionMetrics> | boolean;
@@ -1990,7 +2030,7 @@ class TransactionManager {
       });
       this._headroomTracker = new HeadroomTracker(this._limitsConfig);
     }
-    this.functionStack.push(functionPath);
+    this.getFunctionStack().push(functionPath);
     const convex = getConvexGlobal();
     for (const component of Object.values(convex.components)) {
       component.db.startTransaction();
@@ -1998,11 +2038,11 @@ class TransactionManager {
   }
 
   beginAction(functionPath: FunctionPath) {
-    this.functionStack.push(functionPath);
+    this.getFunctionStack().push(functionPath);
   }
 
   finishAction() {
-    this.functionStack.pop();
+    this.getFunctionStack().pop();
   }
 
   // Used to distinguish between mutation and action execution
@@ -2035,7 +2075,7 @@ class TransactionManager {
     if (this._markTransactionDone === null) {
       throw new Error("Transaction not started");
     }
-    this.functionStack.pop();
+    this.getFunctionStack().pop();
     if (!isNested) {
       this._headroomTracker = null;
       this._waitOnCurrentFunction = null;
@@ -2166,8 +2206,17 @@ export function convexTest<Schema extends GenericSchema>(
   } as any;
 }
 
-function withAuth(auth: AuthFake = new AuthFake()) {
-  const runTransaction = async <T>(
+function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
+  // Auth doesn't propagate across component boundaries.
+  // Must be called before begin()/beginAction() which pushes onto functionStack.
+  function authForComponent(componentPath: string) {
+    const isCrossComponent =
+      getTransactionManager().getFunctionStack().length > 0 &&
+      componentPath !== getCurrentComponentPath();
+    return isCrossComponent ? new AuthFake() : auth;
+  }
+
+  const runMutationWithHandler = async <T>(
     handler: (ctx: any, args: any) => T,
     args: any,
     extraCtx: any = {},
@@ -2176,21 +2225,53 @@ function withAuth(auth: AuthFake = new AuthFake()) {
   ): Promise<T> => {
     const m = mutationGeneric({
       handler: (ctx: any, a: any) => {
-        const testCtx = { ...ctx, auth, ...extraCtx };
+        const testCtx = {
+          ...ctx,
+          auth: authStorage.getStore() ?? auth,
+          ...extraCtx,
+        };
         return handler(testCtx, a);
       },
     });
     const transactionManager = getTransactionManager();
+
+    // Serialize nested calls at each nesting level to prevent functionStack
+    // and transaction level corruption from parallel component sub-calls.
+    // Each level gets its own lock via AsyncLocalStorage so nested-within-nested
+    // parallel calls also serialize correctly within their own level.
+    const parentLock = isNested
+      ? (nestedTxStorage.getStore() ?? transactionManager.rootNestedLock)
+      : null;
+    if (parentLock) {
+      await parentLock.acquire();
+    }
+
+    const authForChild = authForComponent(functionPath.componentPath);
+
     await transactionManager.begin(functionPath, isNested);
     try {
-      const rawResult = await (
-        m as unknown as { invokeMutation: (args: string) => Promise<string> }
-      ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
+      const childLock = new NestedLock();
+      const invokeRaw = () =>
+        (
+          m as unknown as {
+            invokeMutation: (args: string) => Promise<string>;
+          }
+        ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
+      const invokeInContext = () => authStorage.run(authForChild, invokeRaw);
+
+      const rawResult = isNested
+        ? await nestedTxStorage.run(childLock, invokeInContext)
+        : await invokeInContext();
+
       transactionManager.commit(isNested);
       return jsonToConvex(JSON.parse(rawResult)) as T;
     } catch (e) {
       transactionManager.rollback(isNested);
       throw e;
+    } finally {
+      if (parentLock) {
+        parentLock.release();
+      }
     }
   };
 
@@ -2204,19 +2285,41 @@ function withAuth(auth: AuthFake = new AuthFake()) {
   ): Promise<T> => {
     const q = queryGeneric({
       handler: (ctx: any, a: any) => {
-        const testCtx = { ...ctx, auth };
+        const testCtx = { ...ctx, auth: authStorage.getStore() ?? auth };
         return handler(testCtx, a);
       },
     });
     const transactionManager = getTransactionManager();
+
+    // Serialize nested calls at each nesting level (same pattern as runTransaction).
+    const parentLock = isNested
+      ? (nestedTxStorage.getStore() ?? transactionManager.rootNestedLock)
+      : null;
+    if (parentLock) {
+      await parentLock.acquire();
+    }
+
+    const authForChild = authForComponent(functionPath.componentPath);
+
     await transactionManager.begin(functionPath, isNested);
     try {
-      const rawResult = await (
-        q as unknown as { invokeQuery: (args: string) => Promise<string> }
-      ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
+      const childLock = new NestedLock();
+      const invokeRaw = () =>
+        (
+          q as unknown as { invokeQuery: (args: string) => Promise<string> }
+        ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
+      const invokeInContext = () => authStorage.run(authForChild, invokeRaw);
+
+      const rawResult = isNested
+        ? await nestedTxStorage.run(childLock, invokeInContext)
+        : await invokeInContext();
+
       return jsonToConvex(JSON.parse(rawResult)) as T;
     } finally {
       transactionManager.rollback(isNested);
+      if (parentLock) {
+        parentLock.release();
+      }
     }
   };
 
@@ -2237,26 +2340,39 @@ function withAuth(auth: AuthFake = new AuthFake()) {
           runQuery: ctxRunQuery,
           runMutation: ctxRunMutation,
           runAction: ctxRunAction,
-          auth,
+          auth: authStorage.getStore() ?? auth,
         };
         return handler(testCtx, innerArgs);
       },
     });
-    getTransactionManager().beginAction(functionPath);
-    const requestId = "" + Math.random();
-    try {
-      const rawResult = await (
-        a as unknown as {
-          invokeAction: (requestId: string, args: string) => Promise<string>;
-        }
-      ).invokeAction(
-        requestId,
-        JSON.stringify(convexToJson([parseArgs(args)])),
-      );
-      return jsonToConvex(JSON.parse(rawResult)) as T;
-    } finally {
-      getTransactionManager().finishAction();
-    }
+    // Check component boundary before entering the action's own stack context,
+    // so we can see the parent's function stack.
+    const authForChild = authForComponent(functionPath.componentPath);
+    // Each action gets its own function stack via ALS so parallel actions
+    // don't corrupt each other's stacks.
+    const stack: FunctionPath[] = [];
+    return await functionStackStorage.run(stack, async () => {
+      getTransactionManager().beginAction(functionPath);
+      const requestId = "" + Math.random();
+      try {
+        const rawResult = await authStorage.run(authForChild, () =>
+          (
+            a as unknown as {
+              invokeAction: (
+                requestId: string,
+                args: string,
+              ) => Promise<string>;
+            }
+          ).invokeAction(
+            requestId,
+            JSON.stringify(convexToJson([parseArgs(args)])),
+          ),
+        );
+        return jsonToConvex(JSON.parse(rawResult)) as T;
+      } finally {
+        getTransactionManager().finishAction();
+      }
+    });
   };
 
   const byTypeWithPath = {
@@ -2268,12 +2384,14 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       const func = await getFunctionFromPath(functionPath, "query");
       validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
 
-      return await runQueryWithHandler(
+      const result = await runQueryWithHandler(
         (ctx, a) => getHandler(func)(ctx, a),
         args,
         functionPath,
         isNested,
       );
+      validateReturnValue(func, result, "query", functionPath);
+      return result;
     },
 
     mutationFromPath: async (
@@ -2284,20 +2402,22 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       const func = await getFunctionFromPath(functionPath, "mutation");
       validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
 
-      return await runTransaction(
+      const result = await runMutationWithHandler(
         getHandler(func),
         args,
         {},
         functionPath,
         isNested,
       );
+      validateReturnValue(func, result, "mutation", functionPath);
+      return result;
     },
 
     actionFromPath: async (functionPath: FunctionPath, args: any) => {
       const func = await getFunctionFromPath(functionPath, "action");
       validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
 
-      return await runActionWithHandler(
+      const result = await runActionWithHandler(
         getHandler(func),
         args,
         functionPath,
@@ -2305,6 +2425,8 @@ function withAuth(auth: AuthFake = new AuthFake()) {
         byTypeWithPath.runMutation,
         byTypeWithPath.runAction,
       );
+      validateReturnValue(func, result, "action", functionPath);
+      return result;
     },
     runQuery: async (
       functionReference: FunctionReference<any, any, any, any>,
@@ -2354,7 +2476,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
       args?: any,
     ): Promise<Value> => {
       if (typeof functionReferenceOrHandler === "function") {
-        return await runTransaction(
+        return await runMutationWithHandler(
           functionReferenceOrHandler,
           args ?? {},
           /* extraCtx */ {},
@@ -2396,7 +2518,7 @@ function withAuth(auth: AuthFake = new AuthFake()) {
     // Grab StorageActionWriter from action ctx
     const a = actionGeneric({
       handler: async (ctx: GenericActionCtx<any>) => {
-        return await runTransaction(
+        return await runMutationWithHandler(
           handler,
           {},
           {
@@ -2529,6 +2651,24 @@ function parseArgs(
     );
   }
   return args;
+}
+
+function validateReturnValue(
+  func: any,
+  result: any,
+  functionType: "query" | "mutation" | "action",
+  functionPath: FunctionPath,
+) {
+  const returnsValidator = JSON.parse(func.exportReturns());
+  if (returnsValidator !== null) {
+    try {
+      validateValidator(returnsValidator, result);
+    } catch (e) {
+      throw new Error(
+        `Return value validation failed for ${functionType} "${functionPath.udfPath}":\n${(e as Error).message}`,
+      );
+    }
+  }
 }
 
 function createFunctionHandle(functionPath: FunctionPath) {
