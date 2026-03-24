@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.44
+
+- More correctly implements nested transactions and parallel calls.
+- Starts validating return validators.
+- Propagates auth more correctly between callsites-not scheduler or components.
+
 ## 0.0.43
 
 - Support pagination when documents may be deleted by using the values as the cursor
