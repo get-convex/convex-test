@@ -136,6 +136,7 @@ class NestedLock {
 
 const nestedTxStorage = new AsyncLocalStorage<NestedLock>();
 const authStorage = new AsyncLocalStorage<AuthFake>();
+const convexGlobalStorage = new AsyncLocalStorage<ConvexGlobal>();
 
 class DatabaseFake {
   private _componentPath: string;
@@ -1509,67 +1510,73 @@ function asyncSyscallImpl() {
           state: { kind: "pending" },
         });
         const componentPath = getCurrentComponentPath();
+        // Capture the current test's ConvexGlobal so the scheduled
+        // function callback (which runs via setTimeout, outside the
+        // original ALS context) uses the correct test state.
+        const capturedGlobal = getConvexGlobal();
         setTimeout(
           // Scheduled functions run without auth context, even if
           // they were scheduled from an authenticated function.
           (() =>
-            authStorage.run(new AuthFake(), async () => {
-              const canceled = await withAuth().runInComponent(
-                componentPath,
-                async () => {
+            convexGlobalStorage.run(capturedGlobal, () =>
+              authStorage.run(new AuthFake(), async () => {
+                const canceled = await withAuth().runInComponent(
+                  componentPath,
+                  async () => {
+                    const job = db.get(
+                      "_scheduled_functions",
+                      jobId,
+                    ) as ScheduledFunction;
+                    if (job.state.kind === "canceled") {
+                      return true;
+                    }
+                    if (job.state.kind !== "pending") {
+                      throw new Error(
+                        `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+                      );
+                    }
+                    db.patch("_scheduled_functions", jobId, {
+                      state: { kind: "inProgress" },
+                    });
+                    return false;
+                  },
+                );
+                if (canceled) {
+                  return;
+                }
+                try {
+                  await withAuth().fun(functionPath, parsedArgs);
+                } catch (error) {
+                  console.error(
+                    `Error when running scheduled function ${name}`,
+                    error,
+                  );
+                  await withAuth().runInComponent(componentPath, async () => {
+                    db.patch("_scheduled_functions", jobId, {
+                      state: { kind: "failed" },
+                      completedTime: Date.now(),
+                    });
+                  });
+                  db.jobFinished(jobId);
+                  return;
+                }
+                await withAuth().runInComponent(componentPath, async () => {
                   const job = db.get(
                     "_scheduled_functions",
                     jobId,
                   ) as ScheduledFunction;
-                  if (job.state.kind === "canceled") {
-                    return true;
-                  }
-                  if (job.state.kind !== "pending") {
+                  if (job.state.kind !== "inProgress") {
                     throw new Error(
-                      `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+                      `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
                     );
                   }
                   db.patch("_scheduled_functions", jobId, {
-                    state: { kind: "inProgress" },
-                  });
-                  return false;
-                },
-              );
-              if (canceled) {
-                return;
-              }
-              try {
-                await withAuth().fun(functionPath, parsedArgs);
-              } catch (error) {
-                console.error(
-                  `Error when running scheduled function ${name}`,
-                  error,
-                );
-                await withAuth().runInComponent(componentPath, async () => {
-                  db.patch("_scheduled_functions", jobId, {
-                    state: { kind: "failed" },
-                    completedTime: Date.now(),
+                    state: { kind: "success" },
                   });
                 });
                 db.jobFinished(jobId);
-                return;
-              }
-              await withAuth().runInComponent(componentPath, async () => {
-                const job = db.get(
-                  "_scheduled_functions",
-                  jobId,
-                ) as ScheduledFunction;
-                if (job.state.kind !== "inProgress") {
-                  throw new Error(
-                    `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
-                  );
-                }
-                db.patch("_scheduled_functions", jobId, {
-                  state: { kind: "success" },
-                });
-              });
-              db.jobFinished(jobId);
-            })) as () => void,
+              }),
+            )) as () => void,
           tsInSecs * 1000 - Date.now(),
         );
         return JSON.stringify(convexToJson(jobId));
@@ -1903,7 +1910,7 @@ function getModulesForComponent(componentPath: string) {
 }
 
 function getSyscalls() {
-  return (global as any).Convex as {
+  return getConvexGlobal() as {
     syscall: ReturnType<typeof syscallImpl>;
     asyncSyscall: ReturnType<typeof asyncSyscallImpl>;
   };
@@ -1975,15 +1982,15 @@ type ConvexGlobal = {
 };
 
 function getConvexGlobal(): ConvexGlobal {
-  return (global as unknown as { Convex: ConvexGlobal }).Convex;
+  return (
+    convexGlobalStorage.getStore() ??
+    (global as unknown as { Convex: ConvexGlobal }).Convex
+  );
 }
 
 function setConvexGlobal(convex: ConvexGlobal) {
-  if (getConvexGlobal()) {
-    if (getTransactionManager().isInTransaction()) {
-      throw new Error("test began while previous transaction was still open");
-    }
-  }
+  // Set on the real global so the Convex runtime can find syscalls.
+  // Per-test isolation is handled by convexGlobalStorage (AsyncLocalStorage).
   (global as unknown as { Convex: ConvexGlobal }).Convex = convex;
 }
 
@@ -2167,7 +2174,7 @@ export function convexTest<Schema extends GenericSchema>(
   }
 
   const rootDb = new DatabaseFake(schema ?? null, ROOT_COMPONENT_PATH);
-  setConvexGlobal({
+  const convexGlobal: ConvexGlobal = {
     components: {
       [ROOT_COMPONENT_PATH]: {
         db: rootDb,
@@ -2178,7 +2185,22 @@ export function convexTest<Schema extends GenericSchema>(
     syscall: syscallImpl(),
     asyncSyscall: asyncSyscallImpl(),
     jsSyscall: jsSyscallImpl(),
-  });
+  };
+  setConvexGlobal(convexGlobal);
+
+  // Wrap all function properties to run within this test's ALS context.
+  function wrapInContext<T extends Record<string, unknown>>(obj: T): T {
+    const result = {} as any;
+    for (const key of Object.keys(obj)) {
+      const val = (obj as any)[key];
+      result[key] =
+        typeof val === "function"
+          ? (...args: any[]) =>
+              convexGlobalStorage.run(convexGlobal, () => val(...args))
+          : val;
+    }
+    return result;
+  }
 
   return {
     withIdentity(identity: Partial<UserIdentity>) {
@@ -2187,11 +2209,13 @@ export function convexTest<Schema extends GenericSchema>(
       const issuer = identity.issuer ?? "https://convex.test";
       const tokenIdentifier =
         identity.tokenIdentifier ?? `${issuer}|${subject}`;
-      return withAuth(
-        new AuthFake({ ...identity, subject, issuer, tokenIdentifier }),
+      return wrapInContext(
+        withAuth(
+          new AuthFake({ ...identity, subject, issuer, tokenIdentifier }),
+        ),
       );
     },
-    ...withAuth(),
+    ...wrapInContext(withAuth()),
     registerComponent(
       componentPath: string,
       schema: SchemaDefinition<GenericSchema, boolean>,
@@ -2201,7 +2225,7 @@ export function convexTest<Schema extends GenericSchema>(
         db: new DatabaseFake(schema, componentPath),
         modules: moduleCache(glob),
       };
-      getConvexGlobal().components[componentPath] = componentInfo;
+      convexGlobal.components[componentPath] = componentInfo;
     },
   } as any;
 }
