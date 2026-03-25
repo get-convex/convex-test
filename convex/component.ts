@@ -169,6 +169,20 @@ export const actionCallingComponentAction = internalAction({
   },
 });
 
+export const actionSchedulingOnBothComponents = internalAction({
+  args: {},
+  handler: async (ctx): Promise<null> => {
+    // Schedule mutations on both components from an action.
+    // Each component's `schedule` mutation uses ctx.scheduler.runAfter,
+    // so this exercises setTimeout within an action across components.
+    await Promise.all([
+      ctx.runMutation(components.counter.public.schedule, { name: "beans" }),
+      ctx.runMutation(components.counter2.public.schedule, { name: "beans" }),
+    ]);
+    return null;
+  },
+});
+
 export const parallelComponentMutations = internalMutation({
   args: {},
   handler: async (ctx): Promise<null> => {
