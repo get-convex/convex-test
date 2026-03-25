@@ -1982,16 +1982,35 @@ type ConvexGlobal = {
 };
 
 function getConvexGlobal(): ConvexGlobal {
-  return (
-    convexGlobalStorage.getStore() ??
-    (global as unknown as { Convex: ConvexGlobal }).Convex
-  );
+  const store = convexGlobalStorage.getStore();
+  if (!store) {
+    throw new Error(
+      "No active convexTest context. " +
+        "Make sure you are calling methods on the object returned by convexTest().",
+    );
+  }
+  return store;
 }
 
-function setConvexGlobal(convex: ConvexGlobal) {
-  // Set on the real global so the Convex runtime can find syscalls.
-  // Per-test isolation is handled by convexGlobalStorage (AsyncLocalStorage).
-  (global as unknown as { Convex: ConvexGlobal }).Convex = convex;
+// Install a permanent global proxy so the Convex runtime's
+// `Convex.syscall` / `Convex.asyncSyscall` / `Convex.jsSyscall`
+// always delegate to the current test's ALS context.
+// This avoids writing per-test state to the global.
+let _globalProxyInstalled = false;
+function ensureGlobalProxy() {
+  if (_globalProxyInstalled) return;
+  _globalProxyInstalled = true;
+  (global as unknown as { Convex: ConvexGlobal }).Convex = {
+    get syscall() {
+      return getConvexGlobal().syscall;
+    },
+    get asyncSyscall() {
+      return getConvexGlobal().asyncSyscall;
+    },
+    get jsSyscall() {
+      return getConvexGlobal().jsSyscall;
+    },
+  } as ConvexGlobal;
 }
 
 class TransactionManager {
@@ -2186,7 +2205,7 @@ export function convexTest<Schema extends GenericSchema>(
     asyncSyscall: asyncSyscallImpl(),
     jsSyscall: jsSyscallImpl(),
   };
-  setConvexGlobal(convexGlobal);
+  ensureGlobalProxy();
 
   // Wrap all function properties to run within this test's ALS context.
   function wrapInContext<T extends Record<string, unknown>>(obj: T): T {
