@@ -2667,9 +2667,8 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       // Stop after a fixed number of iterations to avoid infinite loops.
       for (let i = 0; i < maxIterations; i++) {
         await advanceTimers();
-        // Keep advancing timers while waiting for scheduled functions.
-        // Actions may use setTimeout internally (e.g. for delays), and those
-        // timers need to be fired for the action to complete.
+        // Actions may use setTimeout internally (e.g. for delays).
+        // Keep advancing timers while waiting so those can resolve.
         let done = false;
         const waitPromise = waitForInProgressScheduledFunctions().then(
           (had) => {
@@ -2677,12 +2676,20 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
             return had;
           },
         );
-        // Pump timers while waiting for in-progress functions to finish.
-        // Limit pumps to avoid infinite loops with sync advanceTimers.
-        for (let pump = 0; pump < 1000 && !done; pump++) {
+        const maxPumps = 10000;
+        for (let pump = 0; pump < maxPumps && !done; pump++) {
           await advanceTimers();
-          // Yield to microtask queue to let job completion propagate
+          // Yield to let job completion propagate
           await new Promise<void>((r) => queueMicrotask(r));
+          if (pump === maxPumps - 1 && !done) {
+            throw new Error(
+              "finishAllScheduledFunctions: scheduled function did not " +
+                "complete after " +
+                maxPumps +
+                " timer pumps. " +
+                "Does an action have an unresolvable setTimeout or infinite loop?",
+            );
+          }
         }
         const hadScheduledFunctions = await waitPromise;
         if (!hadScheduledFunctions) {
