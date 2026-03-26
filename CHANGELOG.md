@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.45-alpha.0
+
+- Replaces global usage with AsyncLocalStorage-scoped test state for isolation
+
 ## 0.0.44
 
 - More correctly implements nested transactions and parallel calls.
