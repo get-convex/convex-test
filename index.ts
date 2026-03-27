@@ -1849,9 +1849,7 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    *   usually `vi.runAllTimers`. This function will be called in a loop
    *   with `finishInProgressScheduledFunctions()`.
    */
-  finishAllScheduledFunctions: (
-    advanceTimers: (() => void) | (() => Promise<void>),
-  ) => Promise<void>;
+  finishAllScheduledFunctions: (advanceTimers: () => void) => Promise<void>;
 };
 
 export type TestConvexForDataModelAndIdentity<
@@ -2659,14 +2657,14 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     },
 
     finishAllScheduledFunctions: async (
-      advanceTimers: (() => void) | (() => Promise<void>),
+      advanceTimers: () => void,
       maxIterations: number = 100,
     ): Promise<void> => {
       // Wait for all scheduled functions to finish, advancing time in between
       // each function.
       // Stop after a fixed number of iterations to avoid infinite loops.
       for (let i = 0; i < maxIterations; i++) {
-        await advanceTimers();
+        advanceTimers();
         // Actions may use setTimeout internally (e.g. for delays).
         // Keep advancing timers while waiting so those can resolve.
         let done = false;
@@ -2678,7 +2676,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         );
         const maxPumps = 10000;
         for (let pump = 0; pump < maxPumps && !done; pump++) {
-          await advanceTimers();
+          advanceTimers();
           // Yield to let job completion propagate
           await new Promise<void>((r) => queueMicrotask(r));
           if (pump === maxPumps - 1 && !done) {
