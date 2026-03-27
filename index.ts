@@ -2682,9 +2682,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           if (pump === maxPumps - 1 && !done) {
             throw new Error(
               "finishAllScheduledFunctions: scheduled function did not " +
-                "complete after " +
-                maxPumps +
-                " timer pumps. " +
+                `complete after ${maxPumps} timer pumps. ` +
                 "Does an action have an unresolvable setTimeout or infinite loop?",
             );
           }
