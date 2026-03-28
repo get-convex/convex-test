@@ -2665,8 +2665,29 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       // Stop after a fixed number of iterations to avoid infinite loops.
       for (let i = 0; i < maxIterations; i++) {
         advanceTimers();
-        const hadScheduledFunctions =
-          await waitForInProgressScheduledFunctions();
+        // Actions may use setTimeout internally (e.g. for delays).
+        // Keep advancing timers while waiting so those can resolve.
+        let done = false;
+        const waitPromise = waitForInProgressScheduledFunctions().then(
+          (had) => {
+            done = true;
+            return had;
+          },
+        );
+        const maxPumps = 10000;
+        for (let pump = 0; pump < maxPumps && !done; pump++) {
+          advanceTimers();
+          // Yield to let job completion propagate
+          await new Promise<void>((r) => queueMicrotask(r));
+          if (pump === maxPumps - 1 && !done) {
+            throw new Error(
+              "finishAllScheduledFunctions: scheduled function did not " +
+                `complete after ${maxPumps} timer pumps. ` +
+                "Does an action have an unresolvable setTimeout or infinite loop?",
+            );
+          }
+        }
+        const hadScheduledFunctions = await waitPromise;
         if (!hadScheduledFunctions) {
           return;
         }
