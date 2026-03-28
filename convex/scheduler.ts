@@ -109,26 +109,6 @@ export const actionSchedulingActionNTimes = action({
   },
 });
 
-// Action that uses setTimeout internally (e.g. simulating a delay/polling pattern)
-export const actionWithInternalSetTimeout = action({
-  args: { body: v.string() },
-  handler: async (ctx, { body }) => {
-    await new Promise<void>((resolve) => setTimeout(resolve, 100));
-    await ctx.runMutation(api.scheduler.add, { body, author: "AI" });
-  },
-});
-
-export const mutationSchedulingActionWithTimeout = mutation({
-  args: { body: v.string() },
-  handler: async (ctx, { body }) => {
-    await ctx.scheduler.runAfter(
-      0,
-      api.scheduler.actionWithInternalSetTimeout,
-      { body },
-    );
-  },
-});
-
 export const selfSchedulingMutation = mutation({
   args: {},
   handler: async (ctx) => {
