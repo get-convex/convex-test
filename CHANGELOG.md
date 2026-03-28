@@ -1,8 +1,13 @@
 # Changelog
 
-## 0.0.45-alpha.0
+## 0.0.45
 
-- Replaces global usage with AsyncLocalStorage-scoped test state for isolation
+- Replaces global usage with AsyncLocalStorage-scoped test state for isolation.
+  Now tests shouldn't fail due to dirty state left behind by other tests.
+- Better support for setTimeout usage within tested functions
+- Improves typing for inline calls to t.mutation(() => {}) to be a union
+  instead of overload so `TestConvex<SpecificSchema>` is assignable to
+  `TestConvex<GenericSchema>`.
 
 ## 0.0.44
 
