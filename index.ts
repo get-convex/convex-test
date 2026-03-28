@@ -1746,15 +1746,22 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    *   the arguments will be `{}`. Not used for inline functions.
    * @returns A `Promise` of the query's result.
    */
-  query: {
-    <Query extends FunctionReference<"query", any>>(
-      query: Query,
-      ...args: OptionalRestArgs<Query>
-    ): Promise<FunctionReturnType<Query>>;
-    <Output>(
-      func: (ctx: GenericQueryCtx<DataModel>) => Promise<Output>,
-    ): Promise<Output>;
-  };
+  query: <
+    QueryOrFunc extends
+      | FunctionReference<"query", any>
+      | ((ctx: GenericQueryCtx<DataModel>) => Promise<any>),
+  >(
+    queryOrFunc: QueryOrFunc,
+    ...args: QueryOrFunc extends FunctionReference<"query", any>
+      ? OptionalRestArgs<QueryOrFunc>
+      : []
+  ) => Promise<
+    QueryOrFunc extends FunctionReference<"query", any>
+      ? FunctionReturnType<QueryOrFunc>
+      : QueryOrFunc extends (ctx: any) => Promise<infer Output>
+        ? Output
+        : never
+  >;
 
   /**
    * Call a public or internal mutation, or run an inline mutation function.
@@ -1765,15 +1772,22 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    *   the arguments will be `{}`. Not used for inline functions.
    * @returns A `Promise` of the mutation's result.
    */
-  mutation: {
-    <Mutation extends FunctionReference<"mutation", any>>(
-      mutation: Mutation,
-      ...args: OptionalRestArgs<Mutation>
-    ): Promise<FunctionReturnType<Mutation>>;
-    <Output>(
-      func: (ctx: GenericMutationCtx<DataModel>) => Promise<Output>,
-    ): Promise<Output>;
-  };
+  mutation: <
+    MutationOrFunc extends
+      | FunctionReference<"mutation", any>
+      | ((ctx: GenericMutationCtx<DataModel>) => Promise<any>),
+  >(
+    mutationOrFunc: MutationOrFunc,
+    ...args: MutationOrFunc extends FunctionReference<"mutation", any>
+      ? OptionalRestArgs<MutationOrFunc>
+      : []
+  ) => Promise<
+    MutationOrFunc extends FunctionReference<"mutation", any>
+      ? FunctionReturnType<MutationOrFunc>
+      : MutationOrFunc extends (ctx: any) => Promise<infer Output>
+        ? Output
+        : never
+  >;
 
   /**
    * Call a public or internal action, or run an inline action function.
@@ -1784,15 +1798,22 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    *   the arguments will be `{}`. Not used for inline functions.
    * @returns A `Promise` of the action's result.
    */
-  action: {
-    <Action extends FunctionReference<"action", any>>(
-      action: Action,
-      ...args: OptionalRestArgs<Action>
-    ): Promise<FunctionReturnType<Action>>;
-    <Output>(
-      func: (ctx: GenericActionCtx<DataModel>) => Promise<Output>,
-    ): Promise<Output>;
-  };
+  action: <
+    ActionOrFunc extends
+      | FunctionReference<"action", any>
+      | ((ctx: GenericActionCtx<DataModel>) => Promise<any>),
+  >(
+    actionOrFunc: ActionOrFunc,
+    ...args: ActionOrFunc extends FunctionReference<"action", any>
+      ? OptionalRestArgs<ActionOrFunc>
+      : []
+  ) => Promise<
+    ActionOrFunc extends FunctionReference<"action", any>
+      ? FunctionReturnType<ActionOrFunc>
+      : ActionOrFunc extends (ctx: any) => Promise<infer Output>
+        ? Output
+        : never
+  >;
 
   /**
    * Read from and write to the mock backend.
