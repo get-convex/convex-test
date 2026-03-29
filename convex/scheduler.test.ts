@@ -177,6 +177,43 @@ test("self-scheduling mutation", async () => {
   vi.useRealTimers();
 });
 
+test("scheduled action that uses setTimeout internally", async () => {
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  await t.mutation(api.scheduler.mutationSchedulingActionWithTimeout, {
+    body: "delayed action",
+  });
+  // The scheduled action uses setTimeout(resolve, 100) internally.
+  // finishAllScheduledFunctions needs to pump timers while waiting for
+  // the action to complete, otherwise it will hang.
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  const result = await t.query(internal.scheduler.list);
+  expect(result).toMatchObject([{ body: "delayed action", author: "AI" }]);
+  vi.useRealTimers();
+});
+
+test("new convexTest after orphaned scheduled functions", async () => {
+  // First test instance: schedule something and advance timers so the
+  // setTimeout fires, but don't await finishInProgressScheduledFunctions.
+  // This leaves an in-progress function orphaned.
+  vi.useFakeTimers();
+  const t1 = convexTest(schema);
+  await t1.mutation(api.scheduler.mutationSchedulingAction, {
+    body: "orphaned",
+    delayMs: 0,
+  });
+  vi.runAllTimers();
+  // Don't call finishInProgressScheduledFunctions — leave it orphaned
+  vi.useRealTimers();
+
+  // Second test instance: should clean up the orphaned function and not throw
+  const t2 = convexTest(schema);
+  // Verify it works normally
+  await t2.mutation(api.scheduler.add, { body: "fresh", author: "test" });
+  const result = await t2.query(internal.scheduler.list);
+  expect(result).toMatchObject([{ body: "fresh", author: "test" }]);
+});
+
 test("argument serialization", async () => {
   vi.useFakeTimers();
   const t = convexTest(schema);
