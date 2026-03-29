@@ -1579,6 +1579,13 @@ function asyncSyscallImpl() {
           `${sourceComponent}:${jobId}`,
           functionPath,
         );
+        // Create a time-marker setTimeout so that vi.runAllTimers() or
+        // vi.advanceTimersByTime(ms) advances the clock past this
+        // function's scheduled time. The callback is intentionally empty —
+        // execution is handled explicitly by finishInProgressScheduledFunctions
+        // / finishAllScheduledFunctions.
+        const delay = Math.max(0, tsInSecs * 1000 - Date.now());
+        setTimeout(() => {}, delay);
         return JSON.stringify(convexToJson(jobId));
       }
       case "1.0/actions/cancel_job": {
@@ -2017,12 +2024,10 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    *
    * Use in combination with `vi.useFakeTimers()` to test scheduled functions.
    *
-   * @param advanceTimers Function that advances timers, e.g.
-   *   `vi.advanceTimersByTime` or `vi.runAllTimers`.
+   * @param advanceTimers Function that advances timers,
+   *   usually `vi.runAllTimers`.
    */
-  finishAllScheduledFunctions: (
-    advanceTimers: (() => void) | ((ms: number) => void),
-  ) => Promise<void>;
+  finishAllScheduledFunctions: (advanceTimers: () => void) => Promise<void>;
 };
 
 export type TestConvexForDataModelAndIdentity<
@@ -2895,7 +2900,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     },
 
     finishAllScheduledFunctions: async (
-      advanceTimers: (() => void) | ((ms: number) => void),
+      advanceTimers: () => void,
       maxIterations: number = 100,
     ): Promise<void> => {
       const convexGlobal = getConvexGlobal();
@@ -2903,17 +2908,12 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       // function's scheduledTime. Stop after a fixed number of iterations
       // to detect infinitely recursive schedules.
       for (let i = 0; i < maxIterations; i++) {
+        // Advance timers to fire scheduling-time markers, moving the
+        // clock past pending functions' scheduled times.
+        advanceTimers();
         const next = await findEarliestPendingFunction(convexGlobal);
-        if (next === null) {
+        if (next === null || next.scheduledTime > Date.now()) {
           return;
-        }
-        const delta = Math.max(0, next.scheduledTime - Date.now());
-        if (delta > 0) {
-          // Create a setTimeout marker so that advanceTimers (whether
-          // vi.runAllTimers or vi.advanceTimersByTime) advances the
-          // clock to the scheduled function's time.
-          setTimeout(() => {}, delta);
-          advanceTimers(delta);
         }
         // Execute the function while pumping timers so that any internal
         // setTimeout calls (e.g. in actions) can resolve. This is safe
@@ -2929,9 +2929,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         });
         const maxPumps = 10000;
         for (let pump = 0; pump < maxPumps && !done; pump++) {
-          // Create a 1ms marker and advance to fire any pending timers.
-          setTimeout(() => {}, 1);
-          advanceTimers(1);
+          // Advance timers to fire any pending internal timers
+          // (e.g. setTimeout in actions) and any new scheduling markers.
+          advanceTimers();
           // Yield through a full event loop iteration so that dynamic
           // import() calls (used to load function modules) can resolve.
           await new Promise<void>((r) => {

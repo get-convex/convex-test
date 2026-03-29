@@ -24,7 +24,7 @@ test("mutation scheduling action", async () => {
     expect(jobs).toMatchObject([{ state: { kind: "pending" } }]);
   }
 
-  vi.advanceTimersByTime(5000);
+  vi.runAllTimers();
 
   await t.finishInProgressScheduledFunctions();
 
@@ -44,7 +44,7 @@ test("mutation scheduling action then mutation fails", async () => {
     delayMs: 10000,
     body: "through scheduler",
   });
-  vi.advanceTimersByTime(10000);
+  vi.runAllTimers();
   await t.finishInProgressScheduledFunctions();
   {
     const jobs = await t.query(internal.scheduler.jobs);
@@ -78,7 +78,7 @@ test("cancel mutation", async () => {
   const jobs = await t.query(internal.scheduler.jobs);
   expect(jobs).toMatchObject([{ state: { kind: "canceled" } }]);
 
-  vi.advanceTimersByTime(10000);
+  vi.runAllTimers();
   await t.finishInProgressScheduledFunctions();
 
   const result = await t.query(internal.scheduler.list);
@@ -99,6 +99,8 @@ test("action scheduling action", async () => {
       { state: { kind: "pending" }, args: [{ body: "through scheduler" }] },
     ]);
   }
+
+  vi.runAllTimers();
 
   await t.finishInProgressScheduledFunctions();
 
@@ -137,7 +139,7 @@ test("cancel action", async () => {
   const jobs = await t.query(internal.scheduler.jobs);
   expect(jobs).toMatchObject([{ state: { kind: "canceled" } }]);
 
-  vi.advanceTimersByTime(10000);
+  vi.runAllTimers();
   await t.finishInProgressScheduledFunctions();
 
   const result = await t.query(internal.scheduler.list);
@@ -152,6 +154,7 @@ test("failed scheduled function", async () => {
     delayMs: 0,
     body: "FAIL THIS",
   });
+  vi.runAllTimers();
   await t.finishInProgressScheduledFunctions();
   // Regression test: previously this would throw an error that the scheduled
   // function state is "failed" while it should be "inProgress".
@@ -181,30 +184,31 @@ test("scheduled action that uses setTimeout internally", async () => {
     body: "delayed action",
   });
   // The scheduled action uses setTimeout(resolve, 100) internally.
-  // finishAllScheduledFunctions pumps timers while waiting for each
-  // function to complete, so internal setTimeouts resolve naturally.
+  // finishAllScheduledFunctions needs to pump timers while waiting for
+  // the action to complete, otherwise it will hang.
   await t.finishAllScheduledFunctions(vi.runAllTimers);
   const result = await t.query(internal.scheduler.list);
   expect(result).toMatchObject([{ body: "delayed action", author: "AI" }]);
   vi.useRealTimers();
 });
 
-test("new convexTest after abandoned scheduled functions", async () => {
-  // First test instance: schedule something but don't run it.
-  // Since scheduled functions are not triggered by setTimeout, the function
-  // just stays "pending" and is abandoned when t1 goes away.
+test("new convexTest after orphaned scheduled functions", async () => {
+  // First test instance: schedule something and advance timers so the
+  // setTimeout fires, but don't await finishInProgressScheduledFunctions.
+  // This leaves an in-progress function orphaned.
   vi.useFakeTimers();
   const t1 = convexTest(schema);
   await t1.mutation(api.scheduler.mutationSchedulingAction, {
-    body: "abandoned",
+    body: "orphaned",
     delayMs: 0,
   });
-  // Don't call finishInProgressScheduledFunctions — leave it abandoned
+  vi.runAllTimers();
+  // Don't call finishInProgressScheduledFunctions — leave it orphaned
   vi.useRealTimers();
 
-  // Second test instance: should work normally since each convexTest
-  // has its own isolated state.
+  // Second test instance: should clean up the orphaned function and not throw
   const t2 = convexTest(schema);
+  // Verify it works normally
   await t2.mutation(api.scheduler.add, { body: "fresh", author: "test" });
   const result = await t2.query(internal.scheduler.list);
   expect(result).toMatchObject([{ body: "fresh", author: "test" }]);
@@ -235,7 +239,7 @@ test("argument serialization", async () => {
     expect(jobs).toMatchObject([{ state: { kind: "pending" } }]);
   }
 
-  vi.advanceTimersByTime(5000);
+  vi.runAllTimers();
 
   await t.finishInProgressScheduledFunctions();
 
