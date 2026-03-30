@@ -2698,8 +2698,15 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         const maxPumps = 10000;
         for (let pump = 0; pump < maxPumps && !done; pump++) {
           advanceTimers();
-          // Yield to let job completion propagate
-          await new Promise<void>((r) => queueMicrotask(r));
+          // Yield through a full event loop iteration so that dynamic
+          // import() calls (used to load function modules) can resolve.
+          // Using MessageChannel to post to the macrotask queue —
+          // it is not faked by vitest and not removed by edge-runtime.
+          await new Promise<void>((r) => {
+            const { port1, port2 } = new MessageChannel();
+            port2.onmessage = () => r();
+            port1.postMessage(null);
+          });
           if (pump === maxPumps - 1 && !done) {
             throw new Error(
               "finishAllScheduledFunctions: scheduled function did not " +
