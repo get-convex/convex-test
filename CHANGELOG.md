@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.46
+
+- Changes `finishAllScheduledFunctions` to pump the macrotask queue instead
+  of microtask queue to enable dynamic imports to resolve, which regressed
+  in 0.0.45.
+
 ## 0.0.45
 
 - Replaces global usage with AsyncLocalStorage-scoped test state for isolation.
