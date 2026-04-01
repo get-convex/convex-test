@@ -2013,6 +2013,75 @@ function getConvexGlobal(): ConvexGlobal {
   return store;
 }
 
+// Globals that libraries (e.g. workflow engines) may patch during function
+// execution. Each handler invocation gets its own AsyncLocalStorage context,
+// so patches are isolated per-context and nested Convex calls automatically
+// see the original (real) globals.
+const PATCHABLE_GLOBALS = [
+  "setTimeout",
+  "clearTimeout",
+  "setInterval",
+  "clearInterval",
+  "fetch",
+  "Date",
+  "console",
+  "crypto",
+  "atob",
+  "btoa",
+  "Request",
+  "Response",
+  "Headers",
+  "URL",
+  "URLSearchParams",
+  "AbortController",
+  "TextEncoder",
+  "TextDecoder",
+  "structuredClone",
+  "queueMicrotask",
+  "performance",
+] as const;
+
+type GlobalOverrides = Record<string, unknown>;
+const globalOverridesStorage = new AsyncLocalStorage<GlobalOverrides>();
+
+// Replace tracked globals with ALS-backed getter/setters so that writes
+// from user code land in the current context's override map while reads
+// fall through to the original value when no override exists.
+let _globalProxiesInstalled = false;
+function installGlobalProxies() {
+  if (_globalProxiesInstalled) return;
+  _globalProxiesInstalled = true;
+
+  const g = globalThis as Record<string, unknown>;
+  const originals: Record<string, unknown> = {};
+
+  for (const key of PATCHABLE_GLOBALS) {
+    if (!(key in g)) continue;
+    originals[key] = g[key];
+
+    try {
+      Object.defineProperty(g, key, {
+        get() {
+          const store = globalOverridesStorage.getStore();
+          return store && key in store ? store[key] : originals[key];
+        },
+        set(value: unknown) {
+          const store = globalOverridesStorage.getStore();
+          if (store) {
+            store[key] = value;
+          } else {
+            originals[key] = value;
+          }
+        },
+        configurable: true,
+        enumerable: true,
+      });
+    } catch {
+      // Some globals (e.g. crypto) may not be configurable.
+    }
+  }
+}
+
 // Install a permanent global proxy so the Convex runtime's
 // `Convex.syscall` / `Convex.asyncSyscall` / `Convex.jsSyscall`
 // always delegate to the current test's ALS context.
@@ -2021,6 +2090,7 @@ let _globalProxyInstalled = false;
 function ensureGlobalProxy() {
   if (_globalProxyInstalled) return;
   _globalProxyInstalled = true;
+  installGlobalProxies();
   (global as unknown as { Convex: ConvexGlobal }).Convex = {
     get syscall() {
       return getConvexGlobal().syscall;
@@ -2294,7 +2364,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           auth: authStorage.getStore() ?? auth,
           ...extraCtx,
         };
-        return handler(testCtx, a);
+        return globalOverridesStorage.run({}, () => handler(testCtx, a));
       },
     });
     const transactionManager = getTransactionManager();
@@ -2350,7 +2420,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     const q = queryGeneric({
       handler: (ctx: any, a: any) => {
         const testCtx = { ...ctx, auth: authStorage.getStore() ?? auth };
-        return handler(testCtx, a);
+        return globalOverridesStorage.run({}, () => handler(testCtx, a));
       },
     });
     const transactionManager = getTransactionManager();
@@ -2406,7 +2476,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           runAction: ctxRunAction,
           auth: authStorage.getStore() ?? auth,
         };
-        return handler(testCtx, innerArgs);
+        return globalOverridesStorage.run({}, () =>
+          handler(testCtx, innerArgs),
+        );
       },
     });
     // Check component boundary before entering the action's own stack context,
