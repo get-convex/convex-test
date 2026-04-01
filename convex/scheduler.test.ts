@@ -214,6 +214,86 @@ test("new convexTest after orphaned scheduled functions", async () => {
   expect(result).toMatchObject([{ body: "fresh", author: "test" }]);
 });
 
+test("finishInProgressScheduledFunctions runs only ready functions", async () => {
+  // This tests that functions scheduled for the future don't run
+  // when only immediate functions should execute.
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  await t.mutation(api.scheduler.scheduleNowAndLater, {});
+
+  // Only run ready functions (the immediate one), not future ones
+  await t.finishInProgressScheduledFunctions();
+
+  const result = await t.query(internal.scheduler.list);
+  // Only the immediate function should have run
+  expect(result).toMatchObject([{ body: "immediate" }]);
+
+  const jobs = await t.query(internal.scheduler.jobs);
+  const pending = jobs.filter(
+    (j: { state: { kind: string } }) => j.state.kind === "pending",
+  );
+  const success = jobs.filter(
+    (j: { state: { kind: string } }) => j.state.kind === "success",
+  );
+  expect(pending).toHaveLength(1); // the delayed one is still pending
+  expect(success).toHaveLength(1); // the immediate one succeeded
+  vi.useRealTimers();
+});
+
+test("scheduled functions don't fire during unrelated function execution", async () => {
+  // On main, scheduled functions execute via setTimeout callbacks,
+  // which can fire in the middle of other function executions.
+  // With the explicit scheduler, functions only run when you call
+  // finishInProgressScheduledFunctions or finishAllScheduledFunctions.
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+
+  // Schedule a function for delay=0
+  await t.mutation(api.scheduler.mutationSchedulingAction, {
+    body: "scheduled",
+    delayMs: 0,
+  });
+
+  // Advance timers — on main this would trigger the scheduled function's
+  // setTimeout callback. With explicit scheduler, nothing executes.
+  vi.runAllTimers();
+
+  // The scheduled function should still be pending (not automatically executed)
+  // until we explicitly call finishInProgressScheduledFunctions
+  const jobsBefore = await t.query(internal.scheduler.jobs);
+  expect(jobsBefore).toMatchObject([{ state: { kind: "pending" } }]);
+
+  // Now explicitly run it
+  await t.finishInProgressScheduledFunctions();
+
+  const jobsAfter = await t.query(internal.scheduler.jobs);
+  expect(jobsAfter).toMatchObject([{ state: { kind: "success" } }]);
+  vi.useRealTimers();
+});
+
+test("finishInProgressScheduledFunctions without prior vi.runAllTimers", async () => {
+  // On main, finishInProgressScheduledFunctions only waits for already
+  // in-progress functions — it doesn't find and execute pending ones.
+  // With the explicit scheduler, it also runs pending functions whose
+  // scheduledTime <= Date.now(), so no vi.runAllTimers() is needed
+  // for delay=0 scheduled functions.
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  await t.mutation(api.scheduler.mutationSchedulingAction, {
+    body: "no timers needed",
+    delayMs: 0,
+  });
+
+  // Don't call vi.runAllTimers() — just call finishInProgressScheduledFunctions
+  await t.finishInProgressScheduledFunctions();
+
+  const result = await t.query(internal.scheduler.list);
+  expect(result).toMatchObject([{ body: "no timers needed", author: "AI" }]);
+  const jobs = await t.query(internal.scheduler.jobs);
+  expect(jobs).toMatchObject([{ state: { kind: "success" } }]);
+  vi.useRealTimers();
+});
+
 test("argument serialization", async () => {
   vi.useFakeTimers();
   const t = convexTest(schema);
