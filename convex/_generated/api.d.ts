@@ -15,6 +15,7 @@ import type * as component from "../component.js";
 import type * as convexError from "../convexError.js";
 import type * as explicitTableNames from "../explicitTableNames.js";
 import type * as getFunctionMetadata from "../getFunctionMetadata.js";
+import type * as globals from "../globals.js";
 import type * as helpers from "../helpers.js";
 import type * as http from "../http.js";
 import type * as messages from "../messages.js";
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   convexError: typeof convexError;
   explicitTableNames: typeof explicitTableNames;
   getFunctionMetadata: typeof getFunctionMetadata;
+  globals: typeof globals;
   helpers: typeof helpers;
   http: typeof http;
   messages: typeof messages;
