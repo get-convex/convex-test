@@ -2445,16 +2445,21 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       isNested: boolean,
       args: any,
     ) => {
-      const func = await getFunctionFromPath(functionPath, "query");
-      validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
+      const resolved = await getFunctionFromPath(functionPath, "query");
+      validateValidator(resolved.args, args ?? {});
 
       const result = await runQueryWithHandler(
-        (ctx, a) => getHandler(func)(ctx, a),
+        resolved.handler,
         args,
-        functionPath,
+        resolved.functionPath,
         isNested,
       );
-      validateReturnValue(func, result, "query", functionPath);
+      validateReturnValue(
+        resolved.returns,
+        result,
+        "query",
+        resolved.functionPath,
+      );
       return result;
     },
 
@@ -2463,33 +2468,43 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       isNested: boolean,
       args: any,
     ): Promise<Value> => {
-      const func = await getFunctionFromPath(functionPath, "mutation");
-      validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
+      const resolved = await getFunctionFromPath(functionPath, "mutation");
+      validateValidator(resolved.args, args ?? {});
 
       const result = await runMutationWithHandler(
-        getHandler(func),
+        resolved.handler,
         args,
         {},
-        functionPath,
+        resolved.functionPath,
         isNested,
       );
-      validateReturnValue(func, result, "mutation", functionPath);
+      validateReturnValue(
+        resolved.returns,
+        result,
+        "mutation",
+        resolved.functionPath,
+      );
       return result;
     },
 
     actionFromPath: async (functionPath: FunctionPath, args: any) => {
-      const func = await getFunctionFromPath(functionPath, "action");
-      validateValidator(JSON.parse((func as any).exportArgs()), args ?? {});
+      const resolved = await getFunctionFromPath(functionPath, "action");
+      validateValidator(resolved.args, args ?? {});
 
       const result = await runActionWithHandler(
-        getHandler(func),
+        resolved.handler,
         args,
-        functionPath,
+        resolved.functionPath,
         byTypeWithPath.runQuery,
         byTypeWithPath.runMutation,
         byTypeWithPath.runAction,
       );
-      validateReturnValue(func, result, "action", functionPath);
+      validateReturnValue(
+        resolved.returns,
+        result,
+        "action",
+        resolved.functionPath,
+      );
       return result;
     },
     runQuery: async (
@@ -2619,7 +2634,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     },
 
     fun: async (functionPath: FunctionPath, args: any) => {
-      const func = await getFunctionFromPath(functionPath, "any");
+      const { func } = await getFunctionFromPath(functionPath, "any");
       if (func.isQuery) {
         return await byTypeWithPath.queryFromPath(
           functionPath,
@@ -2746,12 +2761,11 @@ function parseArgs(
 }
 
 function validateReturnValue(
-  func: any,
+  returnsValidator: ValidatorJSON | null,
   result: any,
   functionType: "query" | "mutation" | "action",
   functionPath: FunctionPath,
 ) {
-  const returnsValidator = JSON.parse(func.exportReturns());
   if (returnsValidator !== null) {
     try {
       validateValidator(returnsValidator, result);
@@ -2848,7 +2862,13 @@ function getHandler(func: any): (ctx: any, args: any) => any {
 async function getFunctionFromPath<T extends RegisteredFunctionKind>(
   functionPath: FunctionPath,
   type: T,
-): Promise<RegisteredFunctions[T]> {
+): Promise<{
+  func: RegisteredFunctions[T];
+  functionPath: FunctionPath;
+  handler: (ctx: any, args: any) => any;
+  returns: ValidatorJSON | null;
+  args: ValidatorJSON;
+}> {
   // "queries/messages:list" -> ["queries/messages", "list"]
   const [modulePath, maybeExportName] = functionPath.udfPath.split(":");
   const exportName =
@@ -2864,7 +2884,8 @@ async function getFunctionFromPath<T extends RegisteredFunctionKind>(
       `Expected a Convex function exported from module "${modulePath}" as \`${exportName}\`, but there is no such export.`,
     );
   }
-  if (typeof getHandler(func) !== "function") {
+  const handler = getHandler(func);
+  if (typeof handler !== "function") {
     throw new Error(
       `Expected a Convex function exported from module "${modulePath}" as \`${exportName}\`, but got: ${func}`,
     );
@@ -2897,7 +2918,10 @@ async function getFunctionFromPath<T extends RegisteredFunctionKind>(
       // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw type satisfies never;
   }
-  return func;
+  const args = JSON.parse(func.exportArgs());
+  const returns = JSON.parse(func.exportReturns());
+
+  return { func, functionPath, handler, returns, args };
 }
 
 function simpleHash(string: string) {
