@@ -1905,9 +1905,9 @@ function getTransactionManager() {
 }
 
 function getCurrentComponentPath() {
-  const functionStack = getTransactionManager().getFunctionStack();
-  const currentFunctionPath = functionStack[functionStack.length - 1];
-  return currentFunctionPath?.componentPath ?? ROOT_COMPONENT_PATH;
+  return (
+    executionContextStorage.getStore()?.componentPath ?? ROOT_COMPONENT_PATH
+  );
 }
 
 function getModules() {
@@ -1983,9 +1983,13 @@ type FunctionAddress =
   | { reference: string; name: undefined; functionHandle: undefined }
   | { functionHandle: string; name: undefined; reference: undefined };
 
-// Per-execution-context function stack. Actions create their own context
-// so parallel actions don't corrupt each other's stacks.
-const functionStackStorage = new AsyncLocalStorage<FunctionPath[]>();
+type ExecutionContext = {
+  componentPath: string;
+  udfPath: string;
+  depth: number; // 0 = top-level, 1+ = nested
+};
+
+const executionContextStorage = new AsyncLocalStorage<ExecutionContext>();
 
 type ConvexGlobal = {
   components: Record<string, ComponentInfo>;
@@ -2035,13 +2039,6 @@ class TransactionManager {
   // can run mutations in parallel.
   private _waitOnCurrentFunction: Promise<void> | null = null;
   private _markTransactionDone: (() => void) | null = null;
-  // Default function stack used when not inside an action's ALS context.
-  private _functionStack: FunctionPath[] = [];
-  // Returns the per-context function stack (ALS stack for actions, shared stack otherwise).
-  getFunctionStack(): FunctionPath[] {
-    return functionStackStorage.getStore() ?? this._functionStack;
-  }
-
   private _headroomTracker: HeadroomTracker | null = null;
   private _limitsConfig: Partial<TransactionMetrics> | boolean;
 
@@ -2049,7 +2046,7 @@ class TransactionManager {
     this._limitsConfig = limitsConfig;
   }
 
-  async begin(functionPath: FunctionPath, isNested: boolean) {
+  async begin(isNested: boolean) {
     // Take a lock only for the top-level of each transaction.
     // Nested transactions are not isolated so if you `Promise.all` on multiple
     // `ctx.runMutation` or `ctx.runQuery` calls, they won't be serialized.
@@ -2066,19 +2063,10 @@ class TransactionManager {
       });
       this._headroomTracker = new HeadroomTracker(this._limitsConfig);
     }
-    this.getFunctionStack().push(functionPath);
     const convex = getConvexGlobal();
     for (const component of Object.values(convex.components)) {
       component.db.startTransaction();
     }
-  }
-
-  beginAction(functionPath: FunctionPath) {
-    this.getFunctionStack().push(functionPath);
-  }
-
-  finishAction() {
-    this.getFunctionStack().pop();
   }
 
   // Used to distinguish between mutation and action execution
@@ -2111,7 +2099,6 @@ class TransactionManager {
     if (this._markTransactionDone === null) {
       throw new Error("Transaction not started");
     }
-    this.getFunctionStack().pop();
     if (!isNested) {
       this._headroomTracker = null;
       this._waitOnCurrentFunction = null;
@@ -2261,11 +2248,10 @@ export function convexTest<Schema extends GenericSchema>(
 
 function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
   // Auth doesn't propagate across component boundaries.
-  // Must be called before begin()/beginAction() which pushes onto functionStack.
   function authForComponent(componentPath: string) {
+    const ctx = executionContextStorage.getStore();
     const isCrossComponent =
-      getTransactionManager().getFunctionStack().length > 0 &&
-      componentPath !== getCurrentComponentPath();
+      ctx !== undefined && componentPath !== ctx.componentPath;
     return isCrossComponent ? new AuthFake() : auth;
   }
 
@@ -2290,7 +2276,14 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
 
     const authForChild = authForComponent(functionPath.componentPath);
 
-    await transactionManager.begin(functionPath, isNested);
+    const parentCtx = executionContextStorage.getStore();
+    const childCtx: ExecutionContext = {
+      componentPath: functionPath.componentPath,
+      udfPath: functionPath.udfPath,
+      depth: (parentCtx?.depth ?? 0) + 1,
+    };
+
+    await transactionManager.begin(isNested);
     try {
       const childLock = new NestedLock();
       const invokeRaw = () =>
@@ -2299,7 +2292,10 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
             invokeMutation: (args: string) => Promise<string>;
           }
         ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
-      const invokeInContext = () => authStorage.run(authForChild, invokeRaw);
+      const invokeInContext = () =>
+        executionContextStorage.run(childCtx, () =>
+          authStorage.run(authForChild, invokeRaw),
+        );
 
       const rawResult = await nestedTxStorage.run(childLock, invokeInContext);
 
@@ -2330,14 +2326,24 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
 
     const authForChild = authForComponent(functionPath.componentPath);
 
-    await transactionManager.begin(functionPath, isNested);
+    const parentCtx = executionContextStorage.getStore();
+    const childCtx: ExecutionContext = {
+      componentPath: functionPath.componentPath,
+      udfPath: functionPath.udfPath,
+      depth: (parentCtx?.depth ?? 0) + 1,
+    };
+
+    await transactionManager.begin(isNested);
     try {
       const childLock = new NestedLock();
       const invokeRaw = () =>
         (
           q as unknown as { invokeQuery: (args: string) => Promise<string> }
         ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
-      const invokeInContext = () => authStorage.run(authForChild, invokeRaw);
+      const invokeInContext = () =>
+        executionContextStorage.run(childCtx, () =>
+          authStorage.run(authForChild, invokeRaw),
+        );
 
       const rawResult = await nestedTxStorage.run(childLock, invokeInContext);
 
@@ -2369,33 +2375,26 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         return handler(testCtx, innerArgs);
       },
     });
-    // Check component boundary before entering the action's own stack context,
-    // so we can see the parent's function stack.
     const authForChild = authForComponent(functionPath.componentPath);
-    // Each action gets its own function stack via ALS so parallel actions
-    // don't corrupt each other's stacks.
-    const stack: FunctionPath[] = [];
-    return await functionStackStorage.run(stack, async () => {
-      getTransactionManager().beginAction(functionPath);
+    const parentCtx = executionContextStorage.getStore();
+    const childCtx: ExecutionContext = {
+      componentPath: functionPath.componentPath,
+      udfPath: functionPath.udfPath,
+      depth: (parentCtx?.depth ?? 0) + 1,
+    };
+    return await executionContextStorage.run(childCtx, async () => {
       const requestId = "" + Math.random();
-      try {
-        const rawResult = await authStorage.run(authForChild, () =>
-          (
-            a as unknown as {
-              invokeAction: (
-                requestId: string,
-                args: string,
-              ) => Promise<string>;
-            }
-          ).invokeAction(
-            requestId,
-            JSON.stringify(convexToJson([parseArgs(args)])),
-          ),
-        );
-        return jsonToConvex(JSON.parse(rawResult)) as T;
-      } finally {
-        getTransactionManager().finishAction();
-      }
+      const rawResult = await authStorage.run(authForChild, () =>
+        (
+          a as unknown as {
+            invokeAction: (requestId: string, args: string) => Promise<string>;
+          }
+        ).invokeAction(
+          requestId,
+          JSON.stringify(convexToJson([parseArgs(args)])),
+        ),
+      );
+      return jsonToConvex(JSON.parse(rawResult)) as T;
     });
   };
 
@@ -2404,14 +2403,6 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       functionPathOrAddress: FunctionPath | FunctionAddress,
       args: any,
     ) => {
-      // Serialize nested calls at each nesting level to prevent functionStack
-      // corruption from parallel component sub-calls (GitHub issue #80).
-      // The lock must be acquired before resolving the function address so
-      // that getCurrentComponentPath() reads a consistent function stack.
-      // Use nestedTxStorage (ALS) to detect nesting — this is per-execution-context
-      // so concurrent top-level calls from different actions correctly see themselves
-      // as non-nested, while calls from within a mutation/query handler see themselves
-      // as nested.
       const parentLock = nestedTxStorage.getStore() ?? null;
       const isNested = parentLock !== null;
       if (parentLock) {
@@ -2505,22 +2496,28 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       functionReference: FunctionReference<any, any, any, any>,
       args: any,
     ) => {
-      const refPath = await getFunctionPathFromReference(functionReference);
-      return await byTypeWithPath.queryFromPath(refPath, args);
+      return await byTypeWithPath.queryFromPath(
+        getFunctionAddress(functionReference),
+        args,
+      );
     },
     runMutation: async (
       functionReference: FunctionReference<any, any, any, any>,
       args: any,
     ) => {
-      const refPath = await getFunctionPathFromReference(functionReference);
-      return await byTypeWithPath.mutationFromPath(refPath, args);
+      return await byTypeWithPath.mutationFromPath(
+        getFunctionAddress(functionReference),
+        args,
+      );
     },
     runAction: async (
       functionReference: FunctionReference<any, any, any, any>,
       args: any,
     ) => {
-      const refPath = await getFunctionPathFromReference(functionReference);
-      return await byTypeWithPath.actionFromPath(refPath, args);
+      return await byTypeWithPath.actionFromPath(
+        getFunctionAddress(functionReference),
+        args,
+      );
     },
   };
 
@@ -2534,10 +2531,10 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           /* isNested */ false,
         );
       }
-      const functionPath = await getFunctionPathFromReference(
-        functionReferenceOrHandler,
+      return await byTypeWithPath.queryFromPath(
+        getFunctionAddress(functionReferenceOrHandler),
+        args,
       );
-      return await byTypeWithPath.queryFromPath(functionPath, args);
     },
 
     mutation: async (
@@ -2553,10 +2550,10 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           /* isNested */ false,
         );
       }
-      const functionPath = await getFunctionPathFromReference(
-        functionReferenceOrHandler,
+      return await byTypeWithPath.mutationFromPath(
+        getFunctionAddress(functionReferenceOrHandler),
+        args,
       );
-      return await byTypeWithPath.mutationFromPath(functionPath, args);
     },
 
     action: async (functionReferenceOrHandler: any, args?: any) => {
@@ -2570,10 +2567,10 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           byTypeWithPath.runAction,
         );
       }
-      const functionPath = await getFunctionPathFromReference(
-        functionReferenceOrHandler,
+      return await byTypeWithPath.actionFromPath(
+        getFunctionAddress(functionReferenceOrHandler),
+        args,
       );
-      return await byTypeWithPath.actionFromPath(functionPath, args);
     },
   };
   const run = async <T>(
@@ -2797,16 +2794,6 @@ function getFunctionPathFromAddress(
     };
   }
   throw new Error("Function address not supported");
-}
-
-async function getFunctionPathFromReference(
-  functionReference: FunctionReference<any, any, any, any>,
-) {
-  // { name: "messages:list" }
-  // { reference: "_reference/childComponent/aggregate/path/to/file/functionName" }
-  // { functionHandle: "function://<id>/<path>" }
-  const functionAddress = getFunctionAddress(functionReference);
-  return getFunctionPathFromAddress(functionAddress);
 }
 
 type RegisteredFunctions = {
