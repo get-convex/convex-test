@@ -1438,18 +1438,20 @@ function asyncSyscallImpl() {
           args: udfArgsJson,
         } = args;
         const udfArgs = jsonToConvex(udfArgsJson);
-        const functionAddress = { name, reference, functionHandle };
+        const functionPath = getFunctionPathFromAddress({
+          name,
+          reference,
+          functionHandle,
+        });
         if (udfType === "query") {
           return JSON.stringify(
-            convexToJson(
-              await withAuth().queryFromPath(functionAddress, udfArgs),
-            ),
+            convexToJson(await withAuth().queryFromPath(functionPath, udfArgs)),
           );
         }
         if (udfType === "mutation") {
           return JSON.stringify(
             convexToJson(
-              await withAuth().mutationFromPath(functionAddress, udfArgs),
+              await withAuth().mutationFromPath(functionPath, udfArgs),
             ),
           );
         }
@@ -1481,11 +1483,8 @@ function asyncSyscallImpl() {
           args: fnArgs,
           ts: tsInSecs,
         } = args;
-        const functionPath = getFunctionPathFromAddress({
-          name,
-          reference,
-          functionHandle,
-        });
+        const functionAddress = { name, reference, functionHandle };
+        const functionPath = getFunctionPathFromAddress(functionAddress);
         // Convert args to a Convex value before storing them or passing them to the function
         const parsedArgs = jsonToConvex(fnArgs);
 
@@ -2399,17 +2398,14 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
   };
 
   const byTypeWithPath = {
-    queryFromPath: async (
-      functionPathOrAddress: FunctionPath | FunctionAddress,
-      args: any,
-    ) => {
+    queryFromPath: async (functionPath: FunctionPath, args: any) => {
       const parentLock = nestedTxStorage.getStore() ?? null;
       const isNested = parentLock !== null;
       if (parentLock) {
         await parentLock.acquire();
       }
       try {
-        const resolved = await resolveFunction(functionPathOrAddress, "query");
+        const resolved = await resolveFunction(functionPath, "query");
         validateValidator(resolved.args, args ?? {});
 
         const result = await runQueryWithHandler(
@@ -2433,7 +2429,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     },
 
     mutationFromPath: async (
-      functionPathOrAddress: FunctionPath | FunctionAddress,
+      functionPath: FunctionPath,
       args: any,
     ): Promise<Value> => {
       const parentLock = nestedTxStorage.getStore() ?? null;
@@ -2442,10 +2438,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         await parentLock.acquire();
       }
       try {
-        const resolved = await resolveFunction(
-          functionPathOrAddress,
-          "mutation",
-        );
+        const resolved = await resolveFunction(functionPath, "mutation");
         validateValidator(resolved.args, args ?? {});
 
         const result = await runMutationWithHandler(
@@ -2469,11 +2462,8 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       }
     },
 
-    actionFromPath: async (
-      functionPathOrAddress: FunctionPath | FunctionAddress,
-      args: any,
-    ) => {
-      const resolved = await resolveFunction(functionPathOrAddress, "action");
+    actionFromPath: async (functionPath: FunctionPath, args: any) => {
+      const resolved = await resolveFunction(functionPath, "action");
       validateValidator(resolved.args, args ?? {});
 
       const result = await runActionWithHandler(
@@ -2496,28 +2486,28 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       functionReference: FunctionReference<any, any, any, any>,
       args: any,
     ) => {
-      return await byTypeWithPath.queryFromPath(
+      const functionPath = getFunctionPathFromAddress(
         getFunctionAddress(functionReference),
-        args,
       );
+      return await byTypeWithPath.queryFromPath(functionPath, args);
     },
     runMutation: async (
       functionReference: FunctionReference<any, any, any, any>,
       args: any,
     ) => {
-      return await byTypeWithPath.mutationFromPath(
+      const functionPath = getFunctionPathFromAddress(
         getFunctionAddress(functionReference),
-        args,
       );
+      return await byTypeWithPath.mutationFromPath(functionPath, args);
     },
     runAction: async (
       functionReference: FunctionReference<any, any, any, any>,
       args: any,
     ) => {
-      return await byTypeWithPath.actionFromPath(
+      const functionPath = getFunctionPathFromAddress(
         getFunctionAddress(functionReference),
-        args,
       );
+      return await byTypeWithPath.actionFromPath(functionPath, args);
     },
   };
 
@@ -2531,10 +2521,10 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           /* isNested */ false,
         );
       }
-      return await byTypeWithPath.queryFromPath(
+      const functionPath = getFunctionPathFromAddress(
         getFunctionAddress(functionReferenceOrHandler),
-        args,
       );
+      return await byTypeWithPath.queryFromPath(functionPath, args);
     },
 
     mutation: async (
@@ -2550,10 +2540,10 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           /* isNested */ false,
         );
       }
-      return await byTypeWithPath.mutationFromPath(
+      const functionPath = getFunctionPathFromAddress(
         getFunctionAddress(functionReferenceOrHandler),
-        args,
       );
+      return await byTypeWithPath.mutationFromPath(functionPath, args);
     },
 
     action: async (functionReferenceOrHandler: any, args?: any) => {
@@ -2567,10 +2557,10 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           byTypeWithPath.runAction,
         );
       }
-      return await byTypeWithPath.actionFromPath(
+      const functionPath = getFunctionPathFromAddress(
         getFunctionAddress(functionReferenceOrHandler),
-        args,
       );
+      return await byTypeWithPath.actionFromPath(functionPath, args);
     },
   };
   const run = async <T>(
@@ -2822,7 +2812,7 @@ function getHandler(func: any): (ctx: any, args: any) => any {
 }
 
 async function resolveFunction<T extends RegisteredFunctionKind>(
-  functionPathOrAddress: FunctionPath | FunctionAddress,
+  functionPath: FunctionPath,
   type: T,
 ): Promise<{
   func: RegisteredFunctions[T];
@@ -2831,10 +2821,6 @@ async function resolveFunction<T extends RegisteredFunctionKind>(
   returns: ValidatorJSON | null;
   args: ValidatorJSON;
 }> {
-  const functionPath =
-    "udfPath" in functionPathOrAddress
-      ? functionPathOrAddress
-      : getFunctionPathFromAddress(functionPathOrAddress);
   // "queries/messages:list" -> ["queries/messages", "list"]
   const [modulePath, maybeExportName] = functionPath.udfPath.split(":");
   const exportName =
