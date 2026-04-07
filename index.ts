@@ -2481,27 +2481,21 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       functionReference: FunctionReference<any, any, any, any>,
       args: any,
     ) => {
-      const functionPath = getFunctionPathFromAddress(
-        getFunctionAddress(functionReference),
-      );
+      const functionPath = getFunctionPathFromReference(functionReference);
       return await byTypeWithPath.queryFromPath(functionPath, args);
     },
     runMutation: async (
       functionReference: FunctionReference<any, any, any, any>,
       args: any,
     ) => {
-      const functionPath = getFunctionPathFromAddress(
-        getFunctionAddress(functionReference),
-      );
+      const functionPath = getFunctionPathFromReference(functionReference);
       return await byTypeWithPath.mutationFromPath(functionPath, args);
     },
     runAction: async (
       functionReference: FunctionReference<any, any, any, any>,
       args: any,
     ) => {
-      const functionPath = getFunctionPathFromAddress(
-        getFunctionAddress(functionReference),
-      );
+      const functionPath = getFunctionPathFromReference(functionReference);
       return await byTypeWithPath.actionFromPath(functionPath, args);
     },
   };
@@ -2516,8 +2510,8 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           /* isNested */ false,
         );
       }
-      const functionPath = getFunctionPathFromAddress(
-        getFunctionAddress(functionReferenceOrHandler),
+      const functionPath = getFunctionPathFromReference(
+        functionReferenceOrHandler,
       );
       return await byTypeWithPath.queryFromPath(functionPath, args);
     },
@@ -2535,8 +2529,8 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           /* isNested */ false,
         );
       }
-      const functionPath = getFunctionPathFromAddress(
-        getFunctionAddress(functionReferenceOrHandler),
+      const functionPath = getFunctionPathFromReference(
+        functionReferenceOrHandler,
       );
       return await byTypeWithPath.mutationFromPath(functionPath, args);
     },
@@ -2552,8 +2546,8 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           byTypeWithPath.runAction,
         );
       }
-      const functionPath = getFunctionPathFromAddress(
-        getFunctionAddress(functionReferenceOrHandler),
+      const functionPath = getFunctionPathFromReference(
+        functionReferenceOrHandler,
       );
       return await byTypeWithPath.actionFromPath(functionPath, args);
     },
@@ -2782,6 +2776,12 @@ function getFunctionPathFromAddress(
     };
   }
   throw new Error("Function address not supported");
+}
+
+function getFunctionPathFromReference(
+  functionReference: FunctionReference<any, any, any, any>,
+) {
+  return getFunctionPathFromAddress(getFunctionAddress(functionReference));
 }
 
 type RegisteredFunctions = {
