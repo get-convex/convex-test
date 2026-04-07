@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.47
+
+- Fix: Isolate function stack tracking between parallel function calls
+  to prevent corruption when calling different components in parallel.
+  This may have presented previously as not being able to find modules
+  that existed but were being resolved for the wrong component.
+
 ## 0.0.46
 
 - Changes `finishAllScheduledFunctions` to pump the macrotask queue instead
