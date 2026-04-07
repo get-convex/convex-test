@@ -94,6 +94,14 @@ export const getIdentityNameAction = action({
   },
 });
 
+export const countAction = action({
+  args: { name: v.string() },
+  returns: v.number(),
+  handler: async (ctx, args): Promise<number> => {
+    return await ctx.runQuery(api.public.count, { name: args.name });
+  },
+});
+
 export const mutationWithNumberArg = mutation({
   args: { a: v.number() },
   handler: async (_ctx, args) => {

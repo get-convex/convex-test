@@ -233,6 +233,32 @@ test("separate convexTest instances are isolated with scheduling", async () => {
   vi.useRealTimers();
 });
 
+test("parallel sequential cross-component queries (issue #80)", async () => {
+  const t = testWithTwoCounters();
+  const result = await t.query(
+    internal.component.parallelSequentialComponentQueries,
+  );
+  expect(result).toMatchObject({
+    count1a: 0,
+    count1b: 0,
+    count2a: 0,
+    count2b: 0,
+  });
+});
+
+test("parallel sequential cross-component actions", async () => {
+  const t = testWithTwoCounters();
+  const result = await t.action(
+    internal.component.parallelSequentialComponentActions,
+  );
+  expect(result).toMatchObject({
+    count1a: 0,
+    count1b: 0,
+    count2a: 0,
+    count2b: 0,
+  });
+});
+
 test("parallel mutations on different components", async () => {
   const t = testWithTwoCounters();
   await t.mutation(internal.component.parallelComponentMutations);

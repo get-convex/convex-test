@@ -86,6 +86,12 @@ export declare const components: {
         null
       >;
       count: FunctionReference<"query", "internal", { name: string }, number>;
+      countAction: FunctionReference<
+        "action",
+        "internal",
+        { name: string },
+        number
+      >;
       countMany: FunctionReference<
         "action",
         "internal",
@@ -123,6 +129,12 @@ export declare const components: {
         null
       >;
       count: FunctionReference<"query", "internal", { name: string }, number>;
+      countAction: FunctionReference<
+        "action",
+        "internal",
+        { name: string },
+        number
+      >;
       countMany: FunctionReference<
         "action",
         "internal",

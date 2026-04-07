@@ -199,3 +199,57 @@ export const parallelComponentMutations = internalMutation({
     return null;
   },
 });
+
+export const parallelSequentialComponentActions = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    const [[count1a, count1b], [count2a, count2b]] = await Promise.all([
+      (async () => {
+        const a = await ctx.runAction(components.counter.public.countAction, {
+          name: "a",
+        });
+        const b = await ctx.runAction(components.counter.public.countAction, {
+          name: "b",
+        });
+        return [a, b] as const;
+      })(),
+      (async () => {
+        const a = await ctx.runAction(components.counter2.public.countAction, {
+          name: "a",
+        });
+        const b = await ctx.runAction(components.counter2.public.countAction, {
+          name: "b",
+        });
+        return [a, b] as const;
+      })(),
+    ]);
+    return { count1a, count1b, count2a, count2b };
+  },
+});
+
+export const parallelSequentialComponentQueries = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const [[count1a, count1b], [count2a, count2b]] = await Promise.all([
+      (async () => {
+        const a = await ctx.runQuery(components.counter.public.count, {
+          name: "a",
+        });
+        const b = await ctx.runQuery(components.counter.public.count, {
+          name: "b",
+        });
+        return [a, b] as const;
+      })(),
+      (async () => {
+        const a = await ctx.runQuery(components.counter2.public.count, {
+          name: "a",
+        });
+        const b = await ctx.runQuery(components.counter2.public.count, {
+          name: "b",
+        });
+        return [a, b] as const;
+      })(),
+    ]);
+    return { count1a, count1b, count2a, count2b };
+  },
+});
