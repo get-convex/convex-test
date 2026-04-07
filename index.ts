@@ -1977,11 +1977,6 @@ type FunctionPath = {
   udfPath: string;
 };
 
-type FunctionAddress =
-  | { name: string; reference: undefined; functionHandle: undefined }
-  | { reference: string; name: undefined; functionHandle: undefined }
-  | { functionHandle: string; name: undefined; reference: undefined };
-
 type ExecutionContext = {
   componentPath: string;
   udfPath: string;
@@ -2307,7 +2302,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
   };
 
   // Shared helper to run a query with a given handler and transaction context.
-  // Used by both resolveQuery (for function references) and inline queries.
+  // Used by both queryFromPath (for function references) and inline queries.
   // Callers are responsible for acquiring the nested lock when nested.
   const runQueryWithHandler = async <T>(
     handler: (ctx: any, args: any) => T,
@@ -2353,7 +2348,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
   };
 
   // Shared helper to run an action with a given handler
-  // Used by both resolveAction (for function references) and inline actions
+  // Used by both actionFromPath (for function references) and inline actions
   const runActionWithHandler = async <T>(
     handler: (ctx: any, args: any) => T,
     args: any,
@@ -2752,7 +2747,10 @@ function parseFunctionHandle(handle: string) {
 }
 
 function getFunctionPathFromAddress(
-  functionAddress: FunctionAddress,
+  functionAddress:
+    | { name: string; reference: undefined; functionHandle: undefined }
+    | { reference: string; name: undefined; functionHandle: undefined }
+    | { functionHandle: string; name: undefined; reference: undefined },
 ): FunctionPath {
   if (functionAddress.functionHandle !== undefined) {
     return parseFunctionHandle(functionAddress.functionHandle);
