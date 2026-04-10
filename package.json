@@ -40,7 +40,7 @@
     "convex": "^1.32.0"
   },
   "devDependencies": {
-    "@edge-runtime/vm": "3.2.0",
+    "@edge-runtime/vm": "5.0.0",
     "@eslint/eslintrc": "3.3.5",
     "@eslint/js": "9.39.4",
     "@types/node": "20.19.39",
