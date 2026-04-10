@@ -150,7 +150,7 @@ test("limits accumulate within a transaction", async () => {
   ).rejects.toThrow(/Scanned too many documents/);
 });
 
-test("getTransactionHeadroom returns bandwidth stats", async () => {
+test("getTransactionMetrics returns bandwidth stats", async () => {
   const t = convexTest({ schema });
   await t.run(async (ctx) => {
     await ctx.db.insert("messages", { author: "sarah", body: "hello" });
@@ -158,14 +158,39 @@ test("getTransactionHeadroom returns bandwidth stats", async () => {
   });
   const consumption = await t.query(async (ctx) => {
     await ctx.db.query("messages").collect();
-    // TODO: replace with getTransactionHeadroom() once it's published
     const syscalls = (global as any).Convex;
     return JSON.parse(
-      await syscalls.asyncSyscall("1.0/headroom", JSON.stringify({})),
+      await syscalls.asyncSyscall(
+        "1.0/getTransactionMetrics",
+        JSON.stringify({}),
+      ),
     );
   });
   // Should have read some bytes and documents
   expect(consumption.documentsRead.used).toBeGreaterThan(0);
   expect(consumption.bytesRead.used).toBeGreaterThan(0);
   expect(consumption.databaseQueries.used).toBeGreaterThan(0);
+  // Should have remaining capacity
+  expect(consumption.documentsRead.remaining).toBeGreaterThan(0);
+  expect(consumption.bytesRead.remaining).toBeGreaterThan(0);
+  expect(consumption.bytesWritten.used).toBe(0);
+  expect(consumption.documentsWritten.used).toBe(0);
+  expect(consumption.functionsScheduled.used).toBe(0);
+  expect(consumption.scheduledFunctionArgsBytes.used).toBe(0);
+});
+
+test("getTransactionMetrics tracks writes", async () => {
+  const t = convexTest({ schema });
+  const consumption = await t.mutation(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello" });
+    const syscalls = (global as any).Convex;
+    return JSON.parse(
+      await syscalls.asyncSyscall(
+        "1.0/getTransactionMetrics",
+        JSON.stringify({}),
+      ),
+    );
+  });
+  expect(consumption.documentsWritten.used).toBe(1);
+  expect(consumption.bytesWritten.used).toBeGreaterThan(0);
 });
