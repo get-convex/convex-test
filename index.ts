@@ -1402,6 +1402,27 @@ function asyncSyscallImpl() {
             "It is not available in actions or outside of a Convex function.",
         );
       }
+      case "1.0/getTransactionMetrics": {
+        if (tracker) {
+          return JSON.stringify(tracker.getTransactionHeadroom());
+        }
+        throw new Error(
+          "getTransactionMetrics() can only be called from a query or mutation. " +
+            "It is not available in actions or outside of a Convex function.",
+        );
+      }
+      case "1.0/getFunctionMetadata": {
+        const ctx = executionContextStorage.getStore();
+        if (!ctx) {
+          throw new Error(
+            "getFunctionMetadata() can only be called from within a Convex function.",
+          );
+        }
+        return JSON.stringify({
+          name: ctx.udfPath,
+          componentPath: ctx.componentPath,
+        });
+      }
       case "1.0/actions/query": {
         const { name, args: queryArgs } = args;
         return JSON.stringify(
