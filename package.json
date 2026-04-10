@@ -52,7 +52,7 @@
     "globals": "17.4.0",
     "pkg-pr-new": "0.0.66",
     "prettier": "3.8.1",
-    "replace-in-file": "7.2.0",
+    "replace-in-file": "8.4.0",
     "typescript": "5.9.3",
     "vitest": "1.6.1"
   }
