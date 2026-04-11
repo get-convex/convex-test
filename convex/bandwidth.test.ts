@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { getDocumentSize } from "convex/values";
 import { convexTest } from "../index";
 import schema from "./schema";
 
@@ -156,23 +157,23 @@ test("getTransactionMetrics returns bandwidth stats", async () => {
     await ctx.db.insert("messages", { author: "sarah", body: "hello" });
     await ctx.db.insert("messages", { author: "michal", body: "world" });
   });
-  const consumption = await t.query(async (ctx) => {
-    await ctx.db.query("messages").collect();
+  const { consumption, totalBytes } = await t.query(async (ctx) => {
+    const docs = await ctx.db.query("messages").collect();
+    const totalBytes = docs.reduce((sum, doc) => sum + getDocumentSize(doc), 0);
     const syscalls = (global as any).Convex;
-    return JSON.parse(
+    const consumption = JSON.parse(
       await syscalls.asyncSyscall(
         "1.0/getTransactionMetrics",
         JSON.stringify({}),
       ),
     );
+    return { consumption, totalBytes };
   });
-  // Should have read some bytes and documents
-  expect(consumption.documentsRead.used).toBeGreaterThan(0);
-  expect(consumption.bytesRead.used).toBeGreaterThan(0);
-  expect(consumption.databaseQueries.used).toBeGreaterThan(0);
-  // Should have remaining capacity
-  expect(consumption.documentsRead.remaining).toBeGreaterThan(0);
-  expect(consumption.bytesRead.remaining).toBeGreaterThan(0);
+  expect(consumption.documentsRead.used).toBe(2);
+  expect(consumption.bytesRead.used).toBe(totalBytes);
+  expect(consumption.databaseQueries.used).toBe(1);
+  expect(consumption.documentsRead.remaining).toBe(32000 - 2);
+  expect(consumption.bytesRead.remaining).toBe((16 << 20) - totalBytes);
   expect(consumption.bytesWritten.used).toBe(0);
   expect(consumption.documentsWritten.used).toBe(0);
   expect(consumption.functionsScheduled.used).toBe(0);
@@ -181,16 +182,22 @@ test("getTransactionMetrics returns bandwidth stats", async () => {
 
 test("getTransactionMetrics tracks writes", async () => {
   const t = convexTest({ schema });
-  const consumption = await t.mutation(async (ctx) => {
-    await ctx.db.insert("messages", { author: "sarah", body: "hello" });
+  const { consumption, docBytes } = await t.mutation(async (ctx) => {
+    const id = await ctx.db.insert("messages", {
+      author: "sarah",
+      body: "hello",
+    });
+    const doc = (await ctx.db.get(id))!;
+    const docBytes = getDocumentSize(doc);
     const syscalls = (global as any).Convex;
-    return JSON.parse(
+    const consumption = JSON.parse(
       await syscalls.asyncSyscall(
         "1.0/getTransactionMetrics",
         JSON.stringify({}),
       ),
     );
+    return { consumption, docBytes };
   });
   expect(consumption.documentsWritten.used).toBe(1);
-  expect(consumption.bytesWritten.used).toBeGreaterThan(0);
+  expect(consumption.bytesWritten.used).toBe(docBytes);
 });
