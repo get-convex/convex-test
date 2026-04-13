@@ -218,7 +218,10 @@ class DatabaseFake {
   private _generateId<TableName extends string>(
     table: TableName,
   ): GenericId<TableName> {
-    const id = this._nextDocId.toString() + ";" + table;
+    const counterPadLen = 38 - table.length - 3;
+    const counter = this._nextDocId.toString().padStart(counterPadLen, "0");
+    const nameLen = table.length.toString().padStart(3, "0");
+    const id = table + counter + nameLen;
     this._nextDocId += 1;
     return id as GenericId<TableName>;
   }
@@ -830,11 +833,14 @@ class DatabaseFake {
 }
 
 function tableNameFromId(id: string) {
-  const parts = id.split(";");
-  if (parts.length !== 2) {
+  if (id.length !== 38) {
     return null;
   }
-  return id.split(";")[1];
+  const nameLen = Number(id.slice(35));
+  if (isNaN(nameLen) || nameLen <= 0) {
+    return null;
+  }
+  return id.slice(0, nameLen);
 }
 
 function isSimpleObject(value: unknown) {
@@ -1287,9 +1293,9 @@ function syscallImpl() {
       }
       case "1.0/db/normalizeId": {
         const idString: string = args.idString;
-        const isInTable = idString.endsWith(`;${args.table}`);
+        const tableName = tableNameFromId(idString);
         return JSON.stringify({
-          id: isInTable ? idString : null,
+          id: tableName === args.table ? idString : null,
         });
       }
       default: {
