@@ -833,11 +833,11 @@ class DatabaseFake {
 }
 
 function tableNameFromId(id: string) {
-  if (id.length !== 38) {
+  if (id.length < 4) {
     return null;
   }
-  const nameLen = Number(id.slice(35));
-  if (isNaN(nameLen) || nameLen <= 0) {
+  const nameLen = Number(id.slice(-3));
+  if (isNaN(nameLen) || nameLen <= 0 || nameLen > id.length - 3) {
     return null;
   }
   return id.slice(0, nameLen);
