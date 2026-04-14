@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.48
+
+- Add implementations for internal syscalls for upcoming ctx.meta
+  features (ctx.meta.{getFunctionMetadata,getTransactionMetrics})
+
 ## 0.0.47
 
 - Fix: Isolate function stack tracking between parallel function calls
