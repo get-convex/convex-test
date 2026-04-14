@@ -39,7 +39,10 @@ import {
   getDocumentSize,
   jsonToConvex,
 } from "convex/values";
-import { HeadroomTracker, TransactionMetrics } from "./headroom.js";
+import {
+  TransactionMetricsTracker,
+  TransactionMetrics,
+} from "./transactionMetrics.js";
 
 type FilterJson =
   | { $eq: [FilterJson, FilterJson] }
@@ -1277,7 +1280,7 @@ function syscallImpl() {
     switch (op) {
       case "1.0/queryStream": {
         const { query } = args;
-        const tracker = getTransactionManager().getHeadroomTracker();
+        const tracker = getTransactionManager().getMetricsTracker();
         tracker?.trackIndexRange();
         const queryId = db.startQuery(query);
         return JSON.stringify({ queryId });
@@ -1311,7 +1314,7 @@ function asyncSyscallImpl() {
   return async (op: string, jsonArgs: string): Promise<string> => {
     const args = JSON.parse(jsonArgs);
     const db = getDb();
-    const tracker = getTransactionManager().getHeadroomTracker();
+    const tracker = getTransactionManager().getMetricsTracker();
     function getAndTrack(table: string, id: GenericId<string>) {
       const doc = db.get(table, id);
       if (doc !== null) {
@@ -1393,13 +1396,27 @@ function asyncSyscallImpl() {
         tracker?.trackWrite(0);
         return JSON.stringify({});
       }
-      case "1.0/headroom": {
+      case "1.0/getTransactionMetrics": {
         if (tracker) {
-          return JSON.stringify(convexToJson(tracker.getTransactionHeadroom()));
+          return JSON.stringify(convexToJson(tracker.getTransactionMetrics()));
         }
         throw new Error(
-          "getTransactionHeadroom() can only be called from a query or mutation. " +
+          "getTransactionMetrics() can only be called from a query or mutation. " +
             "It is not available in actions or outside of a Convex function.",
+        );
+      }
+      case "1.0/getFunctionMetadata": {
+        const ctx = executionContextStorage.getStore();
+        if (!ctx) {
+          throw new Error(
+            "getFunctionMetadata() can only be called from within a Convex function.",
+          );
+        }
+        return JSON.stringify(
+          convexToJson({
+            name: ctx.udfPath,
+            componentPath: ctx.componentPath,
+          }),
         );
       }
       case "1.0/actions/query": {
@@ -2033,7 +2050,7 @@ class TransactionManager {
   // can run mutations in parallel.
   private _waitOnCurrentFunction: Promise<void> | null = null;
   private _markTransactionDone: (() => void) | null = null;
-  private _headroomTracker: HeadroomTracker | null = null;
+  private _metricsTracker: TransactionMetricsTracker | null = null;
   private _limitsConfig: Partial<TransactionMetrics> | boolean;
 
   constructor(limitsConfig: Partial<TransactionMetrics> | boolean = false) {
@@ -2055,7 +2072,7 @@ class TransactionManager {
       this._waitOnCurrentFunction = new Promise((resolve) => {
         this._markTransactionDone = resolve;
       });
-      this._headroomTracker = new HeadroomTracker(this._limitsConfig);
+      this._metricsTracker = new TransactionMetricsTracker(this._limitsConfig);
     }
     const convex = getConvexGlobal();
     for (const component of Object.values(convex.components)) {
@@ -2069,8 +2086,8 @@ class TransactionManager {
     return this._waitOnCurrentFunction !== null;
   }
 
-  getHeadroomTracker(): HeadroomTracker | null {
-    return this._headroomTracker;
+  getMetricsTracker(): TransactionMetricsTracker | null {
+    return this._metricsTracker;
   }
 
   commit(isNested: boolean) {
@@ -2094,7 +2111,7 @@ class TransactionManager {
       throw new Error("Transaction not started");
     }
     if (!isNested) {
-      this._headroomTracker = null;
+      this._metricsTracker = null;
       this._waitOnCurrentFunction = null;
       this._markTransactionDone();
       this._markTransactionDone = null;
@@ -2631,11 +2648,18 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         };
         return getHandler(func)(testCtx, a);
       });
-      const response = await (
-        a as unknown as {
-          invokeHttpAction: (request: Request) => Promise<Response>;
-        }
-      ).invokeHttpAction(new Request(url, init));
+      const httpCtx: ExecutionContext = {
+        componentPath: getCurrentComponentPath(),
+        udfPath: "http",
+        depth: 0,
+      };
+      const response = await executionContextStorage.run(httpCtx, () =>
+        (
+          a as unknown as {
+            invokeHttpAction: (request: Request) => Promise<Response>;
+          }
+        ).invokeHttpAction(new Request(url, init)),
+      );
       return response;
     },
 

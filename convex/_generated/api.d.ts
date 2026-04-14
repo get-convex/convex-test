@@ -13,9 +13,11 @@ import type * as argumentsValidation from "../argumentsValidation.js";
 import type * as authentication from "../authentication.js";
 import type * as component from "../component.js";
 import type * as explicitTableNames from "../explicitTableNames.js";
+import type * as getFunctionMetadata from "../getFunctionMetadata.js";
 import type * as helpers from "../helpers.js";
 import type * as http from "../http.js";
 import type * as messages from "../messages.js";
+import type * as meta from "../meta.js";
 import type * as mutations from "../mutations.js";
 import type * as pagination from "../pagination.js";
 import type * as queries from "../queries.js";
@@ -37,9 +39,11 @@ declare const fullApi: ApiFromModules<{
   authentication: typeof authentication;
   component: typeof component;
   explicitTableNames: typeof explicitTableNames;
+  getFunctionMetadata: typeof getFunctionMetadata;
   helpers: typeof helpers;
   http: typeof http;
   messages: typeof messages;
+  meta: typeof meta;
   mutations: typeof mutations;
   pagination: typeof pagination;
   queries: typeof queries;
@@ -100,6 +104,7 @@ export declare const components: {
       >;
       getIdentityName: FunctionReference<"query", "internal", {}, any>;
       getIdentityNameAction: FunctionReference<"action", "internal", {}, any>;
+      metadata: FunctionReference<"query", "internal", {}, any>;
       mutationWithNestedQuery: FunctionReference<
         "mutation",
         "internal",
@@ -143,6 +148,7 @@ export declare const components: {
       >;
       getIdentityName: FunctionReference<"query", "internal", {}, any>;
       getIdentityNameAction: FunctionReference<"action", "internal", {}, any>;
+      metadata: FunctionReference<"query", "internal", {}, any>;
       mutationWithNestedQuery: FunctionReference<
         "mutation",
         "internal",

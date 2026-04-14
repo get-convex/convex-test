@@ -38,6 +38,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         number,
         Name
       >;
+      countAction: FunctionReference<
+        "action",
+        "internal",
+        { name: string },
+        number,
+        Name
+      >;
       countMany: FunctionReference<
         "action",
         "internal",
@@ -45,6 +52,15 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Array<number>,
         Name
       >;
+      getIdentityName: FunctionReference<"query", "internal", {}, any, Name>;
+      getIdentityNameAction: FunctionReference<
+        "action",
+        "internal",
+        {},
+        any,
+        Name
+      >;
+      metadata: FunctionReference<"query", "internal", {}, any, Name>;
       mutationWithNestedQuery: FunctionReference<
         "mutation",
         "internal",

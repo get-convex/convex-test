@@ -1,6 +1,7 @@
 import { httpRouter } from "convex/server";
 import { internal } from "./_generated/api";
 import { httpAction, internalQuery } from "./_generated/server";
+import { getFunctionMetadata } from "./meta";
 
 const http = httpRouter();
 
@@ -43,6 +44,15 @@ http.route({
 
 export const getFirst = internalQuery(async (ctx) => {
   return await ctx.db.query("messages").first();
+});
+
+http.route({
+  path: "/metadata",
+  method: "GET",
+  handler: httpAction(async () => {
+    const metadata = await getFunctionMetadata();
+    return new Response(JSON.stringify(metadata), { status: 200 });
+  }),
 });
 
 export default http;

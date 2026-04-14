@@ -20,7 +20,7 @@ const DEFAULT_TRANSACTION_LIMITS: TransactionMetrics = {
   scheduledFunctionArgsBytes: 16 * MiB,
 };
 
-export class HeadroomTracker {
+export class TransactionMetricsTracker {
   private _metrics: TransactionMetrics;
   private _limits: TransactionMetrics;
   private _enforceLimits: boolean;
@@ -123,7 +123,7 @@ export class HeadroomTracker {
     }
   }
 
-  getTransactionHeadroom() {
+  getTransactionMetrics() {
     return {
       bytesRead: {
         used: this._metrics.bytesRead,
