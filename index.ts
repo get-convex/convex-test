@@ -222,10 +222,9 @@ class DatabaseFake {
   private _generateId<TableName extends string>(
     table: TableName,
   ): GenericId<TableName> {
-    const counterPadLen = TYPICAL_CONVEX_ID_LENGTH - table.length - 3;
+    const counterPadLen = TYPICAL_CONVEX_ID_LENGTH - table.length;
     const counter = this._nextDocId.toString().padStart(counterPadLen, "0");
-    const nameLen = table.length.toString().padStart(3, "0");
-    const id = table + counter + nameLen;
+    const id = counter + table;
     this._nextDocId += 1;
     return id as GenericId<TableName>;
   }
@@ -837,14 +836,11 @@ class DatabaseFake {
 }
 
 function tableNameFromId(id: string) {
-  if (id.length < 4) {
+  const match = id.match(/^[0-9]+/);
+  if (!match || match[0].length === id.length) {
     return null;
   }
-  const nameLen = Number(id.slice(-3));
-  if (isNaN(nameLen) || nameLen <= 0 || nameLen > id.length - 3) {
-    return null;
-  }
-  return id.slice(0, nameLen);
+  return id.slice(match[0].length);
 }
 
 function isSimpleObject(value: unknown) {
