@@ -94,8 +94,13 @@ test("scheduled function does not receive auth", async () => {
   const t = convexTest(schema);
   const asSarah = t.withIdentity({ name: "Sarah" });
   // Sarah schedules a query that checks auth
-  await asSarah.mutation(api.authentication.scheduleQuery);
+  const scheduled = await asSarah.mutation(api.authentication.scheduledNoAuth);
   await t.finishAllScheduledFunctions(vi.runAllTimers);
+  const result = await t.query((ctx) =>
+    ctx.db.system.get("_scheduled_functions", scheduled),
+  );
+  expect(result?.state.kind).toBe("success");
+
   vi.useRealTimers();
   // The scheduled query should have run without auth (no error = pass).
   // queryName returns undefined when there's no identity, which is fine.

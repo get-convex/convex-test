@@ -1,4 +1,5 @@
 import { api } from "./_generated/api";
+import { type Id } from "./_generated/dataModel";
 import { action, mutation, query } from "./_generated/server";
 
 export const actionCallingQuery = action({
@@ -78,9 +79,18 @@ export const actionName = action({
   },
 });
 
-export const scheduleQuery = mutation({
+export const assertNoAuth = mutation({
   args: {},
   async handler(ctx): Promise<void> {
-    await ctx.scheduler.runAfter(0, api.authentication.queryName);
+    if (await ctx.auth.getUserIdentity()) {
+      throw new Error("Expected no auth");
+    }
+  },
+});
+
+export const scheduledNoAuth = mutation({
+  args: {},
+  async handler(ctx): Promise<Id<"_scheduled_functions">> {
+    return await ctx.scheduler.runAfter(0, api.authentication.assertNoAuth);
   },
 });
