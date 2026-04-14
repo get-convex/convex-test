@@ -2648,11 +2648,18 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         };
         return getHandler(func)(testCtx, a);
       });
-      const response = await (
-        a as unknown as {
-          invokeHttpAction: (request: Request) => Promise<Response>;
-        }
-      ).invokeHttpAction(new Request(url, init));
+      const httpCtx: ExecutionContext = {
+        componentPath: getCurrentComponentPath(),
+        udfPath: "http",
+        depth: 0,
+      };
+      const response = await executionContextStorage.run(httpCtx, () =>
+        (
+          a as unknown as {
+            invokeHttpAction: (request: Request) => Promise<Response>;
+          }
+        ).invokeHttpAction(new Request(url, init)),
+      );
       return response;
     },
 

@@ -45,4 +45,19 @@ export const getFirst = internalQuery(async (ctx) => {
   return await ctx.db.query("messages").first();
 });
 
+http.route({
+  path: "/metadata",
+  method: "GET",
+  handler: httpAction(async () => {
+    const syscalls = (global as any).Convex;
+    const metadata = JSON.parse(
+      await syscalls.asyncSyscall(
+        "1.0/getFunctionMetadata",
+        JSON.stringify({}),
+      ),
+    );
+    return new Response(JSON.stringify(metadata), { status: 200 });
+  }),
+});
+
 export default http;
