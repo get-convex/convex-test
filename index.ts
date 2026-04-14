@@ -1398,7 +1398,7 @@ function asyncSyscallImpl() {
       }
       case "1.0/getTransactionMetrics": {
         if (tracker) {
-          return JSON.stringify(tracker.getTransactionMetrics());
+          return JSON.stringify(convexToJson(tracker.getTransactionMetrics()));
         }
         throw new Error(
           "getTransactionMetrics() can only be called from a query or mutation. " +
@@ -1412,10 +1412,12 @@ function asyncSyscallImpl() {
             "getFunctionMetadata() can only be called from within a Convex function.",
           );
         }
-        return JSON.stringify({
-          name: ctx.udfPath,
-          componentPath: ctx.componentPath,
-        });
+        return JSON.stringify(
+          convexToJson({
+            name: ctx.udfPath,
+            componentPath: ctx.componentPath,
+          }),
+        );
       }
       case "1.0/actions/query": {
         const { name, args: queryArgs } = args;
