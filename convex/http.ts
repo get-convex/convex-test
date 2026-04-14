@@ -1,6 +1,7 @@
 import { httpRouter } from "convex/server";
 import { internal } from "./_generated/api";
 import { httpAction, internalQuery } from "./_generated/server";
+import { getFunctionMetadata } from "./meta";
 
 const http = httpRouter();
 
@@ -49,13 +50,7 @@ http.route({
   path: "/metadata",
   method: "GET",
   handler: httpAction(async () => {
-    const syscalls = (global as any).Convex;
-    const metadata = JSON.parse(
-      await syscalls.asyncSyscall(
-        "1.0/getFunctionMetadata",
-        JSON.stringify({}),
-      ),
-    );
+    const metadata = await getFunctionMetadata();
     return new Response(JSON.stringify(metadata), { status: 200 });
   }),
 });

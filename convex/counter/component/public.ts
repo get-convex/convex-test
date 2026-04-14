@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { action, mutation, query } from "./_generated/server";
 import { api } from "./_generated/api";
+import { getFunctionMetadata } from "../../meta";
 
 export const add = mutation({
   args: {
@@ -109,16 +110,9 @@ export const mutationWithNumberArg = mutation({
   },
 });
 
-// TODO: replace with ctx.meta.getFunctionMetadata() in 1.36+
 export const metadata = query({
   args: {},
   handler: async () => {
-    const syscalls = (global as any).Convex;
-    return JSON.parse(
-      await syscalls.asyncSyscall(
-        "1.0/getFunctionMetadata",
-        JSON.stringify({}),
-      ),
-    );
+    return await getFunctionMetadata();
   },
 });

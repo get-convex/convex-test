@@ -1,12 +1,5 @@
 import { action, mutation, query } from "./_generated/server";
-
-// TODO: replace with ctx.meta.getFunctionMetadata() in 1.36+
-async function getFunctionMetadata() {
-  const syscalls = (global as any).Convex;
-  return JSON.parse(
-    await syscalls.asyncSyscall("1.0/getFunctionMetadata", JSON.stringify({})),
-  );
-}
+import { getFunctionMetadata } from "./meta";
 
 export const metadataQuery = query({
   args: {},

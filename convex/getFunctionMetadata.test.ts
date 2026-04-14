@@ -5,15 +5,9 @@ import { convexTest } from "../index";
 import schema from "./schema";
 import { api, components } from "./_generated/api";
 import counterSchema from "./counter/component/schema";
+import { getFunctionMetadata } from "./meta";
 
 const counterModules = import.meta.glob("./counter/component/**/*.ts");
-
-async function getFunctionMetadata() {
-  const syscalls = (global as any).Convex;
-  return JSON.parse(
-    await syscalls.asyncSyscall("1.0/getFunctionMetadata", JSON.stringify({})),
-  );
-}
 
 test("inline query", async () => {
   const t = convexTest({ schema });
