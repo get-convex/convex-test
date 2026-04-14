@@ -41,6 +41,10 @@ import {
 } from "convex/values";
 import { HeadroomTracker, TransactionMetrics } from "./headroom.js";
 
+// Real Convex IDs are 32 characters. IDs may exceed this length for very long
+// table names or large numbers of documents, but this is the typical target.
+const TYPICAL_CONVEX_ID_LENGTH = 32;
+
 type FilterJson =
   | { $eq: [FilterJson, FilterJson] }
   | { $field: string }
@@ -218,7 +222,7 @@ class DatabaseFake {
   private _generateId<TableName extends string>(
     table: TableName,
   ): GenericId<TableName> {
-    const counterPadLen = 38 - table.length - 3;
+    const counterPadLen = TYPICAL_CONVEX_ID_LENGTH - table.length - 3;
     const counter = this._nextDocId.toString().padStart(counterPadLen, "0");
     const nameLen = table.length.toString().padStart(3, "0");
     const id = table + counter + nameLen;
