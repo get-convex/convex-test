@@ -44,6 +44,10 @@ import {
   TransactionMetrics,
 } from "./transactionMetrics.js";
 
+// Real Convex IDs are 32 characters. IDs may exceed this length for very long
+// table names or large numbers of documents, but this is the typical target.
+const TYPICAL_CONVEX_ID_LENGTH = 32;
+
 type FilterJson =
   | { $eq: [FilterJson, FilterJson] }
   | { $field: string }
@@ -221,7 +225,9 @@ class DatabaseFake {
   private _generateId<TableName extends string>(
     table: TableName,
   ): GenericId<TableName> {
-    const id = this._nextDocId.toString() + ";" + table;
+    const counterPadLen = TYPICAL_CONVEX_ID_LENGTH - table.length;
+    const counter = this._nextDocId.toString().padStart(counterPadLen, "0");
+    const id = counter + table;
     this._nextDocId += 1;
     return id as GenericId<TableName>;
   }
@@ -833,11 +839,11 @@ class DatabaseFake {
 }
 
 function tableNameFromId(id: string) {
-  const parts = id.split(";");
-  if (parts.length !== 2) {
+  const match = id.match(/^[0-9]+/);
+  if (!match || match[0].length === id.length) {
     return null;
   }
-  return id.split(";")[1];
+  return id.slice(match[0].length);
 }
 
 function isSimpleObject(value: unknown) {
@@ -1290,9 +1296,9 @@ function syscallImpl() {
       }
       case "1.0/db/normalizeId": {
         const idString: string = args.idString;
-        const isInTable = idString.endsWith(`;${args.table}`);
+        const tableName = tableNameFromId(idString);
         return JSON.stringify({
-          id: isInTable ? idString : null,
+          id: tableName === args.table ? idString : null,
         });
       }
       default: {
