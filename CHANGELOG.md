@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.49
+
+- Changes the test ID formatting to not include a `;` and be the
+  standard length of regular IDs for folks who have validators.
+
 ## 0.0.48
 
 - Add implementations for internal syscalls for upcoming ctx.meta
