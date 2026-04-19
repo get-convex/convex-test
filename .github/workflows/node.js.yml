@@ -13,7 +13,7 @@ jobs:
         with:
           cache-dependency-path: |
             package-lock.json
-          node-version: "22.x"
+          node-version: "24.x"
           cache: "npm"
       - run: npm i
       - run: npm ci
