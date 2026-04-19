@@ -1,6 +1,6 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import { api } from "./_generated/api";
+import { mutation, query, internalQuery } from "./_generated/server";
+import { api, internal } from "./_generated/api";
 
 /// helpers
 
@@ -137,5 +137,26 @@ export const insertThenDeleteInSubtransaction = mutation({
       author: "sarah",
     });
     return await ctx.runMutation(api.mutations.deleteAndRead, { id });
+  },
+});
+
+export const countMessages = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    return (await ctx.db.query("messages").collect()).length;
+  },
+});
+
+export const snapshotQueryDoesNotSeePendingWrites = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await ctx.db.insert("messages", { body: "hello", author: "sarah" });
+    // Regular query sees the pending write
+    const withWrites = await ctx.runQuery(internal.mutations.countMessages);
+    // Snapshot query does NOT see the pending write
+    const withoutWrites = await ctx.runSnapshotQuery(
+      internal.mutations.countMessages,
+    );
+    return { withWrites, withoutWrites };
   },
 });

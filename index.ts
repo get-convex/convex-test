@@ -424,6 +424,17 @@ class DatabaseFake {
     this._writes.pop();
   }
 
+  // Temporarily hide all pending writes so reads only see committed state.
+  stashWrites(): Array<Record<DocumentId, StoredDocument | null>> {
+    const stashed = this._writes;
+    this._writes = [];
+    return stashed;
+  }
+
+  restoreWrites(stashed: Array<Record<DocumentId, StoredDocument | null>>) {
+    this._writes = stashed;
+  }
+
   _validate(tableName: string, doc: GenericDocument) {
     if (this._schema === null || !this._schema.schemaValidation) {
       return;
@@ -1496,6 +1507,13 @@ function asyncSyscallImpl() {
             convexToJson(await withAuth().queryFromPath(functionPath, udfArgs)),
           );
         }
+        if (udfType === "snapshotQuery") {
+          return JSON.stringify(
+            convexToJson(
+              await withAuth().snapshotQueryFromPath(functionPath, udfArgs),
+            ),
+          );
+        }
         if (udfType === "mutation") {
           return JSON.stringify(
             convexToJson(
@@ -2148,6 +2166,27 @@ class TransactionManager {
       this._markTransactionDone = null;
     }
   }
+
+  stashWrites(): Map<string, Array<Record<DocumentId, StoredDocument | null>>> {
+    const convex = getConvexGlobal();
+    const stashed = new Map<
+      string,
+      Array<Record<DocumentId, StoredDocument | null>>
+    >();
+    for (const [path, component] of Object.entries(convex.components)) {
+      stashed.set(path, component.db.stashWrites());
+    }
+    return stashed;
+  }
+
+  restoreWrites(
+    stashed: Map<string, Array<Record<DocumentId, StoredDocument | null>>>,
+  ) {
+    const convex = getConvexGlobal();
+    for (const [path, writes] of stashed) {
+      convex.components[path].db.restoreWrites(writes);
+    }
+  }
 }
 
 /**
@@ -2474,6 +2513,41 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         );
         return result;
       } finally {
+        if (parentLock) {
+          parentLock.release();
+        }
+      }
+    },
+
+    snapshotQueryFromPath: async (functionPath: FunctionPath, args: any) => {
+      const parentLock = nestedTxStorage.getStore() ?? null;
+      if (parentLock) {
+        await parentLock.acquire();
+      }
+      // Stash pending writes so the query only sees committed state.
+      const transactionManager = getTransactionManager();
+      const stashed = transactionManager.stashWrites();
+      try {
+        const resolved = await resolveFunction(functionPath, "query");
+        validateValidator(resolved.args, args ?? {});
+
+        const result = await runQueryWithHandler(
+          resolved.handler,
+          args,
+          resolved.functionPath,
+          // isNested=true to avoid re-acquiring the top-level lock
+          // (we're inside a mutation that already holds it).
+          /* isNested */ true,
+        );
+        validateReturnValue(
+          resolved.returns,
+          result,
+          "query",
+          resolved.functionPath,
+        );
+        return result;
+      } finally {
+        transactionManager.restoreWrites(stashed);
         if (parentLock) {
           parentLock.release();
         }
