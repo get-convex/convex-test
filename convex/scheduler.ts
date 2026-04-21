@@ -139,3 +139,18 @@ export const selfSchedulingMutation = mutation({
     );
   },
 });
+
+// Mutation that schedules two things: one now and one in the future
+export const scheduleNowAndLater = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await ctx.scheduler.runAfter(0, api.scheduler.add, {
+      body: "immediate",
+      author: "AI",
+    });
+    await ctx.scheduler.runAfter(60000, api.scheduler.add, {
+      body: "delayed",
+      author: "AI",
+    });
+  },
+});
