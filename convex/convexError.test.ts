@@ -68,3 +68,39 @@ test("ConvexError with primitive data round-trips", async () => {
     t.mutation(api.convexError.throwsString, {}),
   ).rejects.toMatchObject({ data: "just a message" });
 });
+
+test("ConvexError.data is deserialized from inline t.query handler", async () => {
+  const t = convexTest(schema);
+  await expect(
+    t.query(async () => {
+      throw new ConvexError({ kind: "inline-query" });
+    }),
+  ).rejects.toMatchObject({ data: { kind: "inline-query" } });
+});
+
+test("ConvexError.data is deserialized from inline t.mutation handler", async () => {
+  const t = convexTest(schema);
+  await expect(
+    t.mutation(async () => {
+      throw new ConvexError({ kind: "inline-mutation" });
+    }),
+  ).rejects.toMatchObject({ data: { kind: "inline-mutation" } });
+});
+
+test("ConvexError.data is deserialized from inline t.action handler", async () => {
+  const t = convexTest(schema);
+  await expect(
+    t.action(async () => {
+      throw new ConvexError({ kind: "inline-action" });
+    }),
+  ).rejects.toMatchObject({ data: { kind: "inline-action" } });
+});
+
+test("ConvexError.data is deserialized from t.run handler", async () => {
+  const t = convexTest(schema);
+  await expect(
+    t.run(async () => {
+      throw new ConvexError({ kind: "inline-run" });
+    }),
+  ).rejects.toMatchObject({ data: { kind: "inline-run" } });
+});
