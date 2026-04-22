@@ -846,6 +846,31 @@ function tableNameFromId(id: string) {
   return id.slice(match[0].length);
 }
 
+// Reverses `serializeConvexErrorData` from `convex/server/impl/registration_impl`,
+// which `invokeFunction` applies to every ConvexError thrown from a Convex
+// function. In production the HTTP client deserializes `.data` via
+// `forwardErrorData` before callers see it, so an action catching a
+// `ConvexError` from `ctx.runMutation` receives the original object, not a
+// JSON string. Apply the same restoration whenever we catch an error from
+// `invokeMutation` / `invokeQuery` / `invokeAction`.
+function deserializeConvexErrorData(thrown: unknown) {
+  if (
+    typeof thrown === "object" &&
+    thrown !== null &&
+    Symbol.for("ConvexError") in thrown &&
+    typeof (thrown as { data: unknown }).data === "string"
+  ) {
+    try {
+      (thrown as { data: unknown }).data = jsonToConvex(
+        JSON.parse((thrown as { data: string }).data),
+      );
+    } catch {
+      // Data wasn't a serialized JSON string — leave it untouched.
+    }
+  }
+  return thrown;
+}
+
 function isSimpleObject(value: unknown) {
   const isObject = typeof value === "object";
   const prototype = Object.getPrototypeOf(value);
@@ -2320,7 +2345,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       return jsonToConvex(JSON.parse(rawResult)) as T;
     } catch (e) {
       transactionManager.rollback(isNested);
-      throw e;
+      throw deserializeConvexErrorData(e);
     }
   };
 
@@ -2365,6 +2390,8 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       const rawResult = await nestedTxStorage.run(childLock, invokeInContext);
 
       return jsonToConvex(JSON.parse(rawResult)) as T;
+    } catch (e) {
+      throw deserializeConvexErrorData(e);
     } finally {
       transactionManager.rollback(isNested);
     }
@@ -2401,17 +2428,24 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     };
     return await executionContextStorage.run(childCtx, async () => {
       const requestId = "" + Math.random();
-      const rawResult = await authStorage.run(authForChild, () =>
-        (
-          a as unknown as {
-            invokeAction: (requestId: string, args: string) => Promise<string>;
-          }
-        ).invokeAction(
-          requestId,
-          JSON.stringify(convexToJson([parseArgs(args)])),
-        ),
-      );
-      return jsonToConvex(JSON.parse(rawResult)) as T;
+      try {
+        const rawResult = await authStorage.run(authForChild, () =>
+          (
+            a as unknown as {
+              invokeAction: (
+                requestId: string,
+                args: string,
+              ) => Promise<string>;
+            }
+          ).invokeAction(
+            requestId,
+            JSON.stringify(convexToJson([parseArgs(args)])),
+          ),
+        );
+        return jsonToConvex(JSON.parse(rawResult)) as T;
+      } catch (e) {
+        throw deserializeConvexErrorData(e);
+      }
     });
   };
 
@@ -2602,12 +2636,16 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     });
     // Real backend uses different ID format
     const requestId = "" + Math.random();
-    const rawResult = await (
-      a as unknown as {
-        invokeAction: (requestId: string, args: string) => Promise<string>;
-      }
-    ).invokeAction(requestId, JSON.stringify(convexToJson([{}])));
-    return jsonToConvex(JSON.parse(rawResult)) as T;
+    try {
+      const rawResult = await (
+        a as unknown as {
+          invokeAction: (requestId: string, args: string) => Promise<string>;
+        }
+      ).invokeAction(requestId, JSON.stringify(convexToJson([{}])));
+      return jsonToConvex(JSON.parse(rawResult)) as T;
+    } catch (e) {
+      throw deserializeConvexErrorData(e);
+    }
   };
   return {
     ...byType,

@@ -12,6 +12,7 @@ import type * as actions from "../actions.js";
 import type * as argumentsValidation from "../argumentsValidation.js";
 import type * as authentication from "../authentication.js";
 import type * as component from "../component.js";
+import type * as convexError from "../convexError.js";
 import type * as explicitTableNames from "../explicitTableNames.js";
 import type * as getFunctionMetadata from "../getFunctionMetadata.js";
 import type * as helpers from "../helpers.js";
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   argumentsValidation: typeof argumentsValidation;
   authentication: typeof authentication;
   component: typeof component;
+  convexError: typeof convexError;
   explicitTableNames: typeof explicitTableNames;
   getFunctionMetadata: typeof getFunctionMetadata;
   helpers: typeof helpers;
