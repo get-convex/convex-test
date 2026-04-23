@@ -1558,10 +1558,10 @@ function asyncSyscallImpl() {
                 const canceled = await withAuth().runInComponent(
                   componentPath,
                   async () => {
-                    const job = db.get(
-                      "_scheduled_functions",
-                      jobId,
-                    ) as ScheduledFunction;
+                    const job = db.get("_scheduled_functions", jobId) as
+                      | ScheduledFunction
+                      | undefined;
+                    if (!job) return true;
                     if (job.state.kind === "canceled") {
                       return true;
                     }
