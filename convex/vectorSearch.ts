@@ -6,7 +6,11 @@ import { action, internalQuery } from "./_generated/server";
 export const get = internalQuery({
   args: { id: v.id("messages") },
   handler: async (ctx, { id }) => {
-    return await ctx.db.get(id);
+    const doc = await ctx.db.get(id);
+    if (!doc) {
+      throw new Error("not found: " + id);
+    }
+    return doc;
   },
 });
 
@@ -26,10 +30,10 @@ export const vectorSearch = action({
     });
     return Promise.all(
       results.map(async ({ _id, _score }) => {
-        const doc: Doc<"messages"> = (await ctx.runQuery(
+        const doc: Doc<"messages"> = await ctx.runQuery(
           internal.vectorSearch.get,
           { id: _id },
-        ))!;
+        );
         return {
           ...doc,
           score: _score,
