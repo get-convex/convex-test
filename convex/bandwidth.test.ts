@@ -2,7 +2,6 @@ import { expect, test } from "vitest";
 import { getDocumentSize } from "convex/values";
 import { convexTest } from "../index";
 import schema from "./schema";
-import { getTransactionMetrics } from "./meta";
 
 test("default: limits disabled, no throws", async () => {
   const t = convexTest({ schema });
@@ -161,7 +160,7 @@ test("getTransactionMetrics returns bandwidth stats", async () => {
   const { consumption, totalBytes } = await t.query(async (ctx) => {
     const docs = await ctx.db.query("messages").collect();
     const totalBytes = docs.reduce((sum, doc) => sum + getDocumentSize(doc), 0);
-    const consumption = await getTransactionMetrics();
+    const consumption = await ctx.meta.getTransactionMetrics();
     return { consumption, totalBytes };
   });
   expect(consumption.documentsRead.used).toBe(2);
@@ -184,7 +183,7 @@ test("getTransactionMetrics tracks writes", async () => {
     });
     const doc = (await ctx.db.get(id))!;
     const docBytes = getDocumentSize(doc);
-    const consumption = await getTransactionMetrics();
+    const consumption = await ctx.meta.getTransactionMetrics();
     return { consumption, docBytes };
   });
   expect(consumption.documentsWritten.used).toBe(1);

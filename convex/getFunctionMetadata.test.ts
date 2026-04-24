@@ -5,32 +5,46 @@ import { convexTest } from "../index";
 import schema from "./schema";
 import { api, components } from "./_generated/api";
 import counterSchema from "./counter/component/schema";
-import { getFunctionMetadata } from "./meta";
 
 const counterModules = import.meta.glob("./counter/component/**/*.ts");
 
 test("inline query", async () => {
   const t = convexTest({ schema });
-  const metadata = await t.query(async () => {
-    return await getFunctionMetadata();
+  const metadata = await t.query(async (ctx) => {
+    return await ctx.meta.getFunctionMetadata();
   });
-  expect(metadata).toEqual({ name: "inline", componentPath: "" });
+  expect(metadata).toEqual({
+    name: "inline",
+    componentPath: "",
+    type: "query",
+    visibility: "public",
+  });
 });
 
 test("inline mutation", async () => {
   const t = convexTest({ schema });
-  const metadata = await t.mutation(async () => {
-    return await getFunctionMetadata();
+  const metadata = await t.mutation(async (ctx) => {
+    return await ctx.meta.getFunctionMetadata();
   });
-  expect(metadata).toEqual({ name: "inline", componentPath: "" });
+  expect(metadata).toEqual({
+    name: "inline",
+    componentPath: "",
+    type: "mutation",
+    visibility: "public",
+  });
 });
 
 test("inline action", async () => {
   const t = convexTest({ schema });
-  const metadata = await t.action(async () => {
-    return await getFunctionMetadata();
+  const metadata = await t.action(async (ctx) => {
+    return await ctx.meta.getFunctionMetadata();
   });
-  expect(metadata).toEqual({ name: "inline", componentPath: "" });
+  expect(metadata).toEqual({
+    name: "inline",
+    componentPath: "",
+    type: "action",
+    visibility: "public",
+  });
 });
 
 test("named query", async () => {
@@ -39,6 +53,8 @@ test("named query", async () => {
   expect(metadata).toEqual({
     name: "getFunctionMetadata:metadataQuery",
     componentPath: "",
+    type: "query",
+    visibility: "public",
   });
 });
 
@@ -48,6 +64,8 @@ test("named mutation", async () => {
   expect(metadata).toEqual({
     name: "getFunctionMetadata:metadataMutation",
     componentPath: "",
+    type: "mutation",
+    visibility: "public",
   });
 });
 
@@ -57,6 +75,8 @@ test("named action", async () => {
   expect(metadata).toEqual({
     name: "getFunctionMetadata:metadataAction",
     componentPath: "",
+    type: "action",
+    visibility: "public",
   });
 });
 
@@ -66,6 +86,8 @@ test("default export", async () => {
   expect(metadata).toEqual({
     name: "getFunctionMetadata",
     componentPath: "",
+    type: "query",
+    visibility: "public",
   });
 });
 
@@ -73,7 +95,12 @@ test("http action", async () => {
   const t = convexTest(schema);
   const response = await t.fetch("/metadata", { method: "GET" });
   const metadata = await response.json();
-  expect(metadata).toEqual({ name: "http", componentPath: "" });
+  expect(metadata).toEqual({
+    name: "http",
+    componentPath: "",
+    type: "action",
+    visibility: "public",
+  });
 });
 
 test("component function has component path", async () => {
@@ -83,5 +110,7 @@ test("component function has component path", async () => {
   expect(metadata).toEqual({
     name: "public:metadata",
     componentPath: "counter",
+    type: "query",
+    visibility: "public",
   });
 });
