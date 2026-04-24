@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.50
+
+- Correctly deserializes ConvexError thrown within nested functions.
+- Fixes a bug where orphaned scheduled functions would eventually fire
+  and hit "Cannot read properties of null (reading 'state')".
+
 ## 0.0.49
 
 - Changes the test ID formatting to not include a `;` and be the
