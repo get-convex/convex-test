@@ -183,3 +183,26 @@ test("insert then delete in subtransaction", async () => {
   );
   expect(result).toEqual([]);
 });
+
+test("snapshot query does not see pending writes", async () => {
+  const t = convexTest(schema);
+  const result = await t.mutation(
+    api.mutations.snapshotQueryDoesNotSeePendingWrites,
+    {},
+  );
+  // Regular query sees the insert (1 message), snapshot query does not (0 messages)
+  expect(result).toEqual({ withWrites: 1, withoutWrites: 0 });
+});
+
+test("snapshot query sees previously committed writes", async () => {
+  const t = convexTest(schema);
+  // First, commit a message
+  await t.mutation(api.mutations.insert, { body: "committed", author: "lee" });
+  // Now run a mutation that inserts another and uses snapshot query
+  const result = await t.mutation(
+    api.mutations.snapshotQueryDoesNotSeePendingWrites,
+    {},
+  );
+  // Regular query sees both committed + pending (2), snapshot sees only committed (1)
+  expect(result).toEqual({ withWrites: 2, withoutWrites: 1 });
+});

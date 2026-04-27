@@ -1,6 +1,12 @@
-import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import { api } from "./_generated/api";
+import { convexToJson, jsonToConvex, v } from "convex/values";
+import {
+  FunctionReference,
+  FunctionReturnType,
+  getFunctionAddress,
+  OptionalRestArgs,
+} from "convex/server";
+import { mutation, query, internalQuery } from "./_generated/server";
+import { api, internal } from "./_generated/api";
 
 /// helpers
 
@@ -139,3 +145,48 @@ export const insertThenDeleteInSubtransaction = mutation({
     return await ctx.runMutation(api.mutations.deleteAndRead, { id });
   },
 });
+
+export const countMessages = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<number> => {
+    return (await ctx.db.query("messages").collect()).length;
+  },
+});
+
+export const snapshotQueryDoesNotSeePendingWrites = mutation({
+  args: {},
+  handler: async (
+    ctx,
+  ): Promise<{ withWrites: number; withoutWrites: number }> => {
+    await ctx.db.insert("messages", { body: "hello", author: "sarah" });
+    // Regular query sees the pending write
+    const withWrites: number = await ctx.runQuery(
+      internal.mutations.countMessages,
+    );
+    // Snapshot query does NOT see the pending write
+    const withoutWrites = await runSnapshotQuery(
+      internal.mutations.countMessages,
+    );
+    return { withWrites, withoutWrites };
+  },
+});
+
+// Snapshot Query isn't part of the public `convex` API surface yet,
+// so call the underlying syscall directly.
+async function runSnapshotQuery<
+  Query extends FunctionReference<"query", "public" | "internal">,
+>(
+  query: Query,
+  ...args: OptionalRestArgs<Query>
+): Promise<FunctionReturnType<Query>> {
+  const syscallArgs = {
+    udfType: "snapshotQuery",
+    args: convexToJson(args[0] ?? {}),
+    ...getFunctionAddress(query),
+  };
+  const resultStr = await (globalThis as any).Convex.asyncSyscall(
+    "1.0/runUdf",
+    JSON.stringify(syscallArgs),
+  );
+  return jsonToConvex(JSON.parse(resultStr)) as FunctionReturnType<Query>;
+}
