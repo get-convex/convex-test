@@ -11,7 +11,9 @@ import {
 // that the patch is still visible after the nested call returns.
 export const mutationPatchingGlobal = internalMutation({
   args: {},
-  handler: async (ctx) => {
+  handler: async (
+    ctx,
+  ): Promise<{ before: string; nested: string; after: string }> => {
     const original = globalThis.atob;
     // Patch atob to a sentinel
     (globalThis as any).atob = () => "patched-by-mutation";
@@ -35,7 +37,7 @@ export const mutationPatchingGlobal = internalMutation({
 
 export const readAtob = internalQuery({
   args: {},
-  handler: async () => {
+  handler: async (): Promise<string> => {
     // Call atob with a valid base64 string to see if it's real or patched
     return globalThis.atob("aGVsbG8="); // "hello"
   },
@@ -105,7 +107,7 @@ export const innerActionPatchingGlobal = internalAction({
 // Used to verify ALS isolation between parallel actions.
 export const actionPatchA = action({
   args: { delayMs: v.number() },
-  handler: async (ctx) => {
+  handler: async () => {
     (globalThis as any).atob = () => "patched-A";
 
     // Small delay so both actions overlap
@@ -118,7 +120,7 @@ export const actionPatchA = action({
 
 export const actionPatchB = action({
   args: { delayMs: v.number() },
-  handler: async (ctx) => {
+  handler: async () => {
     (globalThis as any).atob = () => "patched-B";
 
     await new Promise((r) => setTimeout(r, 10));
