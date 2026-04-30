@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.51
+
+- Add implementation for internal snapshot query syscall.
+
 ## 0.0.50
 
 - Correctly deserializes ConvexError thrown within nested functions.
