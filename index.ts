@@ -1461,6 +1461,15 @@ function asyncSyscallImpl() {
           }),
         );
       }
+      case "1.0/getDeploymentMetadata": {
+        return JSON.stringify(
+          convexToJson({
+            name: "test",
+            region: null,
+            class: "s16",
+          }),
+        );
+      }
       case "1.0/actions/query": {
         const { name, args: queryArgs } = args;
         return JSON.stringify(
