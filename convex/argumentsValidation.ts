@@ -127,3 +127,11 @@ export const queryWithUnionNestedStripFailureArg = query({
     return args.obj;
   },
 });
+
+export const queryWithStripReturn = query({
+  args: {},
+  returns: v.object({ a: v.number() }),
+  handler: () => {
+    return { a: 1, b: 2 } as any;
+  },
+});

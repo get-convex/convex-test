@@ -32,6 +32,7 @@ function patchExportArgs(
   };
 }
 
+
 function forceStripUnknownKeys(functionExport: {
   exportArgs: () => string;
 }): () => void {
@@ -317,5 +318,26 @@ test("union object arg does not leak nested strip mutations across failed member
     ).toEqual({ inner: { a: 42, extra: "keep me" } });
   } finally {
     restore();
+  }
+});
+
+test("returns strip mode strips extra fields from output", async () => {
+  const t = convexTest(schema);
+  const func = argumentsValidationModule.queryWithStripReturn as any;
+  const originalExportReturns = func.exportReturns.bind(func);
+  func.exportReturns = () => {
+    const exported = JSON.parse(originalExportReturns());
+    exported.unknownKeys = "strip";
+    return JSON.stringify(exported);
+  };
+  try {
+    const result = await t.query(
+      api.argumentsValidation.queryWithStripReturn,
+      {},
+    );
+    expect(result).toEqual({ a: 1 });
+    expect((result as any).b).toBeUndefined();
+  } finally {
+    func.exportReturns = originalExportReturns;
   }
 });
