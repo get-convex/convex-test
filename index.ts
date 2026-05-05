@@ -1571,76 +1571,21 @@ function asyncSyscallImpl() {
           scheduledTime: tsInSecs * 1000,
           state: { kind: "pending" },
         });
-        const componentPath = getCurrentComponentPath();
-        // Capture the current test's ConvexGlobal so the scheduled
-        // function callback (which runs via setTimeout, outside the
-        // original ALS context) uses the correct test state.
-        const capturedGlobal = getConvexGlobal();
-        setTimeout(
-          // Scheduled functions run without auth context, even if
-          // they were scheduled from an authenticated function.
-          (() =>
-            convexGlobalStorage.run(capturedGlobal, () =>
-              authStorage.run(new AuthFake(), async () => {
-                const canceled = await withAuth().runInComponent(
-                  componentPath,
-                  async () => {
-                    const job = db.get("_scheduled_functions", jobId) as
-                      | ScheduledFunction
-                      | undefined;
-                    if (!job) return true;
-                    if (job.state.kind === "canceled") {
-                      return true;
-                    }
-                    if (job.state.kind !== "pending") {
-                      throw new Error(
-                        `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
-                      );
-                    }
-                    db.patch("_scheduled_functions", jobId, {
-                      state: { kind: "inProgress" },
-                    });
-                    return false;
-                  },
-                );
-                if (canceled) {
-                  return;
-                }
-                try {
-                  await withAuth().fun(functionPath, parsedArgs);
-                } catch (error) {
-                  console.error(
-                    `Error when running scheduled function ${name}`,
-                    error,
-                  );
-                  await withAuth().runInComponent(componentPath, async () => {
-                    db.patch("_scheduled_functions", jobId, {
-                      state: { kind: "failed" },
-                      completedTime: Date.now(),
-                    });
-                  });
-                  db.jobFinished(jobId);
-                  return;
-                }
-                await withAuth().runInComponent(componentPath, async () => {
-                  const job = db.get(
-                    "_scheduled_functions",
-                    jobId,
-                  ) as ScheduledFunction;
-                  if (job.state.kind !== "inProgress") {
-                    throw new Error(
-                      `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
-                    );
-                  }
-                  db.patch("_scheduled_functions", jobId, {
-                    state: { kind: "success" },
-                  });
-                });
-                db.jobFinished(jobId);
-              }),
-            )) as () => void,
-          tsInSecs * 1000 - Date.now(),
+        // Store the resolved function path so executeScheduledFunction
+        // can find the correct component (especially for function handles
+        // that resolve to a different component).
+        const sourceComponent = getCurrentComponentPath();
+        getConvexGlobal().scheduledFunctionPaths.set(
+          `${sourceComponent}:${jobId}`,
+          functionPath,
         );
+        // Create a time-marker setTimeout so that vi.runAllTimers() or
+        // vi.advanceTimersByTime(ms) advances the clock past this
+        // function's scheduled time. The callback is intentionally empty —
+        // execution is handled explicitly by finishInProgressScheduledFunctions
+        // / finishAllScheduledFunctions.
+        const delay = Math.max(0, tsInSecs * 1000 - Date.now());
+        setTimeout(() => {}, delay);
         return JSON.stringify(convexToJson(jobId));
       }
       case "1.0/actions/cancel_job": {
@@ -1795,6 +1740,151 @@ async function waitForInProgressScheduledFunctions(): Promise<boolean> {
   return hadScheduledFunctions;
 }
 
+/**
+ * Execute a single scheduled function by its job ID and component path.
+ * Handles state transitions, error handling, and job completion notification.
+ */
+async function executeScheduledFunction(
+  capturedGlobal: ConvexGlobal,
+  sourceComponentPath: string,
+  jobId: GenericId<"_scheduled_functions">,
+): Promise<void> {
+  await convexGlobalStorage.run(capturedGlobal, () =>
+    authStorage.run(new AuthFake(), async () => {
+      const db = getDbForComponent(sourceComponentPath);
+      const job = db.get("_scheduled_functions", jobId) as ScheduledFunction;
+      // Use the resolved function path if available (needed for function
+      // handles that target a different component). Fall back to
+      // reconstructing from the source component and stored name.
+      const functionPath: FunctionPath =
+        capturedGlobal.scheduledFunctionPaths.get(
+          `${sourceComponentPath}:${jobId}`,
+        ) ?? {
+          componentPath: sourceComponentPath,
+          udfPath: String(job.name),
+        };
+      const parsedArgs = (job.args as any)[0];
+
+      const canceled = await withAuth().runInComponent(
+        sourceComponentPath,
+        async () => {
+          if (job.state.kind === "canceled") {
+            return true;
+          }
+          if (job.state.kind !== "pending") {
+            throw new Error(
+              `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+            );
+          }
+          db.patch("_scheduled_functions", jobId, {
+            state: { kind: "inProgress" },
+          });
+          return false;
+        },
+      );
+      if (canceled) {
+        return;
+      }
+      try {
+        await withAuth().fun(functionPath, parsedArgs);
+      } catch (error) {
+        console.error(
+          `Error when running scheduled function ${job.name}`,
+          error,
+        );
+        await withAuth().runInComponent(sourceComponentPath, async () => {
+          db.patch("_scheduled_functions", jobId, {
+            state: { kind: "failed" },
+            completedTime: Date.now(),
+          });
+        });
+        db.jobFinished(jobId);
+        return;
+      }
+      await withAuth().runInComponent(sourceComponentPath, async () => {
+        const updatedJob = db.get(
+          "_scheduled_functions",
+          jobId,
+        ) as ScheduledFunction;
+        if (updatedJob.state.kind !== "inProgress") {
+          throw new Error(
+            `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${updatedJob.state.kind}`,
+          );
+        }
+        db.patch("_scheduled_functions", jobId, {
+          state: { kind: "success" },
+        });
+      });
+      db.jobFinished(jobId);
+    }),
+  );
+}
+
+/**
+ * Find the earliest pending scheduled function across all components.
+ * Returns null if no pending functions exist.
+ */
+async function findEarliestPendingFunction(
+  convexGlobal: ConvexGlobal,
+): Promise<{
+  componentPath: string;
+  jobId: GenericId<"_scheduled_functions">;
+  scheduledTime: number;
+} | null> {
+  let earliest: {
+    componentPath: string;
+    jobId: GenericId<"_scheduled_functions">;
+    scheduledTime: number;
+  } | null = null;
+
+  for (const componentPath of Object.keys(convexGlobal.components)) {
+    const pendingJobs = (await withAuth().runInComponent(
+      componentPath,
+      async (ctx) => {
+        return (
+          await ctx.db.system.query("_scheduled_functions").collect()
+        ).filter((job: ScheduledFunction) => job.state.kind === "pending");
+      },
+    )) as ScheduledFunction[];
+
+    for (const job of pendingJobs) {
+      const scheduledTime = job.scheduledTime;
+      if (earliest === null || scheduledTime < earliest.scheduledTime) {
+        earliest = {
+          componentPath,
+          jobId: job._id,
+          scheduledTime,
+        };
+      }
+    }
+  }
+
+  return earliest;
+}
+
+/**
+ * Run all pending scheduled functions whose scheduledTime <= Date.now(),
+ * one at a time in order of scheduledTime. Returns true if any were run.
+ */
+async function runReadyScheduledFunctions(
+  convexGlobal: ConvexGlobal,
+): Promise<boolean> {
+  let ranAny = false;
+  for (;;) {
+    const next = await findEarliestPendingFunction(convexGlobal);
+    if (next === null || next.scheduledTime > Date.now()) {
+      break;
+    }
+    await executeScheduledFunction(
+      convexGlobal,
+      next.componentPath,
+      next.jobId,
+    );
+    ranAny = true;
+  }
+  return ranAny;
+}
+
 export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
   TestConvexForDataModelAndIdentity<DataModelFromSchemaDefinition<SchemaDef>>;
 
@@ -1909,28 +1999,33 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   fetch(pathQueryFragment: string, init?: RequestInit): Promise<Response>;
 
   /**
-   * Wait for all scheduled functions currently in the "inProgress" state
-   * to either finish successfully or fail.
+   * Run all pending scheduled functions whose scheduled time has passed
+   * (i.e. `scheduledTime <= Date.now()`), one at a time, in order of
+   * scheduled time. Also waits for any already-in-progress functions.
    *
-   * Use in combination with `vi.useFakeTimers()` and `vi.runAllTimers()`
-   * to control precisely the execution of scheduled functions.
+   * Use in combination with `vi.useFakeTimers()` and
+   * `vi.advanceTimersByTime(ms)` to control the execution of scheduled
+   * functions.
    *
    * Typically:
-   * 1. Use `vi.runAllTimers()` or similar to advance
-   *   time such that a function is scheduled.
-   * 2. Use `finishInProgressScheduledFunctions()` to wait for the function
+   * 1. Use `vi.advanceTimersByTime(ms)` to advance time past when a
+   *    function is scheduled.
+   * 2. Use `finishInProgressScheduledFunctions()` to run and wait for
+   *    those functions.
    */
   finishInProgressScheduledFunctions: () => Promise<void>;
 
   /**
-   * Wait for all currently scheduled functions and any functions they
-   * schedule to either finish successfully or fail.
+   * Run all currently pending scheduled functions and any functions they
+   * schedule, advancing time as needed.
+   *
+   * Functions are executed one at a time in order of scheduled time.
+   * Time is advanced to each function's scheduled time before executing it.
    *
    * Use in combination with `vi.useFakeTimers()` to test scheduled functions.
    *
    * @param advanceTimers Function that advances timers,
-   *   usually `vi.runAllTimers`. This function will be called in a loop
-   *   with `finishInProgressScheduledFunctions()`.
+   *   usually `vi.runAllTimers`.
    */
   finishAllScheduledFunctions: (advanceTimers: () => void) => Promise<void>;
 };
@@ -2066,6 +2161,11 @@ type ConvexGlobal = {
   syscall: (op: string, args: any) => any;
   asyncSyscall: (op: string, args: any) => Promise<any>;
   jsSyscall: (op: string, args: any) => Promise<any>;
+  // Maps "sourceComponentPath:jobId" to their resolved target function paths.
+  // Needed because function handles may resolve to a different component
+  // than the one where the job is stored. Keyed by component+jobId since
+  // different components can generate the same document IDs.
+  scheduledFunctionPaths: Map<string, FunctionPath>;
 };
 
 function getConvexGlobal(): ConvexGlobal {
@@ -2291,6 +2391,7 @@ export function convexTest<Schema extends GenericSchema>(
     syscall: syscallImpl(),
     asyncSyscall: asyncSyscallImpl(),
     jsSyscall: jsSyscallImpl(),
+    scheduledFunctionPaths: new Map(),
   };
   ensureGlobalProxy();
 
@@ -2790,10 +2891,11 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       return response;
     },
 
-    // This is needed because when we execute functions
-    // we are performing dynamic `import`s, and those
-    // are real work that cannot be force-awaited.
     finishInProgressScheduledFunctions: async (): Promise<void> => {
+      const convexGlobal = getConvexGlobal();
+      // Run any pending functions whose scheduled time has passed.
+      await runReadyScheduledFunctions(convexGlobal);
+      // Wait for any functions that are still in progress.
       await waitForInProgressScheduledFunctions();
     },
 
@@ -2801,27 +2903,37 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       advanceTimers: () => void,
       maxIterations: number = 100,
     ): Promise<void> => {
-      // Wait for all scheduled functions to finish, advancing time in between
-      // each function.
-      // Stop after a fixed number of iterations to avoid infinite loops.
+      const convexGlobal = getConvexGlobal();
+      // Run scheduled functions one at a time, advancing time to each
+      // function's scheduledTime. Stop after a fixed number of iterations
+      // to detect infinitely recursive schedules.
       for (let i = 0; i < maxIterations; i++) {
+        // Advance timers to fire scheduling-time markers, moving the
+        // clock past pending functions' scheduled times.
         advanceTimers();
-        // Actions may use setTimeout internally (e.g. for delays).
-        // Keep advancing timers while waiting so those can resolve.
+        const next = await findEarliestPendingFunction(convexGlobal);
+        if (next === null || next.scheduledTime > Date.now()) {
+          return;
+        }
+        // Execute the function while pumping timers so that any internal
+        // setTimeout calls (e.g. in actions) can resolve. This is safe
+        // because scheduled functions are no longer triggered by setTimeout,
+        // so only the executing function's internal timers will fire.
         let done = false;
-        const waitPromise = waitForInProgressScheduledFunctions().then(
-          (had) => {
-            done = true;
-            return had;
-          },
-        );
+        const executionPromise = executeScheduledFunction(
+          convexGlobal,
+          next.componentPath,
+          next.jobId,
+        ).then(() => {
+          done = true;
+        });
         const maxPumps = 10000;
         for (let pump = 0; pump < maxPumps && !done; pump++) {
+          // Advance timers to fire any pending internal timers
+          // (e.g. setTimeout in actions) and any new scheduling markers.
           advanceTimers();
           // Yield through a full event loop iteration so that dynamic
           // import() calls (used to load function modules) can resolve.
-          // Using MessageChannel to post to the macrotask queue —
-          // it is not faked by vitest and not removed by edge-runtime.
           await new Promise<void>((r) => {
             const { port1, port2 } = new MessageChannel();
             port2.onmessage = () => r();
@@ -2835,10 +2947,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
             );
           }
         }
-        const hadScheduledFunctions = await waitPromise;
-        if (!hadScheduledFunctions) {
-          return;
-        }
+        await executionPromise;
       }
       throw new Error(
         "finishAllScheduledFunctions: too many iterations. " +
