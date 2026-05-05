@@ -1567,7 +1567,7 @@ function asyncSyscallImpl() {
         // function callback (which runs via setTimeout, outside the
         // original ALS context) uses the correct test state.
         const capturedGlobal = getConvexGlobal();
-        setTimeout(
+        realSetTimeout(
           // Scheduled functions run without auth context, even if
           // they were scheduled from an authenticated function.
           (() =>
@@ -2101,6 +2101,41 @@ const PATCHABLE_GLOBALS = [
 type GlobalOverrides = Record<string, unknown>;
 const globalOverridesStorage = new AsyncLocalStorage<GlobalOverrides>();
 
+// The framework's own scheduler needs setTimeout even when running inside a
+// transaction context where setTimeout is disallowed for user code. Exit the
+// override store before reading globalThis.setTimeout so we get the underlying
+// value (which still honors vitest fake timers, since those replace the proxy
+// target rather than entering an ALS context).
+function realSetTimeout(
+  cb: (...args: unknown[]) => void,
+  ms?: number,
+): ReturnType<typeof setTimeout> {
+  return globalOverridesStorage.exit(() => globalThis.setTimeout(cb, ms));
+}
+
+// Globals that the real Convex runtime does not provide inside queries and
+// mutations (transactions). Reading them is fine; calling them throws. Users
+// can still assign to `globalThis.fetch` etc. inside a handler — writes land
+// in the per-call ALS override map and replace the sentinel for that call.
+function disallowedInTransaction(name: string): (...args: unknown[]) => never {
+  return () => {
+    throw new Error(
+      `\`${name}\` is not supported in Convex queries or mutations. ` +
+        `Use an action instead, or call \`ctx.runAction\` to perform side effects.`,
+    );
+  };
+}
+
+function transactionGlobalOverrides(): GlobalOverrides {
+  return {
+    fetch: disallowedInTransaction("fetch"),
+    setTimeout: disallowedInTransaction("setTimeout"),
+    clearTimeout: disallowedInTransaction("clearTimeout"),
+    setInterval: disallowedInTransaction("setInterval"),
+    clearInterval: disallowedInTransaction("clearInterval"),
+  };
+}
+
 // Replace tracked globals with ALS-backed getter/setters so that writes
 // from user code land in the current context's override map while reads
 // fall through to the original value when no override exists.
@@ -2420,7 +2455,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           auth: authStorage.getStore() ?? auth,
           ...extraCtx,
         };
-        return globalOverridesStorage.run({}, () => handler(testCtx, a));
+        return globalOverridesStorage.run(transactionGlobalOverrides(), () =>
+          handler(testCtx, a),
+        );
       },
     });
     const transactionManager = getTransactionManager();
@@ -2470,7 +2507,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     const q = queryGeneric({
       handler: (ctx: any, a: any) => {
         const testCtx = { ...ctx, auth: authStorage.getStore() ?? auth };
-        return globalOverridesStorage.run({}, () => handler(testCtx, a));
+        return globalOverridesStorage.run(transactionGlobalOverrides(), () =>
+          handler(testCtx, a),
+        );
       },
     });
     const transactionManager = getTransactionManager();

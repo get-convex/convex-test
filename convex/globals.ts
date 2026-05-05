@@ -136,3 +136,57 @@ export const readAtobAction = internalAction({
     return globalThis.atob("aGVsbG8="); // "hello"
   },
 });
+
+// Functions that attempt to use globals disallowed in transactions.
+export const queryUsingFetch = internalQuery({
+  args: {},
+  handler: async () => {
+    await fetch("https://example.com");
+    return null;
+  },
+});
+
+export const mutationUsingFetch = internalMutation({
+  args: {},
+  handler: async () => {
+    await fetch("https://example.com");
+    return null;
+  },
+});
+
+export const mutationUsingSetTimeout = internalMutation({
+  args: {},
+  handler: async () => {
+    setTimeout(() => {}, 0);
+    return null;
+  },
+});
+
+export const queryUsingSetInterval = internalQuery({
+  args: {},
+  handler: async () => {
+    setInterval(() => {}, 0);
+    return null;
+  },
+});
+
+// User-supplied fetch override should win over the disallowed sentinel.
+export const mutationOverridingFetch = internalMutation({
+  args: {},
+  handler: async () => {
+    (globalThis as any).fetch = async () =>
+      new Response(JSON.stringify({ ok: true }));
+    const res = await fetch("https://example.com");
+    return await res.text();
+  },
+});
+
+// Action that uses fetch — should still be allowed (we only restrict in
+// transactions). Hits localhost so we don't depend on the network.
+export const actionUsingSetTimeout = internalAction({
+  args: {},
+  handler: async () => {
+    await new Promise((r) => setTimeout(r, 1));
+    return "ok";
+  },
+});
