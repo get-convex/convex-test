@@ -53,6 +53,55 @@ test("globals are clean after handler that patched them", async () => {
   expect(result).toBe("hello");
 });
 
+test("query: fetch is not supported", async () => {
+  const t = convexTest(schema);
+  await expect(t.query(internal.globals.queryUsingFetch)).rejects.toThrow(
+    /`fetch` is not supported/,
+  );
+});
+
+test("mutation: fetch is not supported", async () => {
+  const t = convexTest(schema);
+  await expect(t.mutation(internal.globals.mutationUsingFetch)).rejects.toThrow(
+    /`fetch` is not supported/,
+  );
+});
+
+test("mutation: setTimeout is not supported", async () => {
+  const t = convexTest(schema);
+  await expect(
+    t.mutation(internal.globals.mutationUsingSetTimeout),
+  ).rejects.toThrow(/`setTimeout` is not supported/);
+});
+
+test("query: setInterval is not supported", async () => {
+  const t = convexTest(schema);
+  await expect(t.query(internal.globals.queryUsingSetInterval)).rejects.toThrow(
+    /`setInterval` is not supported/,
+  );
+});
+
+test("inline mutation via t.run: fetch is not supported", async () => {
+  const t = convexTest(schema);
+  await expect(
+    t.run(async () => {
+      await fetch("https://example.com");
+    }),
+  ).rejects.toThrow(/`fetch` is not supported/);
+});
+
+test("mutation can override the disallowed fetch sentinel", async () => {
+  const t = convexTest(schema);
+  const result = await t.mutation(internal.globals.mutationOverridingFetch);
+  expect(result).toBe('{"ok":true}');
+});
+
+test("action: setTimeout still works", async () => {
+  const t = convexTest(schema);
+  const result = await t.action(internal.globals.actionUsingSetTimeout);
+  expect(result).toBe("ok");
+});
+
 test("inline mutation: patched globals restored after nested query", async () => {
   const t = convexTest(schema);
   await t.run(async (ctx) => {
