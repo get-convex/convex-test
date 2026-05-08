@@ -1353,7 +1353,7 @@ class AuthFake {
 }
 
 function asyncSyscallImpl() {
-  return async (op: string, jsonArgs: string): Promise<string> => {
+  return async (op: string, jsonArgs: string): Promise<string | undefined> => {
     const args = JSON.parse(jsonArgs);
     const db = getDb();
     const tracker = getTransactionManager().getMetricsTracker();
@@ -1711,6 +1711,9 @@ function asyncSyscallImpl() {
           count += 1;
         }
         return JSON.stringify(count);
+      }
+      case "1.0/auditLog": {
+        return;
       }
       default: {
         throw new Error(
