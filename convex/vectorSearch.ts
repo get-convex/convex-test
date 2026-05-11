@@ -22,7 +22,10 @@ export const vectorSearch = action({
     embedding: v.array(v.number()),
     limit: v.number(),
   },
-  handler: async (ctx, { author, embedding, limit }) => {
+  handler: async (
+    ctx,
+    { author, embedding, limit },
+  ): Promise<Array<Doc<"messages"> & { score: number }>> => {
     const results = await ctx.vectorSearch("messages", "embedding", {
       vector: embedding,
       filter: author !== null ? (q) => q.eq("author", author) : undefined,
