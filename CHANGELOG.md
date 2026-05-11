@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.52
+
+- Add implementation for `ctx.meta.getDeploymentMetadata()`.
+- Add support for internal audit log syscall.
+
 ## 0.0.51
 
 - Add implementation for internal snapshot query syscall.
