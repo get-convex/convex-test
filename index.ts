@@ -1712,6 +1712,9 @@ function asyncSyscallImpl() {
         }
         return JSON.stringify(count);
       }
+      case "1.0/auditLog": {
+        return JSON.stringify(null);
+      }
       default: {
         throw new Error(
           `\`convexTest\` does not support async syscall: "${op}"`,
