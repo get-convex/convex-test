@@ -2799,7 +2799,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         // Actions may use setTimeout internally (e.g. for delays).
         // Keep advancing timers while waiting so those can resolve.
         let done = false;
-        const drainPromise = finishInProgressScheduledFunctions().then(() => {
+        void finishInProgressScheduledFunctions().then(() => {
           done = true;
         });
         const maxPumps = 10000;
@@ -2822,7 +2822,6 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
             );
           }
         }
-        await drainPromise;
       }
       throw new Error(
         "finishAllScheduledFunctions: too many iterations. " +
