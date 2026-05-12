@@ -2780,9 +2780,6 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       return response;
     },
 
-    // This is needed because when we execute functions
-    // we are performing dynamic `import`s, and those
-    // are real work that cannot be force-awaited.
     finishInProgressScheduledFunctions,
 
     finishAllScheduledFunctions: async (
