@@ -214,6 +214,133 @@ test("new convexTest after orphaned scheduled functions", async () => {
   expect(result).toMatchObject([{ body: "fresh", author: "test" }]);
 });
 
+test("advancing time fires only jobs whose scheduledTime has arrived", async () => {
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  await t.mutation(api.scheduler.scheduleNowAndLater, {});
+
+  // Fire the immediate (delay=0) but not the delayed (delay=60s).
+  vi.advanceTimersByTime(0);
+  await t.finishInProgressScheduledFunctions();
+
+  expect(await t.query(internal.scheduler.list)).toMatchObject([
+    { body: "immediate" },
+  ]);
+  const jobs = await t.query(internal.scheduler.jobs);
+  expect(
+    jobs.filter((j: { state: { kind: string } }) => j.state.kind === "pending"),
+  ).toHaveLength(1);
+  expect(
+    jobs.filter((j: { state: { kind: string } }) => j.state.kind === "success"),
+  ).toHaveLength(1);
+
+  // Drain the delayed one too.
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  expect(await t.query(internal.scheduler.list)).toMatchObject([
+    { body: "immediate" },
+    { body: "delayed" },
+  ]);
+  vi.useRealTimers();
+});
+
+test("scheduled functions don't fire until time advances", async () => {
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+
+  await t.mutation(api.scheduler.mutationSchedulingAction, {
+    body: "scheduled",
+    delayMs: 0,
+  });
+
+  // Without advancing fake timers, the scheduler's setTimeout doesn't fire,
+  // so the job is still pending and nothing has executed.
+  const jobsBefore = await t.query(internal.scheduler.jobs);
+  expect(jobsBefore).toMatchObject([{ state: { kind: "pending" } }]);
+
+  vi.runAllTimers();
+  await t.finishInProgressScheduledFunctions();
+
+  const jobsAfter = await t.query(internal.scheduler.jobs);
+  expect(jobsAfter).toMatchObject([{ state: { kind: "success" } }]);
+  vi.useRealTimers();
+});
+
+test("scheduled mutations serialize after the parent commits", async () => {
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  await t.mutation(async (ctx) => {
+    await ctx.scheduler.runAfter(0, api.scheduler.add, {
+      body: "A-scheduled",
+      author: "AI",
+    });
+    await ctx.db.insert("messages", { body: "B-parent-after", author: "ME" });
+  });
+  vi.runAllTimers();
+  await t.finishInProgressScheduledFunctions();
+
+  const messages = await t.query(internal.scheduler.list);
+  expect(messages.map((m: { body: string }) => m.body)).toEqual([
+    "B-parent-after",
+    "A-scheduled",
+  ]);
+  vi.useRealTimers();
+});
+
+test("rollback cancels scheduled function", async () => {
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  await expect(
+    t.mutation(async (ctx) => {
+      await ctx.scheduler.runAfter(0, api.scheduler.add, {
+        body: "should-not-run",
+        author: "AI",
+      });
+      throw new Error("rollback");
+    }),
+  ).rejects.toThrowError(/rollback/);
+
+  vi.runAllTimers();
+  await t.finishInProgressScheduledFunctions();
+
+  const messages = await t.query(internal.scheduler.list);
+  expect(messages).toEqual([]);
+  const jobs = await t.query(internal.scheduler.jobs);
+  expect(jobs).toEqual([]);
+  vi.useRealTimers();
+});
+
+test("scheduling from a nested mutation still runs as top-level", async () => {
+  // Regression test: the schedule syscall runs inside a `ctx.runMutation`,
+  // i.e. with a non-null `nestedTxStorage` parent lock. The fired
+  // setTimeout callback must still acquire the global lock (not behave as
+  // if it were nested inside the long-gone parent transaction).
+  vi.useFakeTimers();
+  const t = convexTest(schema);
+  await t.mutation(api.scheduler.parentRunsMutationThatSchedules, {
+    body: "from-nested",
+  });
+  vi.runAllTimers();
+  await t.finishInProgressScheduledFunctions();
+  const messages = await t.query(internal.scheduler.list);
+  expect(messages.map((m: { body: string }) => m.body)).toEqual([
+    "from-nested",
+  ]);
+  vi.useRealTimers();
+});
+
+test("action can schedule a mutation and poll for its effect without finish*", async () => {
+  // Real timers: the scheduled mutation's setTimeout fires naturally
+  // while the action is awaiting its poll sleep. The action's runQuery
+  // releases the mutation lock between iterations, letting the scheduled
+  // mutation acquire it and commit.
+  const t = convexTest(schema);
+  await t.action(api.scheduler.actionSchedulesMutationAndPolls, {
+    body: "polled",
+  });
+  const messages = await t.query(internal.scheduler.list);
+  expect(messages.map((m: { body: string }) => m.body)).toEqual(["polled"]);
+});
+
 test("argument serialization", async () => {
   vi.useFakeTimers();
   const t = convexTest(schema);
