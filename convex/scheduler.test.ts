@@ -114,6 +114,8 @@ test("action scheduling action", async () => {
 });
 
 test("action scheduling action many times", async () => {
+  // Also ensures that recursively-scheduled functions are detected by
+  // finishAllScheduledFunctions across iterations.
   vi.useFakeTimers();
   const t = convexTest(schema);
   await t.action(api.scheduler.actionSchedulingActionNTimes, {
