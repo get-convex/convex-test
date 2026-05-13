@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.53-alpha.0
+
+- Support scheduled functions correctly with or without fake timers,
+  by always serializing scheduled mutations with the global transaction
+  manager.
+
 ## 0.0.52
 
 - Add implementation for `ctx.meta.getDeploymentMetadata()`.
