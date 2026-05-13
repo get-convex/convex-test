@@ -1641,9 +1641,9 @@ function asyncSyscallImpl() {
                   }),
                 )
                 .finally(() => {
-                  scheduler.inFlightExecutions.delete(promise);
+                  scheduler.finish(promise);
                 });
-              scheduler.inFlightExecutions.add(promise);
+              scheduler.add(promise);
             },
             Math.max(0, tsInSecs * 1000 - Date.now()),
           );
@@ -2082,9 +2082,27 @@ function ensureGlobalProxy() {
 
 // Per-test scheduler state: tracks executions of scheduled functions that
 // have been fired (their setTimeout callback has run) but haven't yet
-// settled. `finish*ScheduledFunctions` awaits these.
+// settled.
 class Scheduler {
-  inFlightExecutions: Set<Promise<void>> = new Set();
+  private _inFlight: Set<Promise<void>> = new Set();
+
+  add(promise: Promise<void>) {
+    this._inFlight.add(promise);
+  }
+
+  finish(promise: Promise<void>) {
+    this._inFlight.delete(promise);
+  }
+
+  anyFunctionsRunning(): boolean {
+    return this._inFlight.size > 0;
+  }
+
+  async finishInProgressScheduledFunctions(): Promise<void> {
+    while (this._inFlight.size > 0) {
+      await Promise.all(this._inFlight);
+    }
+  }
 }
 
 class TransactionManager {
@@ -2718,12 +2736,6 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       throw deserializeConvexErrorData(e);
     }
   };
-  const finishInProgressScheduledFunctions = async (): Promise<void> => {
-    const { inFlightExecutions } = getConvexGlobal().scheduler;
-    while (inFlightExecutions.size > 0) {
-      await Promise.all(inFlightExecutions);
-    }
-  };
   return {
     ...byType,
     ...byTypeWithPath,
@@ -2784,7 +2796,8 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       return response;
     },
 
-    finishInProgressScheduledFunctions,
+    finishInProgressScheduledFunctions: (): Promise<void> =>
+      getConvexGlobal().scheduler.finishInProgressScheduledFunctions(),
 
     finishAllScheduledFunctions: async (
       advanceTimers: () => void,
@@ -2793,17 +2806,17 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       // Wait for all scheduled functions to finish, advancing time in between
       // each function.
       // Stop after a fixed number of iterations to avoid infinite loops.
-      const { inFlightExecutions } = getConvexGlobal().scheduler;
+      const { scheduler } = getConvexGlobal();
       for (let i = 0; i < maxIterations; i++) {
         advanceTimers();
         // If no scheduled work fired, there's nothing left to wait for.
-        if (inFlightExecutions.size === 0) {
+        if (!scheduler.anyFunctionsRunning()) {
           return;
         }
         // Actions may use setTimeout internally (e.g. for delays).
         // Keep advancing timers while waiting so those can resolve.
         let done = false;
-        void finishInProgressScheduledFunctions().then(() => {
+        void scheduler.finishInProgressScheduledFunctions().then(() => {
           done = true;
         });
         const maxPumps = 10000;
