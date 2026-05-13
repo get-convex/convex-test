@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { api } from "./_generated/api";
-import { action, internalQuery, mutation } from "./_generated/server";
+import { action, internalQuery, mutation, query } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 
 export const list = internalQuery({
@@ -137,5 +137,61 @@ export const selfSchedulingMutation = mutation({
       api.scheduler.selfSchedulingMutation,
       {},
     );
+  },
+});
+
+// Mutation that schedules two things: one now and one in the future
+export const scheduleNowAndLater = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await ctx.scheduler.runAfter(0, api.scheduler.add, {
+      body: "immediate",
+      author: "AI",
+    });
+    await ctx.scheduler.runAfter(60000, api.scheduler.add, {
+      body: "delayed",
+      author: "AI",
+    });
+  },
+});
+
+// Mutation that calls another mutation via ctx.runMutation, which itself
+// schedules a function. Used to exercise the case where the schedule
+// syscall fires from inside a nested transaction.
+export const childSchedulesAdd = mutation({
+  args: { body: v.string() },
+  handler: async (ctx, { body }) => {
+    await ctx.scheduler.runAfter(0, api.scheduler.add, { body, author: "AI" });
+  },
+});
+
+export const parentRunsMutationThatSchedules = mutation({
+  args: { body: v.string() },
+  handler: async (ctx, { body }) => {
+    await ctx.runMutation(api.scheduler.childSchedulesAdd, { body });
+  },
+});
+
+// Action that schedules a mutation and then polls for its effect.
+// This pattern requires the scheduled mutation to be able to run while
+// the action is still executing — i.e. no deadlock waiting on the action
+// to return.
+export const actionSchedulesMutationAndPolls = action({
+  args: { body: v.string() },
+  handler: async (ctx, { body }) => {
+    await ctx.scheduler.runAfter(0, api.scheduler.add, { body, author: "AI" });
+    for (let i = 0; i < 100; i++) {
+      const messages = await ctx.runQuery(api.scheduler.listPublic, {});
+      if (messages.some((m) => m.body === body)) return;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    throw new Error("polled too long without seeing scheduled mutation");
+  },
+});
+
+export const listPublic = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("messages").collect();
   },
 });

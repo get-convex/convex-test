@@ -153,8 +153,6 @@ class DatabaseFake {
   private _nextDocId: number = 10000;
   private _lastCreationTime: number = 0;
   private _queryResults: Record<QueryId, Array<GenericDocument>> = {};
-  // TODO: Make this more robust and cleaner
-  jobListener: (jobId: string) => void = () => {};
   // Pending writes for each level of transaction nesting.
   // Whenever a child mutation begins, a new level is created for all
   // components.
@@ -785,10 +783,6 @@ class DatabaseFake {
       results = results.slice(0, limit);
     }
     return results;
-  }
-
-  jobFinished(jobId: string) {
-    this.jobListener(jobId);
   }
 
   vectorSearch(
@@ -1576,71 +1570,84 @@ function asyncSyscallImpl() {
         // function callback (which runs via setTimeout, outside the
         // original ALS context) uses the correct test state.
         const capturedGlobal = getConvexGlobal();
-        setTimeout(
-          // Scheduled functions run without auth context, even if
-          // they were scheduled from an authenticated function.
-          (() =>
-            convexGlobalStorage.run(capturedGlobal, () =>
-              authStorage.run(new AuthFake(), async () => {
-                const canceled = await withAuth().runInComponent(
-                  componentPath,
-                  async () => {
-                    const job = db.get("_scheduled_functions", jobId) as
-                      | ScheduledFunction
-                      | undefined;
-                    if (!job) return true;
-                    if (job.state.kind === "canceled") {
-                      return true;
-                    }
-                    if (job.state.kind !== "pending") {
-                      throw new Error(
-                        `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
-                      );
-                    }
-                    db.patch("_scheduled_functions", jobId, {
-                      state: { kind: "inProgress" },
-                    });
-                    return false;
-                  },
-                );
-                if (canceled) {
-                  return;
-                }
-                try {
-                  await withAuth().fun(functionPath, parsedArgs);
-                } catch (error) {
-                  console.error(
-                    `Error when running scheduled function ${name}`,
-                    error,
-                  );
-                  await withAuth().runInComponent(componentPath, async () => {
-                    db.patch("_scheduled_functions", jobId, {
-                      state: { kind: "failed" },
-                      completedTime: Date.now(),
-                    });
-                  });
-                  db.jobFinished(jobId);
-                  return;
-                }
-                await withAuth().runInComponent(componentPath, async () => {
-                  const job = db.get(
-                    "_scheduled_functions",
-                    jobId,
-                  ) as ScheduledFunction;
-                  if (job.state.kind !== "inProgress") {
-                    throw new Error(
-                      `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
+        const scheduler = capturedGlobal.scheduler;
+        // Queue the setTimeout outside any nested-mutation ALS context so
+        // the scheduled function starts as a fresh top-level execution
+        // rather than inheriting a stale parent lock.
+        nestedTxStorage.exit(() => {
+          setTimeout(
+            () => {
+              // Scheduled functions run without auth context, even if
+              // they were scheduled from an authenticated function.
+              const promise = convexGlobalStorage
+                .run(capturedGlobal, () =>
+                  authStorage.run(new AuthFake(), async () => {
+                    const canceled = await withAuth().runInComponent(
+                      componentPath,
+                      async () => {
+                        const job = db.get("_scheduled_functions", jobId) as
+                          | ScheduledFunction
+                          | undefined;
+                        if (!job) return true;
+                        if (job.state.kind === "canceled") {
+                          return true;
+                        }
+                        if (job.state.kind !== "pending") {
+                          throw new Error(
+                            `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+                          );
+                        }
+                        db.patch("_scheduled_functions", jobId, {
+                          state: { kind: "inProgress" },
+                        });
+                        return false;
+                      },
                     );
-                  }
-                  db.patch("_scheduled_functions", jobId, {
-                    state: { kind: "success" },
-                  });
+                    if (canceled) {
+                      return;
+                    }
+                    try {
+                      await withAuth().fun(functionPath, parsedArgs);
+                    } catch (error) {
+                      console.error(
+                        `Error when running scheduled function ${name}`,
+                        error,
+                      );
+                      await withAuth().runInComponent(
+                        componentPath,
+                        async () => {
+                          db.patch("_scheduled_functions", jobId, {
+                            state: { kind: "failed" },
+                            completedTime: Date.now(),
+                          });
+                        },
+                      );
+                      return;
+                    }
+                    await withAuth().runInComponent(componentPath, async () => {
+                      const job = db.get(
+                        "_scheduled_functions",
+                        jobId,
+                      ) as ScheduledFunction;
+                      if (job.state.kind !== "inProgress") {
+                        throw new Error(
+                          `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
+                        );
+                      }
+                      db.patch("_scheduled_functions", jobId, {
+                        state: { kind: "success" },
+                      });
+                    });
+                  }),
+                )
+                .finally(() => {
+                  scheduler.finish(promise);
                 });
-                db.jobFinished(jobId);
-              }),
-            )) as () => void,
-          tsInSecs * 1000 - Date.now(),
-        );
+              scheduler.add(promise);
+            },
+            Math.max(0, tsInSecs * 1000 - Date.now()),
+          );
+        });
         return JSON.stringify(convexToJson(jobId));
       }
       case "1.0/actions/cancel_job": {
@@ -1769,35 +1776,6 @@ async function blobSha(blob: Blob) {
   return btoa(String.fromCharCode(...hashArray));
 }
 
-async function waitForInProgressScheduledFunctions(): Promise<boolean> {
-  let hadScheduledFunctions = false;
-  for (const componentPath of Object.keys(getConvexGlobal().components)) {
-    const inProgressJobs = (await withAuth().runInComponent(
-      componentPath,
-      async (ctx) => {
-        return (
-          await ctx.db.system.query("_scheduled_functions").collect()
-        ).filter((job: ScheduledFunction) => job.state.kind === "inProgress");
-      },
-    )) as ScheduledFunction[];
-    let numRemaining = inProgressJobs.length;
-    if (numRemaining === 0) {
-      continue;
-    }
-    hadScheduledFunctions = true;
-
-    await new Promise<void>((resolve) => {
-      getDbForComponent(componentPath).jobListener = () => {
-        numRemaining -= 1;
-        if (numRemaining === 0) {
-          resolve();
-        }
-      };
-    });
-  }
-  return hadScheduledFunctions;
-}
-
 export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
   TestConvexForDataModelAndIdentity<DataModelFromSchemaDefinition<SchemaDef>>;
 
@@ -1922,6 +1900,7 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    * 1. Use `vi.runAllTimers()` or similar to advance
    *   time such that a function is scheduled.
    * 2. Use `finishInProgressScheduledFunctions()` to wait for the function
+   *    to finish.
    */
   finishInProgressScheduledFunctions: () => Promise<void>;
 
@@ -2066,6 +2045,7 @@ const executionContextStorage = new AsyncLocalStorage<ExecutionContext>();
 type ConvexGlobal = {
   components: Record<string, ComponentInfo>;
   transactionManager: TransactionManager;
+  scheduler: Scheduler;
   syscall: (op: string, args: any) => any;
   asyncSyscall: (op: string, args: any) => Promise<any>;
   jsSyscall: (op: string, args: any) => Promise<any>;
@@ -2101,6 +2081,31 @@ function ensureGlobalProxy() {
       return getConvexGlobal().jsSyscall;
     },
   } as ConvexGlobal;
+}
+
+// Per-test scheduler state: tracks executions of scheduled functions that
+// have been fired (their setTimeout callback has run) but haven't yet
+// settled.
+class Scheduler {
+  private _inFlight: Set<Promise<void>> = new Set();
+
+  add(promise: Promise<void>) {
+    this._inFlight.add(promise);
+  }
+
+  finish(promise: Promise<void>) {
+    this._inFlight.delete(promise);
+  }
+
+  anyFunctionsRunning(): boolean {
+    return this._inFlight.size > 0;
+  }
+
+  async finishInProgressScheduledFunctions(): Promise<void> {
+    while (this._inFlight.size > 0) {
+      await Promise.all(this._inFlight);
+    }
+  }
 }
 
 class TransactionManager {
@@ -2291,6 +2296,7 @@ export function convexTest<Schema extends GenericSchema>(
       },
     },
     transactionManager: new TransactionManager(limitsConfig),
+    scheduler: new Scheduler(),
     syscall: syscallImpl(),
     asyncSyscall: asyncSyscallImpl(),
     jsSyscall: jsSyscallImpl(),
@@ -2793,12 +2799,8 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       return response;
     },
 
-    // This is needed because when we execute functions
-    // we are performing dynamic `import`s, and those
-    // are real work that cannot be force-awaited.
-    finishInProgressScheduledFunctions: async (): Promise<void> => {
-      await waitForInProgressScheduledFunctions();
-    },
+    finishInProgressScheduledFunctions: (): Promise<void> =>
+      getConvexGlobal().scheduler.finishInProgressScheduledFunctions(),
 
     finishAllScheduledFunctions: async (
       advanceTimers: () => void,
@@ -2807,17 +2809,19 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       // Wait for all scheduled functions to finish, advancing time in between
       // each function.
       // Stop after a fixed number of iterations to avoid infinite loops.
+      const { scheduler } = getConvexGlobal();
       for (let i = 0; i < maxIterations; i++) {
         advanceTimers();
+        // If no scheduled work fired, there's nothing left to wait for.
+        if (!scheduler.anyFunctionsRunning()) {
+          return;
+        }
         // Actions may use setTimeout internally (e.g. for delays).
         // Keep advancing timers while waiting so those can resolve.
         let done = false;
-        const waitPromise = waitForInProgressScheduledFunctions().then(
-          (had) => {
-            done = true;
-            return had;
-          },
-        );
+        void scheduler.finishInProgressScheduledFunctions().then(() => {
+          done = true;
+        });
         const maxPumps = 10000;
         for (let pump = 0; pump < maxPumps && !done; pump++) {
           advanceTimers();
@@ -2837,10 +2841,6 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
                 "Does an action have an unresolvable setTimeout or infinite loop?",
             );
           }
-        }
-        const hadScheduledFunctions = await waitPromise;
-        if (!hadScheduledFunctions) {
-          return;
         }
       }
       throw new Error(
