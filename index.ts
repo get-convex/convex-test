@@ -1570,7 +1570,7 @@ function asyncSyscallImpl() {
         // function callback (which runs via setTimeout, outside the
         // original ALS context) uses the correct test state.
         const capturedGlobal = getConvexGlobal();
-        const transactionManager = capturedGlobal.transactionManager;
+        const scheduler = capturedGlobal.scheduler;
         // Queue the setTimeout outside any nested-mutation ALS context so
         // the scheduled function starts as a fresh top-level execution
         // rather than inheriting a stale parent lock.
@@ -1641,11 +1641,9 @@ function asyncSyscallImpl() {
                   }),
                 )
                 .finally(() => {
-                  transactionManager.inFlightScheduledExecutions.delete(
-                    promise,
-                  );
+                  scheduler.inFlightExecutions.delete(promise);
                 });
-              transactionManager.inFlightScheduledExecutions.add(promise);
+              scheduler.inFlightExecutions.add(promise);
             },
             Math.max(0, tsInSecs * 1000 - Date.now()),
           );
@@ -2044,6 +2042,7 @@ const executionContextStorage = new AsyncLocalStorage<ExecutionContext>();
 type ConvexGlobal = {
   components: Record<string, ComponentInfo>;
   transactionManager: TransactionManager;
+  scheduler: Scheduler;
   syscall: (op: string, args: any) => any;
   asyncSyscall: (op: string, args: any) => Promise<any>;
   jsSyscall: (op: string, args: any) => Promise<any>;
@@ -2081,6 +2080,13 @@ function ensureGlobalProxy() {
   } as ConvexGlobal;
 }
 
+// Per-test scheduler state: tracks executions of scheduled functions that
+// have been fired (their setTimeout callback has run) but haven't yet
+// settled. `finish*ScheduledFunctions` awaits these.
+class Scheduler {
+  inFlightExecutions: Set<Promise<void>> = new Set();
+}
+
 class TransactionManager {
   // The DatabaseFake is used in the Convex global,
   // and so it restricts `convexTest` to run one function
@@ -2091,9 +2097,6 @@ class TransactionManager {
   private _markTransactionDone: (() => void) | null = null;
   private _metricsTracker: TransactionMetricsTracker | null = null;
   private _limitsConfig: Partial<TransactionMetrics> | boolean;
-  // Scheduled-function executions currently in flight. Callers can await
-  // these to block until in-flight scheduled work settles.
-  inFlightScheduledExecutions: Set<Promise<void>> = new Set();
 
   constructor(limitsConfig: Partial<TransactionMetrics> | boolean = false) {
     this._limitsConfig = limitsConfig;
@@ -2272,6 +2275,7 @@ export function convexTest<Schema extends GenericSchema>(
       },
     },
     transactionManager: new TransactionManager(limitsConfig),
+    scheduler: new Scheduler(),
     syscall: syscallImpl(),
     asyncSyscall: asyncSyscallImpl(),
     jsSyscall: jsSyscallImpl(),
@@ -2715,9 +2719,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     }
   };
   const finishInProgressScheduledFunctions = async (): Promise<void> => {
-    const tm = getTransactionManager();
-    while (tm.inFlightScheduledExecutions.size > 0) {
-      await Promise.all(tm.inFlightScheduledExecutions);
+    const { inFlightExecutions } = getConvexGlobal().scheduler;
+    while (inFlightExecutions.size > 0) {
+      await Promise.all(inFlightExecutions);
     }
   };
   return {
@@ -2789,11 +2793,11 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       // Wait for all scheduled functions to finish, advancing time in between
       // each function.
       // Stop after a fixed number of iterations to avoid infinite loops.
-      const tm = getTransactionManager();
+      const { inFlightExecutions } = getConvexGlobal().scheduler;
       for (let i = 0; i < maxIterations; i++) {
         advanceTimers();
         // If no scheduled work fired, there's nothing left to wait for.
-        if (tm.inFlightScheduledExecutions.size === 0) {
+        if (inFlightExecutions.size === 0) {
           return;
         }
         // Actions may use setTimeout internally (e.g. for delays).
