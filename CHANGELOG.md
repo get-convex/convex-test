@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.0.53-alpha.0
+## 0.0.53
 
 - Support scheduled functions correctly with or without fake timers,
   by always serializing scheduled mutations with the global transaction
