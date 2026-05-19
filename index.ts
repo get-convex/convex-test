@@ -1833,6 +1833,10 @@ function asyncSyscallImpl() {
           reference,
           functionHandle,
         });
+        // Surface the "component not registered" error eagerly at handle
+        // creation time, rather than later when the handle is used (which
+        // could happen in a scheduled function whose error is only logged).
+        getComponentInfo(functionPath.componentPath);
         const handle = createFunctionHandle(functionPath);
         return JSON.stringify(handle);
       }
@@ -1852,6 +1856,11 @@ function asyncSyscallImpl() {
         } = args;
         const functionAddress = { name, reference, functionHandle };
         const functionPath = getFunctionPathFromAddress(functionAddress);
+        // Surface the "component not registered" error eagerly at schedule
+        // time. Otherwise the failure happens when the timer fires and is
+        // only logged via `console.error`, leaving the test green and the
+        // root cause buried.
+        getComponentInfo(functionPath.componentPath);
         // Convert args to a Convex value before storing them or passing them to the function
         const parsedArgs = jsonToConvex(fnArgs);
         // Scheduled arguments cannot contain pending values
@@ -2445,11 +2454,27 @@ export type TestConvexForDataModelAndIdentity<
 function getComponentInfo(componentPath: string): ComponentInfo {
   const convex = getConvexGlobal();
   if (convex.components[componentPath] === undefined) {
-    throw new Error(
-      `Component "${componentPath}" is not registered. Call "t.registerComponent".`,
-    );
+    throw new Error(formatUnregisteredComponentError(componentPath));
   }
   return convex.components[componentPath];
+}
+
+function formatUnregisteredComponentError(componentPath: string): string {
+  const convex = getConvexGlobal();
+  const registered = Object.keys(convex.components).filter(
+    (p) => p !== ROOT_COMPONENT_PATH,
+  );
+  const registeredHint =
+    registered.length === 0
+      ? "No components have been registered on this `convexTest` instance."
+      : `Registered components: ${registered.map((p) => `"${p}"`).join(", ")}.`;
+  return (
+    `Component "${componentPath}" is not registered on this \`convexTest\` instance. ` +
+    `Before running code that depends on it, call ` +
+    `\`t.registerComponent("${componentPath}", schema, modules)\` ` +
+    `(see https://github.com/get-convex/convex-test#components). ` +
+    registeredHint
+  );
 }
 
 function getDbForComponent(componentPath: string) {
