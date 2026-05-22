@@ -1,13 +1,19 @@
 name: Run tests
+
 on:
   push:
     branches: ["main"]
   pull_request:
+
+permissions: {}
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
       - name: Use Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
@@ -20,4 +26,4 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
-      - run: npx pkg-pr-new publish || "echo 'pkg-pr-new publish failed'"
+      - run: npx pkg-pr-new publish || echo 'pkg-pr-new publish failed'
