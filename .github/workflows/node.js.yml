@@ -1,8 +1,12 @@
 name: Run tests
+
 on:
   push:
     branches: ["main"]
   pull_request:
+
+permissions: {}
+
 jobs:
   build:
     runs-on: ubuntu-latest
