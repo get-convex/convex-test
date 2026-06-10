@@ -21,6 +21,7 @@ import type * as helpers from "../helpers.js";
 import type * as http from "../http.js";
 import type * as messages from "../messages.js";
 import type * as mutations from "../mutations.js";
+import type * as nestedLimits from "../nestedLimits.js";
 import type * as pagination from "../pagination.js";
 import type * as queries from "../queries.js";
 import type * as returnsValidation from "../returnsValidation.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   messages: typeof messages;
   mutations: typeof mutations;
+  nestedLimits: typeof nestedLimits;
   pagination: typeof pagination;
   queries: typeof queries;
   returnsValidation: typeof returnsValidation;

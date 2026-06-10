@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Support the `transactionLimits` option on nested `ctx.runQuery` /
+  `ctx.runMutation` calls (Convex 1.41). The nested call is enforced against
+  its own limits, capped at the global transaction limits so they can only be
+  lowered, never raised.
+
 ## 0.0.53
 
 - Support scheduled functions correctly with or without fake timers,

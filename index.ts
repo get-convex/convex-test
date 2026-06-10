@@ -1498,6 +1498,7 @@ function asyncSyscallImpl() {
           reference,
           functionHandle,
           args: udfArgsJson,
+          transactionLimits,
         } = args;
         const udfArgs = jsonToConvex(udfArgsJson);
         const functionPath = getFunctionPathFromAddress({
@@ -1507,20 +1508,34 @@ function asyncSyscallImpl() {
         });
         if (udfType === "query") {
           return JSON.stringify(
-            convexToJson(await withAuth().queryFromPath(functionPath, udfArgs)),
+            convexToJson(
+              await withAuth().queryFromPath(
+                functionPath,
+                udfArgs,
+                transactionLimits,
+              ),
+            ),
           );
         }
         if (udfType === "snapshotQuery") {
           return JSON.stringify(
             convexToJson(
-              await withAuth().snapshotQueryFromPath(functionPath, udfArgs),
+              await withAuth().snapshotQueryFromPath(
+                functionPath,
+                udfArgs,
+                transactionLimits,
+              ),
             ),
           );
         }
         if (udfType === "mutation") {
           return JSON.stringify(
             convexToJson(
-              await withAuth().mutationFromPath(functionPath, udfArgs),
+              await withAuth().mutationFromPath(
+                functionPath,
+                udfArgs,
+                transactionLimits,
+              ),
             ),
           );
         }
@@ -2116,7 +2131,12 @@ class TransactionManager {
   // can run mutations in parallel.
   private _waitOnCurrentFunction: Promise<void> | null = null;
   private _markTransactionDone: (() => void) | null = null;
-  private _metricsTracker: TransactionMetricsTracker | null = null;
+  // Stack of metrics trackers. The first entry is the top-level (global)
+  // tracker; nested `ctx.runQuery` / `ctx.runMutation` calls with custom
+  // `transactionLimits` push additional, tighter trackers. Reads and writes
+  // are counted against every tracker in the stack, so each enforces its own
+  // limit simultaneously.
+  private _trackerStack: TransactionMetricsTracker[] = [];
   private _limitsConfig: Partial<TransactionMetrics> | boolean;
 
   constructor(limitsConfig: Partial<TransactionMetrics> | boolean = false) {
@@ -2138,7 +2158,7 @@ class TransactionManager {
       this._waitOnCurrentFunction = new Promise((resolve) => {
         this._markTransactionDone = resolve;
       });
-      this._metricsTracker = new TransactionMetricsTracker(this._limitsConfig);
+      this._trackerStack = [new TransactionMetricsTracker(this._limitsConfig)];
     }
     const convex = getConvexGlobal();
     for (const component of Object.values(convex.components)) {
@@ -2152,8 +2172,43 @@ class TransactionManager {
     return this._waitOnCurrentFunction !== null;
   }
 
+  // Returns a tracker that fans reads/writes out to every tracker currently on
+  // the stack (global plus any nested scoped limits), so each enforces its own
+  // limit. `getTransactionMetrics` reports the innermost (current) scope.
+  // Returns null when not inside a transaction.
   getMetricsTracker(): TransactionMetricsTracker | null {
-    return this._metricsTracker;
+    const stack = this._trackerStack;
+    if (stack.length === 0) {
+      return null;
+    }
+    if (stack.length === 1) {
+      return stack[0];
+    }
+    return {
+      trackRead: (docSizeBytes: number) =>
+        stack.forEach((t) => t.trackRead(docSizeBytes)),
+      trackWrite: (docSizeBytes: number) =>
+        stack.forEach((t) => t.trackWrite(docSizeBytes)),
+      trackIndexRange: () => stack.forEach((t) => t.trackIndexRange()),
+      trackScheduledFunction: (argsSizeBytes: number) =>
+        stack.forEach((t) => t.trackScheduledFunction(argsSizeBytes)),
+      getTransactionMetrics: () =>
+        stack[stack.length - 1].getTransactionMetrics(),
+    } as TransactionMetricsTracker;
+  }
+
+  // Push a tighter tracker for a nested call with custom `transactionLimits`.
+  // The nested limits are capped at the global (top-level) limits.
+  pushScopedLimits(transactionLimits: Partial<TransactionMetrics>) {
+    const global = this._trackerStack[0];
+    if (global === undefined) {
+      throw new Error("Cannot scope transaction limits outside a transaction");
+    }
+    this._trackerStack.push(global.createNestedTracker(transactionLimits));
+  }
+
+  popScopedLimits() {
+    this._trackerStack.pop();
   }
 
   commit(isNested: boolean) {
@@ -2177,7 +2232,7 @@ class TransactionManager {
       throw new Error("Transaction not started");
     }
     if (!isNested) {
-      this._metricsTracker = null;
+      this._trackerStack = [];
       this._waitOnCurrentFunction = null;
       this._markTransactionDone();
       this._markTransactionDone = null;
@@ -2360,6 +2415,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     extraCtx: any = {},
     functionPath: FunctionPath,
     isNested: boolean,
+    transactionLimits?: Partial<TransactionMetrics>,
   ): Promise<T> => {
     const m = mutationGeneric({
       handler: (ctx: any, a: any) => {
@@ -2383,6 +2439,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     };
 
     await transactionManager.begin(isNested);
+    if (transactionLimits !== undefined) {
+      transactionManager.pushScopedLimits(transactionLimits);
+    }
     try {
       const childLock = new NestedLock();
       const invokeRaw = () =>
@@ -2403,6 +2462,10 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     } catch (e) {
       transactionManager.rollback(isNested);
       throw deserializeConvexErrorData(e);
+    } finally {
+      if (transactionLimits !== undefined) {
+        transactionManager.popScopedLimits();
+      }
     }
   };
 
@@ -2414,6 +2477,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     args: any,
     functionPath: FunctionPath,
     isNested: boolean,
+    transactionLimits?: Partial<TransactionMetrics>,
   ): Promise<T> => {
     const q = queryGeneric({
       handler: (ctx: any, a: any) => {
@@ -2433,6 +2497,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     };
 
     await transactionManager.begin(isNested);
+    if (transactionLimits !== undefined) {
+      transactionManager.pushScopedLimits(transactionLimits);
+    }
     try {
       const childLock = new NestedLock();
       const invokeRaw = () =>
@@ -2450,6 +2517,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     } catch (e) {
       throw deserializeConvexErrorData(e);
     } finally {
+      if (transactionLimits !== undefined) {
+        transactionManager.popScopedLimits();
+      }
       transactionManager.rollback(isNested);
     }
   };
@@ -2507,7 +2577,11 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
   };
 
   const byTypeWithPath = {
-    queryFromPath: async (functionPath: FunctionPath, args: any) => {
+    queryFromPath: async (
+      functionPath: FunctionPath,
+      args: any,
+      transactionLimits?: Partial<TransactionMetrics>,
+    ) => {
       const parentLock = nestedTxStorage.getStore() ?? null;
       const isNested = parentLock !== null;
       if (parentLock) {
@@ -2522,6 +2596,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           args,
           resolved.functionPath,
           isNested,
+          transactionLimits,
         );
         validateReturnValue(
           resolved.returns,
@@ -2537,7 +2612,11 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       }
     },
 
-    snapshotQueryFromPath: async (functionPath: FunctionPath, args: any) => {
+    snapshotQueryFromPath: async (
+      functionPath: FunctionPath,
+      args: any,
+      transactionLimits?: Partial<TransactionMetrics>,
+    ) => {
       const parentLock = nestedTxStorage.getStore() ?? null;
       if (parentLock) {
         await parentLock.acquire();
@@ -2556,6 +2635,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           // isNested=true to avoid re-acquiring the top-level lock
           // (we're inside a mutation that already holds it).
           /* isNested */ true,
+          transactionLimits,
         );
         validateReturnValue(
           resolved.returns,
@@ -2575,6 +2655,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     mutationFromPath: async (
       functionPath: FunctionPath,
       args: any,
+      transactionLimits?: Partial<TransactionMetrics>,
     ): Promise<Value> => {
       const parentLock = nestedTxStorage.getStore() ?? null;
       const isNested = parentLock !== null;
@@ -2591,6 +2672,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           {},
           resolved.functionPath,
           isNested,
+          transactionLimits,
         );
         validateReturnValue(
           resolved.returns,

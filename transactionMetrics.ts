@@ -123,6 +123,30 @@ export class TransactionMetricsTracker {
     }
   }
 
+  /**
+   * Create a tracker for a nested `ctx.runQuery` / `ctx.runMutation` call.
+   *
+   * Each provided limit is capped at this tracker's limit, so nested limits
+   * can only lower the budget, never raise it above the global limits. Limits
+   * that aren't provided default to this tracker's limit (no extra
+   * restriction). The returned tracker always enforces its limits, even when
+   * the global config has enforcement disabled.
+   */
+  createNestedTracker(
+    limits: Partial<TransactionMetrics>,
+  ): TransactionMetricsTracker {
+    const capped: TransactionMetrics = { ...this._limits };
+    for (const key of Object.keys(
+      this._limits,
+    ) as (keyof TransactionMetrics)[]) {
+      const requested = limits[key];
+      if (requested !== undefined) {
+        capped[key] = Math.min(requested, this._limits[key]);
+      }
+    }
+    return new TransactionMetricsTracker(capped);
+  }
+
   getTransactionMetrics() {
     return {
       bytesRead: {
