@@ -101,6 +101,37 @@ test("nested limit does not leak to the parent transaction", async () => {
   expect(count).toBe(10);
 });
 
+test("rolled-back nested writes are not counted against the transaction", async () => {
+  const t = convexTest({ schema });
+  // The nested mutation writes 5 docs then throws, so its writes roll back.
+  // The parent swallows the error and reads back the transaction metrics: the
+  // rolled-back writes should not be counted.
+  const documentsWritten = await t.mutation(
+    api.nestedLimits.insertRollbackThenReportMetrics,
+    { count: 5 },
+  );
+  expect(documentsWritten).toBe(0);
+  // And nothing was actually persisted.
+  const count = await t.query(api.nestedLimits.readAll, {});
+  expect(count).toBe(0);
+});
+
+test("rolled-back nested writes do not consume the global write limit", async () => {
+  const t = convexTest({
+    schema,
+    transactionLimits: { documentsWritten: 5 },
+  });
+  // Nested mutation writes 4 docs then throws (rolled back). Afterwards the
+  // parent can still write 4 docs of its own: if the rolled-back writes had
+  // been counted, 4 + 4 would exceed the limit of 5.
+  await t.mutation(api.nestedLimits.parentInsertAfterRollback, {
+    rolledBackCount: 4,
+    keptCount: 4,
+  });
+  const count = await t.query(api.nestedLimits.readAll, {});
+  expect(count).toBe(4);
+});
+
 test("nested transactionLimits is optional", async () => {
   const t = convexTest({ schema });
   await seed(t, 10);

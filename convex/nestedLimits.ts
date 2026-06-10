@@ -37,6 +37,53 @@ export const insertMany = mutation({
   },
 });
 
+// Child mutation that inserts `count` messages and then throws, so all of its
+// writes are rolled back.
+export const insertManyThenThrow = mutation({
+  args: { count: v.number() },
+  handler: async (ctx, { count }) => {
+    for (let i = 0; i < count; i++) {
+      await ctx.db.insert("messages", { author: "child", body: `msg${i}` });
+    }
+    throw new Error("nested boom");
+  },
+});
+
+// Parent mutation that calls a nested mutation which rolls back, swallows the
+// error, then reports the transaction metrics. Used to verify the rolled-back
+// nested writes are not counted against the transaction.
+export const insertRollbackThenReportMetrics = mutation({
+  args: { count: v.number() },
+  handler: async (ctx, { count }) => {
+    try {
+      await ctx.runMutation(api.nestedLimits.insertManyThenThrow, { count });
+    } catch {
+      // Swallow: the nested mutation's writes have been rolled back.
+    }
+    const metrics = await ctx.meta.getTransactionMetrics();
+    return metrics.documentsWritten.used;
+  },
+});
+
+// Parent mutation that runs a nested mutation which rolls back, then inserts
+// `keptCount` messages of its own. Used to verify rolled-back nested writes
+// don't consume the global write limit.
+export const parentInsertAfterRollback = mutation({
+  args: { rolledBackCount: v.number(), keptCount: v.number() },
+  handler: async (ctx, { rolledBackCount, keptCount }) => {
+    try {
+      await ctx.runMutation(api.nestedLimits.insertManyThenThrow, {
+        count: rolledBackCount,
+      });
+    } catch {
+      // Swallow: the nested mutation's writes have been rolled back.
+    }
+    for (let i = 0; i < keptCount; i++) {
+      await ctx.db.insert("messages", { author: "parent", body: `kept${i}` });
+    }
+  },
+});
+
 // Parent query that calls a nested query with custom transaction limits.
 export const parentReadWithLimits = query({
   args: { transactionLimits: transactionLimitsValidator },

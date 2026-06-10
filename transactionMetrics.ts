@@ -8,6 +8,15 @@ export type TransactionMetrics = {
   scheduledFunctionArgsBytes: number;
 };
 
+// Metrics that track reads. On rollback these are still folded into the
+// parent (the reads happened), unlike the write metrics whose effects are
+// undone.
+const READ_METRIC_KEYS: (keyof TransactionMetrics)[] = [
+  "bytesRead",
+  "documentsRead",
+  "databaseQueries",
+];
+
 const MiB = 1 << 20;
 
 const DEFAULT_TRANSACTION_LIMITS: TransactionMetrics = {
@@ -124,27 +133,53 @@ export class TransactionMetricsTracker {
   }
 
   /**
-   * Create a tracker for a nested `ctx.runQuery` / `ctx.runMutation` call.
+   * Create a tracker for a nested `ctx.runQuery` / `ctx.runMutation` call,
+   * mirroring how the database pushes a nested transaction layer.
    *
-   * Each provided limit is capped at this tracker's limit, so nested limits
-   * can only lower the budget, never raise it above the global limits. Limits
-   * that aren't provided default to this tracker's limit (no extra
-   * restriction). The returned tracker always enforces its limits, even when
-   * the global config has enforcement disabled.
+   * The child starts from this (parent) tracker's accumulated usage, so the
+   * global limit is enforced against the whole transaction's cumulative
+   * consumption. When `transactionLimits` is provided, each field additionally
+   * caps the nested call's own consumption; the cap is taken against the
+   * global limit so it can only lower the budget, never raise it.
+   *
+   * Fold the child back into its parent with `commitInto` (success) or
+   * `rollbackInto` (rolled back) once the nested call returns.
    */
-  createNestedTracker(
-    limits: Partial<TransactionMetrics>,
+  createChild(
+    transactionLimits?: Partial<TransactionMetrics>,
   ): TransactionMetricsTracker {
-    const capped: TransactionMetrics = { ...this._limits };
-    for (const key of Object.keys(
-      this._limits,
-    ) as (keyof TransactionMetrics)[]) {
-      const requested = limits[key];
-      if (requested !== undefined) {
-        capped[key] = Math.min(requested, this._limits[key]);
+    const child = new TransactionMetricsTracker(false);
+    child._metrics = { ...this._metrics };
+    child._limits = { ...this._limits };
+    child._enforceLimits =
+      this._enforceLimits || transactionLimits !== undefined;
+    if (transactionLimits !== undefined) {
+      for (const key of Object.keys(
+        this._limits,
+      ) as (keyof TransactionMetrics)[]) {
+        const requested = transactionLimits[key];
+        if (requested !== undefined) {
+          child._limits[key] = Math.min(
+            this._limits[key],
+            this._metrics[key] + requested,
+          );
+        }
       }
     }
-    return new TransactionMetricsTracker(capped);
+    return child;
+  }
+
+  // Fold a committed child's cumulative usage back into this parent.
+  commitInto(parent: TransactionMetricsTracker) {
+    parent._metrics = { ...this._metrics };
+  }
+
+  // Fold a rolled-back child back into this parent. Only reads are kept; the
+  // child's writes were undone, so they don't count against the transaction.
+  rollbackInto(parent: TransactionMetricsTracker) {
+    for (const key of READ_METRIC_KEYS) {
+      parent._metrics[key] = this._metrics[key];
+    }
   }
 
   getTransactionMetrics() {

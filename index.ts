@@ -2143,7 +2143,10 @@ class TransactionManager {
     this._limitsConfig = limitsConfig;
   }
 
-  async begin(isNested: boolean) {
+  async begin(
+    isNested: boolean,
+    transactionLimits?: Partial<TransactionMetrics>,
+  ) {
     // Take a lock only for the top-level of each transaction.
     // Nested transactions are not isolated so if you `Promise.all` on multiple
     // `ctx.runMutation` or `ctx.runQuery` calls, they won't be serialized.
@@ -2159,6 +2162,14 @@ class TransactionManager {
         this._markTransactionDone = resolve;
       });
       this._trackerStack = [new TransactionMetricsTracker(this._limitsConfig)];
+    } else {
+      // Push a nested metrics layer alongside the database's nested
+      // transaction layer. It inherits the parent's accumulated usage (so the
+      // global limit still applies) plus any tighter `transactionLimits`.
+      const parent = this._trackerStack[this._trackerStack.length - 1];
+      if (parent !== undefined) {
+        this._trackerStack.push(parent.createChild(transactionLimits));
+      }
     }
     const convex = getConvexGlobal();
     for (const component of Object.values(convex.components)) {
@@ -2172,49 +2183,25 @@ class TransactionManager {
     return this._waitOnCurrentFunction !== null;
   }
 
-  // Returns a tracker that fans reads/writes out to every tracker currently on
-  // the stack (global plus any nested scoped limits), so each enforces its own
-  // limit. `getTransactionMetrics` reports the innermost (current) scope.
-  // Returns null when not inside a transaction.
+  // The tracker for the currently executing (innermost) function. Reads and
+  // writes are counted against it; nested layers fold back into their parent
+  // on commit/rollback. Returns null when not inside a transaction.
   getMetricsTracker(): TransactionMetricsTracker | null {
     const stack = this._trackerStack;
-    if (stack.length === 0) {
-      return null;
-    }
-    if (stack.length === 1) {
-      return stack[0];
-    }
-    return {
-      trackRead: (docSizeBytes: number) =>
-        stack.forEach((t) => t.trackRead(docSizeBytes)),
-      trackWrite: (docSizeBytes: number) =>
-        stack.forEach((t) => t.trackWrite(docSizeBytes)),
-      trackIndexRange: () => stack.forEach((t) => t.trackIndexRange()),
-      trackScheduledFunction: (argsSizeBytes: number) =>
-        stack.forEach((t) => t.trackScheduledFunction(argsSizeBytes)),
-      getTransactionMetrics: () =>
-        stack[stack.length - 1].getTransactionMetrics(),
-    } as TransactionMetricsTracker;
-  }
-
-  // Push a tighter tracker for a nested call with custom `transactionLimits`.
-  // The nested limits are capped at the global (top-level) limits.
-  pushScopedLimits(transactionLimits: Partial<TransactionMetrics>) {
-    const global = this._trackerStack[0];
-    if (global === undefined) {
-      throw new Error("Cannot scope transaction limits outside a transaction");
-    }
-    this._trackerStack.push(global.createNestedTracker(transactionLimits));
-  }
-
-  popScopedLimits() {
-    this._trackerStack.pop();
+    return stack.length === 0 ? null : stack[stack.length - 1];
   }
 
   commit(isNested: boolean) {
     const convex = getConvexGlobal();
     for (const component of Object.values(convex.components)) {
       component.db.commit();
+    }
+    if (isNested) {
+      const child = this._trackerStack.pop();
+      const parent = this._trackerStack[this._trackerStack.length - 1];
+      if (child !== undefined && parent !== undefined) {
+        child.commitInto(parent);
+      }
     }
     this._endTransaction(isNested);
   }
@@ -2223,6 +2210,13 @@ class TransactionManager {
     const convex = getConvexGlobal();
     for (const component of Object.values(convex.components)) {
       component.db.rollbackWrites();
+    }
+    if (isNested) {
+      const child = this._trackerStack.pop();
+      const parent = this._trackerStack[this._trackerStack.length - 1];
+      if (child !== undefined && parent !== undefined) {
+        child.rollbackInto(parent);
+      }
     }
     this._endTransaction(isNested);
   }
@@ -2438,10 +2432,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       depth: (parentCtx?.depth ?? 0) + 1,
     };
 
-    await transactionManager.begin(isNested);
-    if (transactionLimits !== undefined) {
-      transactionManager.pushScopedLimits(transactionLimits);
-    }
+    await transactionManager.begin(isNested, transactionLimits);
     try {
       const childLock = new NestedLock();
       const invokeRaw = () =>
@@ -2462,10 +2453,6 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     } catch (e) {
       transactionManager.rollback(isNested);
       throw deserializeConvexErrorData(e);
-    } finally {
-      if (transactionLimits !== undefined) {
-        transactionManager.popScopedLimits();
-      }
     }
   };
 
@@ -2496,10 +2483,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       depth: (parentCtx?.depth ?? 0) + 1,
     };
 
-    await transactionManager.begin(isNested);
-    if (transactionLimits !== undefined) {
-      transactionManager.pushScopedLimits(transactionLimits);
-    }
+    await transactionManager.begin(isNested, transactionLimits);
     try {
       const childLock = new NestedLock();
       const invokeRaw = () =>
@@ -2517,9 +2501,6 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     } catch (e) {
       throw deserializeConvexErrorData(e);
     } finally {
-      if (transactionLimits !== undefined) {
-        transactionManager.popScopedLimits();
-      }
       transactionManager.rollback(isNested);
     }
   };

@@ -6,6 +6,10 @@
   `ctx.runMutation` calls (Convex 1.41). The nested call is enforced against
   its own limits, capped at the global transaction limits so they can only be
   lowered, never raised.
+- Bandwidth tracking now mirrors the database's nested-transaction layers: a
+  nested call's usage folds into its parent only when it commits, so the writes
+  of a rolled-back nested `ctx.runMutation` no longer count against the
+  transaction's limits.
 
 ## 0.0.53
 
