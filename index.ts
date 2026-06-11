@@ -2131,16 +2131,13 @@ class TransactionManager {
   // can run mutations in parallel.
   private _waitOnCurrentFunction: Promise<void> | null = null;
   private _markTransactionDone: (() => void) | null = null;
-  // Stack of metrics trackers. The first entry is the top-level (global)
-  // tracker; nested `ctx.runQuery` / `ctx.runMutation` calls with custom
-  // `transactionLimits` push additional, tighter trackers. Reads and writes
-  // are counted against every tracker in the stack, so each enforces its own
-  // limit simultaneously.
-  private _trackerStack: TransactionMetricsTracker[] = [];
-  private _limitsConfig: Partial<TransactionMetrics> | boolean;
+  // Tracks bandwidth usage and enforces limits. Like the per-component
+  // `DatabaseFake`, it owns a stack of nested transaction layers; we drive its
+  // `startTransaction` / `commit` / `rollback` in lockstep with the databases'.
+  private _metricsTracker: TransactionMetricsTracker;
 
   constructor(limitsConfig: Partial<TransactionMetrics> | boolean = false) {
-    this._limitsConfig = limitsConfig;
+    this._metricsTracker = new TransactionMetricsTracker(limitsConfig);
   }
 
   async begin(
@@ -2161,20 +2158,12 @@ class TransactionManager {
       this._waitOnCurrentFunction = new Promise((resolve) => {
         this._markTransactionDone = resolve;
       });
-      this._trackerStack = [new TransactionMetricsTracker(this._limitsConfig)];
-    } else {
-      // Push a nested metrics layer alongside the database's nested
-      // transaction layer. It inherits the parent's accumulated usage (so the
-      // global limit still applies) plus any tighter `transactionLimits`.
-      const parent = this._trackerStack[this._trackerStack.length - 1];
-      if (parent !== undefined) {
-        this._trackerStack.push(parent.createChild(transactionLimits));
-      }
     }
     const convex = getConvexGlobal();
     for (const component of Object.values(convex.components)) {
       component.db.startTransaction();
     }
+    this._metricsTracker.startTransaction(transactionLimits);
   }
 
   // Used to distinguish between mutation and action execution
@@ -2183,12 +2172,9 @@ class TransactionManager {
     return this._waitOnCurrentFunction !== null;
   }
 
-  // The tracker for the currently executing (innermost) function. Reads and
-  // writes are counted against it; nested layers fold back into their parent
-  // on commit/rollback. Returns null when not inside a transaction.
+  // The metrics tracker, or null when not inside a transaction.
   getMetricsTracker(): TransactionMetricsTracker | null {
-    const stack = this._trackerStack;
-    return stack.length === 0 ? null : stack[stack.length - 1];
+    return this._metricsTracker.isActive() ? this._metricsTracker : null;
   }
 
   commit(isNested: boolean) {
@@ -2196,13 +2182,7 @@ class TransactionManager {
     for (const component of Object.values(convex.components)) {
       component.db.commit();
     }
-    if (isNested) {
-      const child = this._trackerStack.pop();
-      const parent = this._trackerStack[this._trackerStack.length - 1];
-      if (child !== undefined && parent !== undefined) {
-        child.commitInto(parent);
-      }
-    }
+    this._metricsTracker.commit();
     this._endTransaction(isNested);
   }
 
@@ -2211,13 +2191,7 @@ class TransactionManager {
     for (const component of Object.values(convex.components)) {
       component.db.rollbackWrites();
     }
-    if (isNested) {
-      const child = this._trackerStack.pop();
-      const parent = this._trackerStack[this._trackerStack.length - 1];
-      if (child !== undefined && parent !== undefined) {
-        child.rollbackInto(parent);
-      }
-    }
+    this._metricsTracker.rollback();
     this._endTransaction(isNested);
   }
 
@@ -2226,7 +2200,6 @@ class TransactionManager {
       throw new Error("Transaction not started");
     }
     if (!isNested) {
-      this._trackerStack = [];
       this._waitOnCurrentFunction = null;
       this._markTransactionDone();
       this._markTransactionDone = null;
