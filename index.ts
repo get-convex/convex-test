@@ -1381,6 +1381,22 @@ function asyncSyscallImpl() {
           maximumRowsRead,
           maximumBytesRead,
         } = args;
+        // Convex only allows a single paginated query (`.paginate()`) per
+        // function execution. Multiple `.paginate()` calls pass in the test
+        // mock but fail at runtime in a deployed function, so always enforce
+        // the rule.
+        const ctx = executionContextStorage.getStore();
+        if (ctx) {
+          ctx.paginatedQueries += 1;
+          if (ctx.paginatedQueries > 1) {
+            throw new Error(
+              "Only a single paginated query (`.paginate()`) is allowed per " +
+                "function execution. Calling `.paginate()` more than once in a " +
+                "single Convex function fails at runtime in a deployed backend. " +
+                "This is a Convex limit: https://docs.convex.dev/database/pagination",
+            );
+          }
+        }
         const { page, isDone, continueCursor, splitCursor, pageStatus } =
           db.paginate({
             query,
@@ -2038,6 +2054,9 @@ type ExecutionContext = {
   componentPath: string;
   udfPath: string;
   depth: number; // 0 = top-level, 1+ = nested
+  // Number of paginated queries (`.paginate()`) executed so far in this
+  // function execution. Convex only allows one per function invocation.
+  paginatedQueries: number;
 };
 
 const executionContextStorage = new AsyncLocalStorage<ExecutionContext>();
@@ -2236,6 +2255,10 @@ export function convexTest<Schema extends GenericSchema>(
  *     - `true` or `{}`: enforce default Convex limits
  *     - `{ bytesRead: 1024 }`: override specific limits
  *
+ * Regardless of `transactionLimits`, a single function execution may only run
+ * one paginated query (`.paginate()`); calling it more than once throws,
+ * matching the behavior of a deployed Convex backend.
+ *
  * @returns an object which is by convention stored in the `t` variable
  *   and which provides methods for exercising your Convex functions.
  *
@@ -2380,6 +2403,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       componentPath: functionPath.componentPath,
       udfPath: functionPath.udfPath,
       depth: (parentCtx?.depth ?? 0) + 1,
+      paginatedQueries: 0,
     };
 
     await transactionManager.begin(isNested);
@@ -2430,6 +2454,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       componentPath: functionPath.componentPath,
       udfPath: functionPath.udfPath,
       depth: (parentCtx?.depth ?? 0) + 1,
+      paginatedQueries: 0,
     };
 
     await transactionManager.begin(isNested);
@@ -2482,6 +2507,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       componentPath: functionPath.componentPath,
       udfPath: functionPath.udfPath,
       depth: (parentCtx?.depth ?? 0) + 1,
+      paginatedQueries: 0,
     };
     return await executionContextStorage.run(childCtx, async () => {
       const requestId = "" + Math.random();
@@ -2788,6 +2814,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         componentPath: getCurrentComponentPath(),
         udfPath: "http",
         depth: 0,
+        paginatedQueries: 0,
       };
       const response = await executionContextStorage.run(httpCtx, () =>
         (
