@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Enforce the Convex runtime rule that a single function execution may only
+  run one paginated query (`.paginate()`). Calling it more than once now
+  throws, catching a production-only failure that previously passed silently
+  in tests.
+
 ## 0.0.53
 
 - Support scheduled functions correctly with or without fake timers,
