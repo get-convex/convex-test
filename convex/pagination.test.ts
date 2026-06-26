@@ -396,3 +396,60 @@ test("paginate with deletes and composite index", async () => {
   expect(page3).toMatchObject([{ author: "jordan", body: "hello4" }]);
   expect(isDone3).toEqual(true);
 });
+
+const paginateOnce = (ctx: any) =>
+  ctx.db.query("messages").paginate({ cursor: null, numItems: 10 });
+
+test("multiple paginate calls in one function execution throw", async () => {
+  const t = convexTest({ schema });
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello" });
+  });
+  await expect(
+    t.query(async (ctx) => {
+      await paginateOnce(ctx);
+      await paginateOnce(ctx);
+    }),
+  ).rejects.toThrow(/single paginated query/);
+});
+
+test("a single paginate call is allowed", async () => {
+  const t = convexTest({ schema });
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello" });
+  });
+  const { page } = await t.query(async (ctx) => paginateOnce(ctx));
+  expect(page).toMatchObject([{ author: "sarah", body: "hello" }]);
+});
+
+test("paginate in separate function executions does not throw", async () => {
+  const t = convexTest({ schema });
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello" });
+  });
+  // Each call is its own function execution, so the per-execution count resets.
+  const a = await t.query(async (ctx) => paginateOnce(ctx));
+  const b = await t.query(async (ctx) => paginateOnce(ctx));
+  expect(a.page.length).toBe(1);
+  expect(b.page.length).toBe(1);
+});
+
+test("paginate once per nested function via runQuery does not throw", async () => {
+  const t = convexTest({ schema });
+  await t.run(async (ctx) => {
+    await ctx.db.insert("messages", { author: "sarah", body: "hello" });
+  });
+  // An action invoking two queries, each paginating once. Each query is its
+  // own function execution, so this is allowed.
+  const result = await t.action(async (ctx) => {
+    const first = await ctx.runQuery(api.pagination.listAll, {
+      paginationOptions: { cursor: null, numItems: 10 },
+    });
+    const second = await ctx.runQuery(api.pagination.listAll, {
+      paginationOptions: { cursor: null, numItems: 10 },
+    });
+    return { first, second };
+  });
+  expect(result.first.page.length).toBe(1);
+  expect(result.second.page.length).toBe(1);
+});

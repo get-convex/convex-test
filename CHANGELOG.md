@@ -10,6 +10,10 @@
   nested call's usage folds into its parent only when it commits, so the writes
   of a rolled-back nested `ctx.runMutation` no longer count against the
   transaction's limits.
+- Enforce the Convex runtime rule that a single function execution may only
+  run one paginated query (`.paginate()`). Calling it more than once now
+  throws, catching a production-only failure that previously passed silently
+  in tests.
 
 ## 0.0.53
 
