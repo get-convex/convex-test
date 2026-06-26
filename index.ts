@@ -2131,13 +2131,15 @@ class TransactionManager {
   // can run mutations in parallel.
   private _waitOnCurrentFunction: Promise<void> | null = null;
   private _markTransactionDone: (() => void) | null = null;
-  // Tracks bandwidth usage and enforces limits. Like the per-component
+  // Tracks bandwidth usage and enforces limits for the current top-level
+  // transaction (null when none is in progress). Like the per-component
   // `DatabaseFake`, it owns a stack of nested transaction layers; we drive its
   // `startTransaction` / `commit` / `rollback` in lockstep with the databases'.
-  private _metricsTracker: TransactionMetricsTracker;
+  private _metricsTracker: TransactionMetricsTracker | null = null;
+  private _limitsConfig: Partial<TransactionMetrics> | boolean;
 
   constructor(limitsConfig: Partial<TransactionMetrics> | boolean = false) {
-    this._metricsTracker = new TransactionMetricsTracker(limitsConfig);
+    this._limitsConfig = limitsConfig;
   }
 
   async begin(
@@ -2158,12 +2160,13 @@ class TransactionManager {
       this._waitOnCurrentFunction = new Promise((resolve) => {
         this._markTransactionDone = resolve;
       });
+      this._metricsTracker = new TransactionMetricsTracker(this._limitsConfig);
     }
     const convex = getConvexGlobal();
     for (const component of Object.values(convex.components)) {
       component.db.startTransaction();
     }
-    this._metricsTracker.startTransaction(transactionLimits);
+    this._metricsTracker?.startTransaction(transactionLimits);
   }
 
   // Used to distinguish between mutation and action execution
@@ -2174,7 +2177,7 @@ class TransactionManager {
 
   // The metrics tracker, or null when not inside a transaction.
   getMetricsTracker(): TransactionMetricsTracker | null {
-    return this._metricsTracker.isActive() ? this._metricsTracker : null;
+    return this._metricsTracker;
   }
 
   commit(isNested: boolean) {
@@ -2182,7 +2185,7 @@ class TransactionManager {
     for (const component of Object.values(convex.components)) {
       component.db.commit();
     }
-    this._metricsTracker.commit();
+    this._metricsTracker?.commit();
     this._endTransaction(isNested);
   }
 
@@ -2191,7 +2194,7 @@ class TransactionManager {
     for (const component of Object.values(convex.components)) {
       component.db.rollbackWrites();
     }
-    this._metricsTracker.rollback();
+    this._metricsTracker?.rollback();
     this._endTransaction(isNested);
   }
 
@@ -2200,6 +2203,7 @@ class TransactionManager {
       throw new Error("Transaction not started");
     }
     if (!isNested) {
+      this._metricsTracker = null;
       this._waitOnCurrentFunction = null;
       this._markTransactionDone();
       this._markTransactionDone = null;

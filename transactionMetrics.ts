@@ -73,11 +73,6 @@ export class TransactionMetricsTracker {
     this._config = config;
   }
 
-  // Whether a transaction is currently in progress (a layer is on the stack).
-  isActive(): boolean {
-    return this._layers.length > 0;
-  }
-
   // Mirrors `DatabaseFake.startTransaction`. Pushes a layer for the new
   // transaction: the top-level layer uses the configured limits; a nested
   // layer inherits its parent's usage plus any tighter `transactionLimits`.
