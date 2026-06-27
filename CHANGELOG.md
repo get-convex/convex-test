@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.0.54
 
 - Support the `transactionLimits` option on nested `ctx.runQuery` /
   `ctx.runMutation` calls (Convex 1.41). The nested call is enforced against
