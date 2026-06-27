@@ -8,6 +8,15 @@ export type TransactionMetrics = {
   scheduledFunctionArgsBytes: number;
 };
 
+// Metrics that track reads. On rollback these are still folded into the
+// parent (the reads happened), unlike the write metrics whose effects are
+// undone.
+const READ_METRIC_KEYS: (keyof TransactionMetrics)[] = [
+  "bytesRead",
+  "documentsRead",
+  "databaseQueries",
+];
+
 const MiB = 1 << 20;
 
 const DEFAULT_TRANSACTION_LIMITS: TransactionMetrics = {
@@ -20,50 +29,102 @@ const DEFAULT_TRANSACTION_LIMITS: TransactionMetrics = {
   scheduledFunctionArgsBytes: 16 * MiB,
 };
 
+function zeroMetrics(): TransactionMetrics {
+  return {
+    bytesRead: 0,
+    bytesWritten: 0,
+    documentsRead: 0,
+    documentsWritten: 0,
+    databaseQueries: 0,
+    functionsScheduled: 0,
+    scheduledFunctionArgsBytes: 0,
+  };
+}
+
+// One (possibly nested) transaction's accumulated usage, its limits, and
+// whether those limits are enforced. Layers form a stack, mirroring the
+// database's nested write layers.
+type MetricsLayer = {
+  metrics: TransactionMetrics;
+  limits: TransactionMetrics;
+  enforce: boolean;
+};
+
+/**
+ * Tracks per-transaction bandwidth usage and enforces limits.
+ *
+ * Like `DatabaseFake`, which owns a stack of nested write layers and exposes
+ * `startTransaction` / `commit` / `rollbackWrites`, this tracker owns a stack
+ * of metrics layers and exposes the matching lifecycle. The
+ * `TransactionManager` drives both in lockstep.
+ *
+ * Reads and writes are counted against the innermost (top) layer. A nested
+ * `ctx.runQuery` / `ctx.runMutation` pushes a child layer that inherits the
+ * parent's accumulated usage (so the global limit still applies to the whole
+ * transaction) plus any tighter `transactionLimits`. On commit the child's
+ * usage folds back into its parent; on rollback only the reads fold back,
+ * since the writes were undone.
+ */
 export class TransactionMetricsTracker {
-  private _metrics: TransactionMetrics;
-  private _limits: TransactionMetrics;
-  private _enforceLimits: boolean;
+  private _config: Partial<TransactionMetrics> | boolean;
+  private _layers: MetricsLayer[] = [];
 
-  constructor(limits: Partial<TransactionMetrics> | boolean) {
-    this._metrics = {
-      bytesRead: 0,
-      bytesWritten: 0,
-      documentsRead: 0,
-      documentsWritten: 0,
-      databaseQueries: 0,
-      functionsScheduled: 0,
-      scheduledFunctionArgsBytes: 0,
-    };
+  constructor(config: Partial<TransactionMetrics> | boolean = false) {
+    this._config = config;
+  }
 
-    if (limits === false) {
-      this._enforceLimits = false;
-      this._limits = DEFAULT_TRANSACTION_LIMITS;
-    } else if (limits === true) {
-      this._enforceLimits = true;
-      this._limits = DEFAULT_TRANSACTION_LIMITS;
-    } else {
-      this._enforceLimits = true;
-      this._limits = {
-        ...DEFAULT_TRANSACTION_LIMITS,
-        ...limits,
-      };
+  // Mirrors `DatabaseFake.startTransaction`. Pushes a layer for the new
+  // transaction: the top-level layer uses the configured limits; a nested
+  // layer inherits its parent's usage plus any tighter `transactionLimits`.
+  startTransaction(transactionLimits?: Partial<TransactionMetrics>) {
+    const parent = this._current();
+    this._layers.push(
+      parent === undefined
+        ? this._rootLayer()
+        : this._childLayer(parent, transactionLimits),
+    );
+  }
+
+  // Mirrors `DatabaseFake.commit`. Pops the layer and folds all of its usage
+  // into the parent. Folding into nothing at the top level just ends tracking.
+  commit() {
+    const child = this._pop();
+    const parent = this._current();
+    if (parent !== undefined) {
+      parent.metrics = { ...child.metrics };
+    }
+  }
+
+  // Mirrors `DatabaseFake.rollbackWrites`. Pops the layer, discarding its
+  // writes. Reads still fold into the parent (they happened), but the writes
+  // were undone so they don't count against the transaction.
+  rollback() {
+    const child = this._pop();
+    const parent = this._current();
+    if (parent !== undefined) {
+      for (const key of READ_METRIC_KEYS) {
+        parent.metrics[key] = child.metrics[key];
+      }
     }
   }
 
   trackRead(docSizeBytes: number) {
-    this._metrics.bytesRead += docSizeBytes;
-    this._metrics.documentsRead += 1;
-    if (this._enforceLimits) {
-      if (this._metrics.bytesRead > this._limits.bytesRead) {
+    const layer = this._current();
+    if (layer === undefined) {
+      return;
+    }
+    layer.metrics.bytesRead += docSizeBytes;
+    layer.metrics.documentsRead += 1;
+    if (layer.enforce) {
+      if (layer.metrics.bytesRead > layer.limits.bytesRead) {
         throw new Error(
-          `Read too much data in a single function execution (limit: ${this._limits.bytesRead} bytes). ` +
+          `Read too much data in a single function execution (limit: ${layer.limits.bytesRead} bytes). ` +
             `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
         );
       }
-      if (this._metrics.documentsRead > this._limits.documentsRead) {
+      if (layer.metrics.documentsRead > layer.limits.documentsRead) {
         throw new Error(
-          `Scanned too many documents in a single function execution (limit: ${this._limits.documentsRead}). ` +
+          `Scanned too many documents in a single function execution (limit: ${layer.limits.documentsRead}). ` +
             `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
         );
       }
@@ -71,18 +132,22 @@ export class TransactionMetricsTracker {
   }
 
   trackWrite(docSizeBytes: number) {
-    this._metrics.bytesWritten += docSizeBytes;
-    this._metrics.documentsWritten += 1;
-    if (this._enforceLimits) {
-      if (this._metrics.bytesWritten > this._limits.bytesWritten) {
+    const layer = this._current();
+    if (layer === undefined) {
+      return;
+    }
+    layer.metrics.bytesWritten += docSizeBytes;
+    layer.metrics.documentsWritten += 1;
+    if (layer.enforce) {
+      if (layer.metrics.bytesWritten > layer.limits.bytesWritten) {
         throw new Error(
-          `Wrote too much data in a single function execution (limit: ${this._limits.bytesWritten} bytes). ` +
+          `Wrote too much data in a single function execution (limit: ${layer.limits.bytesWritten} bytes). ` +
             `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
         );
       }
-      if (this._metrics.documentsWritten > this._limits.documentsWritten) {
+      if (layer.metrics.documentsWritten > layer.limits.documentsWritten) {
         throw new Error(
-          `Wrote too many documents in a single function execution (limit: ${this._limits.documentsWritten}). ` +
+          `Wrote too many documents in a single function execution (limit: ${layer.limits.documentsWritten}). ` +
             `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
         );
       }
@@ -90,11 +155,15 @@ export class TransactionMetricsTracker {
   }
 
   trackIndexRange() {
-    this._metrics.databaseQueries += 1;
-    if (this._enforceLimits) {
-      if (this._metrics.databaseQueries > this._limits.databaseQueries) {
+    const layer = this._current();
+    if (layer === undefined) {
+      return;
+    }
+    layer.metrics.databaseQueries += 1;
+    if (layer.enforce) {
+      if (layer.metrics.databaseQueries > layer.limits.databaseQueries) {
         throw new Error(
-          `Too many index ranges read in a single function execution (limit: ${this._limits.databaseQueries}). ` +
+          `Too many index ranges read in a single function execution (limit: ${layer.limits.databaseQueries}). ` +
             `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
         );
       }
@@ -102,21 +171,25 @@ export class TransactionMetricsTracker {
   }
 
   trackScheduledFunction(argsSizeBytes: number) {
-    this._metrics.functionsScheduled += 1;
-    this._metrics.scheduledFunctionArgsBytes += argsSizeBytes;
-    if (this._enforceLimits) {
-      if (this._metrics.functionsScheduled > this._limits.functionsScheduled) {
+    const layer = this._current();
+    if (layer === undefined) {
+      return;
+    }
+    layer.metrics.functionsScheduled += 1;
+    layer.metrics.scheduledFunctionArgsBytes += argsSizeBytes;
+    if (layer.enforce) {
+      if (layer.metrics.functionsScheduled > layer.limits.functionsScheduled) {
         throw new Error(
-          `Scheduled too many functions in a single function execution (limit: ${this._limits.functionsScheduled}). ` +
+          `Scheduled too many functions in a single function execution (limit: ${layer.limits.functionsScheduled}). ` +
             `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
         );
       }
       if (
-        this._metrics.scheduledFunctionArgsBytes >
-        this._limits.scheduledFunctionArgsBytes
+        layer.metrics.scheduledFunctionArgsBytes >
+        layer.limits.scheduledFunctionArgsBytes
       ) {
         throw new Error(
-          `Scheduled function arguments too large in a single function execution (limit: ${this._limits.scheduledFunctionArgsBytes} bytes). ` +
+          `Scheduled function arguments too large in a single function execution (limit: ${layer.limits.scheduledFunctionArgsBytes} bytes). ` +
             `This is a Convex limit: https://docs.convex.dev/production/state/limits`,
         );
       }
@@ -124,39 +197,104 @@ export class TransactionMetricsTracker {
   }
 
   getTransactionMetrics() {
+    const layer = this._current();
+    if (layer === undefined) {
+      throw new Error("Transaction not started");
+    }
+    const { metrics, limits } = layer;
     return {
       bytesRead: {
-        used: this._metrics.bytesRead,
-        remaining: this._limits.bytesRead - this._metrics.bytesRead,
+        used: metrics.bytesRead,
+        remaining: limits.bytesRead - metrics.bytesRead,
       },
       bytesWritten: {
-        used: this._metrics.bytesWritten,
-        remaining: this._limits.bytesWritten - this._metrics.bytesWritten,
+        used: metrics.bytesWritten,
+        remaining: limits.bytesWritten - metrics.bytesWritten,
       },
       databaseQueries: {
-        used: this._metrics.databaseQueries,
-        remaining: this._limits.databaseQueries - this._metrics.databaseQueries,
+        used: metrics.databaseQueries,
+        remaining: limits.databaseQueries - metrics.databaseQueries,
       },
       documentsRead: {
-        used: this._metrics.documentsRead,
-        remaining: this._limits.documentsRead - this._metrics.documentsRead,
+        used: metrics.documentsRead,
+        remaining: limits.documentsRead - metrics.documentsRead,
       },
       documentsWritten: {
-        used: this._metrics.documentsWritten,
-        remaining:
-          this._limits.documentsWritten - this._metrics.documentsWritten,
+        used: metrics.documentsWritten,
+        remaining: limits.documentsWritten - metrics.documentsWritten,
       },
       functionsScheduled: {
-        used: this._metrics.functionsScheduled,
-        remaining:
-          this._limits.functionsScheduled - this._metrics.functionsScheduled,
+        used: metrics.functionsScheduled,
+        remaining: limits.functionsScheduled - metrics.functionsScheduled,
       },
       scheduledFunctionArgsBytes: {
-        used: this._metrics.scheduledFunctionArgsBytes,
+        used: metrics.scheduledFunctionArgsBytes,
         remaining:
-          this._limits.scheduledFunctionArgsBytes -
-          this._metrics.scheduledFunctionArgsBytes,
+          limits.scheduledFunctionArgsBytes -
+          metrics.scheduledFunctionArgsBytes,
       },
+    };
+  }
+
+  private _current(): MetricsLayer | undefined {
+    return this._layers[this._layers.length - 1];
+  }
+
+  private _pop(): MetricsLayer {
+    const layer = this._layers.pop();
+    if (layer === undefined) {
+      throw new Error("Transaction not started");
+    }
+    return layer;
+  }
+
+  private _rootLayer(): MetricsLayer {
+    if (this._config === false) {
+      return {
+        metrics: zeroMetrics(),
+        limits: { ...DEFAULT_TRANSACTION_LIMITS },
+        enforce: false,
+      };
+    }
+    if (this._config === true) {
+      return {
+        metrics: zeroMetrics(),
+        limits: { ...DEFAULT_TRANSACTION_LIMITS },
+        enforce: true,
+      };
+    }
+    return {
+      metrics: zeroMetrics(),
+      limits: { ...DEFAULT_TRANSACTION_LIMITS, ...this._config },
+      enforce: true,
+    };
+  }
+
+  private _childLayer(
+    parent: MetricsLayer,
+    transactionLimits?: Partial<TransactionMetrics>,
+  ): MetricsLayer {
+    const limits = { ...parent.limits };
+    if (transactionLimits !== undefined) {
+      for (const key of Object.keys(limits) as (keyof TransactionMetrics)[]) {
+        const requested = transactionLimits[key];
+        if (requested !== undefined) {
+          // Cap at the parent limit so a nested call can only lower the budget,
+          // never raise it; offset by the parent's usage so the cap applies to
+          // the nested call's own consumption.
+          limits[key] = Math.min(
+            parent.limits[key],
+            parent.metrics[key] + requested,
+          );
+        }
+      }
+    }
+    return {
+      // Start from the parent's accumulated usage so the global limit applies
+      // to the whole transaction, not just this nested call.
+      metrics: { ...parent.metrics },
+      limits,
+      enforce: parent.enforce || transactionLimits !== undefined,
     };
   }
 }

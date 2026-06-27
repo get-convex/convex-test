@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Support the `transactionLimits` option on nested `ctx.runQuery` /
+  `ctx.runMutation` calls (Convex 1.41). The nested call is enforced against
+  its own limits, capped at the global transaction limits so they can only be
+  lowered, never raised.
+- Bandwidth tracking now mirrors the database's nested-transaction layers: a
+  nested call's usage folds into its parent only when it commits, so the writes
+  of a rolled-back nested `ctx.runMutation` no longer count against the
+  transaction's limits.
 - Enforce the Convex runtime rule that a single function execution may only
   run one paginated query (`.paginate()`). Calling it more than once now
   throws, catching a production-only failure that previously passed silently
