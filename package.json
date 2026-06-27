@@ -46,7 +46,7 @@
     "@types/node": "20.19.39",
     "@typescript-eslint/eslint-plugin": "8.58.2",
     "@typescript-eslint/parser": "8.58.2",
-    "@vitest/coverage-v8": "1.6.1",
+    "@vitest/coverage-v8": "4.1.9",
     "convex": "1.41.0",
     "eslint": "9.39.4",
     "globals": "17.5.0",
