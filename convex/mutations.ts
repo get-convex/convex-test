@@ -1,10 +1,4 @@
-import { convexToJson, jsonToConvex, v } from "convex/values";
-import {
-  FunctionReference,
-  FunctionReturnType,
-  getFunctionAddress,
-  OptionalRestArgs,
-} from "convex/server";
+import { v } from "convex/values";
 import { mutation, query, internalQuery } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 
@@ -164,29 +158,11 @@ export const snapshotQueryDoesNotSeePendingWrites = mutation({
       internal.mutations.countMessages,
     );
     // Snapshot query does NOT see the pending write
-    const withoutWrites = await runSnapshotQuery(
+    const withoutWrites: number = await ctx.runQuery(
       internal.mutations.countMessages,
+      {},
+      { useStaleSnapshot: true },
     );
     return { withWrites, withoutWrites };
   },
 });
-
-// Snapshot Query isn't part of the public `convex` API surface yet,
-// so call the underlying syscall directly.
-async function runSnapshotQuery<
-  Query extends FunctionReference<"query", "public" | "internal">,
->(
-  query: Query,
-  ...args: OptionalRestArgs<Query>
-): Promise<FunctionReturnType<Query>> {
-  const syscallArgs = {
-    udfType: "snapshotQuery",
-    args: convexToJson(args[0] ?? {}),
-    ...getFunctionAddress(query),
-  };
-  const resultStr = await (globalThis as any).Convex.asyncSyscall(
-    "1.0/runUdf",
-    JSON.stringify(syscallArgs),
-  );
-  return jsonToConvex(JSON.parse(resultStr)) as FunctionReturnType<Query>;
-}
