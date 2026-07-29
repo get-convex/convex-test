@@ -377,3 +377,44 @@ describe("with real timers", () => {
     expect(messages).toMatchObject([{ body: "real-timer", author: "AI" }]);
   });
 });
+
+describe("scheduled under real timers, drained under fake timers", () => {
+  // Functions scheduled while real timers are active sit on real
+  // setTimeouts, which advancing fake timers cannot fire. The JSDoc for
+  // finishAllScheduledFunctions only requires enabling fake timers for the
+  // drain itself, so this pattern must still work.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("finishAllScheduledFunctions drains functions scheduled under real timers", async () => {
+    const t = convexTest(schema);
+    // Scheduling happens while real timers are active.
+    await t.mutation(api.scheduler.childSchedulesAdd, { body: "outbox" });
+
+    vi.useFakeTimers();
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    vi.useRealTimers();
+
+    const messages = await t.query(internal.scheduler.list);
+    expect(messages).toHaveLength(1);
+  });
+
+  test("finishAllScheduledFunctions skips far-future functions scheduled under real timers", async () => {
+    const t = convexTest(schema);
+    // A real 60s timer can never fire during the test, and fake timers
+    // can't force it. finishAllScheduledFunctions should return without
+    // running it rather than hanging or throwing.
+    await t.mutation(api.scheduler.mutationSchedulingAction, {
+      delayMs: 60000,
+      body: "never runs",
+    });
+
+    vi.useFakeTimers();
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    vi.useRealTimers();
+
+    const jobs = await t.query(internal.scheduler.jobs);
+    expect(jobs).toMatchObject([{ state: { kind: "pending" } }]);
+  });
+});
