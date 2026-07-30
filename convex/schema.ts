@@ -2,6 +2,13 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  commitTs: defineTable({
+    commitTs: v.optional(v.commitTs()),
+    patchedCommitTs: v.optional(v.commitTs()),
+    replacedCommitTs: v.optional(v.commitTs()),
+    nested: v.optional(v.object({ commitTs: v.commitTs() })),
+    other: v.optional(v.string()),
+  }).index("by_commit_ts", ["commitTs"]),
   messages: defineTable({
     author: v.string(),
     body: v.string(),

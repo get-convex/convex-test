@@ -31,6 +31,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         null,
         Name
       >;
+      addWithCommitTs: FunctionReference<
+        "mutation",
+        "internal",
+        { name: string },
+        any,
+        Name
+      >;
       count: FunctionReference<
         "query",
         "internal",
@@ -50,6 +57,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { names: Array<string> },
         Array<number>,
+        Name
+      >;
+      getCommitTs: FunctionReference<
+        "query",
+        "internal",
+        { name: string },
+        any,
         Name
       >;
       getIdentityName: FunctionReference<"query", "internal", {}, any, Name>;

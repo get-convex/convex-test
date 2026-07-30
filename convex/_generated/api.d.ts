@@ -12,6 +12,7 @@ import type * as actions from "../actions.js";
 import type * as argumentsValidation from "../argumentsValidation.js";
 import type * as auditLogging from "../auditLogging.js";
 import type * as authentication from "../authentication.js";
+import type * as commitTs from "../commitTs.js";
 import type * as component from "../component.js";
 import type * as convexError from "../convexError.js";
 import type * as explicitTableNames from "../explicitTableNames.js";
@@ -41,6 +42,7 @@ declare const fullApi: ApiFromModules<{
   argumentsValidation: typeof argumentsValidation;
   auditLogging: typeof auditLogging;
   authentication: typeof authentication;
+  commitTs: typeof commitTs;
   component: typeof component;
   convexError: typeof convexError;
   explicitTableNames: typeof explicitTableNames;

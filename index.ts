@@ -30,6 +30,7 @@ import {
   queryGeneric,
 } from "convex/server";
 import {
+  CommitTsPlaceholder,
   GenericId,
   JSONValue,
   Value,
@@ -396,7 +397,7 @@ class DatabaseFake {
     }
   }
 
-  commit() {
+  commit(commitTs: bigint | null = null) {
     const lastWrites = this._writes.pop();
     if (!lastWrites) {
       throw new Error("Transaction already committed or rolled back");
@@ -407,7 +408,8 @@ class DatabaseFake {
         if (write === null) {
           delete this._documents[_id];
         } else {
-          this._documents[_id] = write;
+          this._documents[_id] =
+            commitTs === null ? write : resolveCommittedValues(write, commitTs);
         }
       } else {
         this._addWrite(_id, write);
@@ -441,7 +443,9 @@ class DatabaseFake {
     if (validator === undefined) {
       return;
     }
-    validateValidator(validator, doc);
+    // Validate the pre-commit view, like the backend does, so an unresolved
+    // commit timestamp is checked as the int64 it will become.
+    validateValidator(validator, resolvePendingValues(doc));
   }
 
   startQuery(query: SerializedQuery) {
@@ -888,6 +892,53 @@ function isSimpleObject(value: unknown) {
   return isObject && isSimple;
 }
 
+// Commit timestamp placeholders are resolved to `i64::MAX` before commit.
+const MAX_COMMIT_TS = 2n ** 63n - 1n;
+
+function hasPendingValues(value: Value): boolean {
+  if (value instanceof CommitTsPlaceholder) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.some(hasPendingValues);
+  }
+  if (value !== null && value !== undefined && isSimpleObject(value)) {
+    return Object.values(value).some(hasPendingValues);
+  }
+  return false;
+}
+
+// The value as the transaction sees it before committing.
+function resolvePendingValues(value: Value): Value {
+  return substituteCommitTs(value, MAX_COMMIT_TS);
+}
+
+// The value as it is committed.
+function resolveCommittedValues<T extends Value>(
+  value: T,
+  commitTs: bigint,
+): T {
+  return substituteCommitTs(value, commitTs);
+}
+
+function substituteCommitTs<T extends Value>(value: T, commitTs: bigint): T {
+  if (!hasPendingValues(value)) {
+    return value;
+  }
+  if (value instanceof CommitTsPlaceholder) {
+    return commitTs as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => substituteCommitTs(v, commitTs)) as T;
+  }
+  return Object.fromEntries(
+    Object.entries(value as object).map(([k, v]) => [
+      k,
+      substituteCommitTs(v, commitTs),
+    ]),
+  ) as T;
+}
+
 function evaluateFieldPath(fieldPath: string, document: any) {
   const pathParts = fieldPath.split(".");
   let result: Value | undefined = document;
@@ -897,7 +948,7 @@ function evaluateFieldPath(fieldPath: string, document: any) {
         ? (result as any)[p]
         : undefined;
   }
-  return result;
+  return result === undefined ? undefined : resolvePendingValues(result);
 }
 
 function evaluateFilter(
@@ -987,7 +1038,7 @@ function evaluateFilter(
     return evaluateFieldPath(filter.$field, document);
   }
   if (filter.$literal !== undefined) {
-    return evaluateValue(filter.$literal);
+    return evaluateQueryValue(filter.$literal);
   }
   throw new Error(`not implemented: ${JSON.stringify(filter)}`);
 }
@@ -997,7 +1048,7 @@ function evaluateRangeFilter(
   expr: SerializedRangeExpression,
 ) {
   const result = evaluateFieldPath(expr.fieldPath, document);
-  const value = evaluateValue(expr.value);
+  const value = evaluateQueryValue(expr.value);
   switch (expr.type) {
     case "Eq":
       return compareValues(result, value) === 0;
@@ -1012,11 +1063,20 @@ function evaluateRangeFilter(
   }
 }
 
+// A value used as a written field.
 function evaluateValue(value: JSONValue) {
   if (typeof value === "object" && value !== null && "$undefined" in value) {
     return undefined;
   }
   return jsonToConvex(value);
+}
+
+// A value used as a query bound or literal.
+function evaluateQueryValue(value: JSONValue) {
+  const evaluatedValue = evaluateValue(value);
+  return evaluatedValue === undefined
+    ? undefined
+    : resolvePendingValues(evaluatedValue);
 }
 
 function evaluateSearchFilter(
@@ -1026,7 +1086,7 @@ function evaluateSearchFilter(
   const result = evaluateFieldPath(filter.fieldPath, document);
   switch (filter.type) {
     case "Eq":
-      return compareValues(result, evaluateValue(filter.value)) === 0;
+      return compareValues(result, evaluateQueryValue(filter.value)) === 0;
     case "Search": {
       const queryTerms = filter.value
         .toLowerCase()
@@ -1157,6 +1217,7 @@ type ValidatorJSON =
     }
   | { type: "number" }
   | { type: "bigint" }
+  | { type: "commitTs" }
   | { type: "boolean" }
   | { type: "string" }
   | { type: "bytes" }
@@ -1190,6 +1251,17 @@ function validateValidator(validator: ValidatorJSON, value: any) {
       if (typeof value !== "bigint") {
         throw new Error(
           `Validator error: Expected \`bigint\`, got \`${value}\``,
+        );
+      }
+      return;
+    }
+    case "commitTs": {
+      if (
+        typeof value !== "bigint" &&
+        !(value instanceof CommitTsPlaceholder)
+      ) {
+        throw new Error(
+          `Validator error: Expected \`v.commitTs()\`, got \`${value}\``,
         );
       }
       return;
@@ -1587,6 +1659,13 @@ function asyncSyscallImpl() {
         const functionPath = getFunctionPathFromAddress(functionAddress);
         // Convert args to a Convex value before storing them or passing them to the function
         const parsedArgs = jsonToConvex(fnArgs);
+        // Scheduled arguments cannot contain pending values
+        if (hasPendingValues(parsedArgs)) {
+          throw new Error(
+            `Invalid arguments for "${functionPath.udfPath}": a scheduled ` +
+              `function cannot take an unresolved placeholder value.`,
+          );
+        }
 
         tracker?.trackScheduledFunction(getConvexSize(parsedArgs));
 
@@ -2156,6 +2235,8 @@ class TransactionManager {
   // `startTransaction` / `commit` / `rollback` in lockstep with the databases'.
   private _metricsTracker: TransactionMetricsTracker | null = null;
   private _limitsConfig: Partial<TransactionMetrics> | boolean;
+  // The last commit timestamp handed out. Strictly increases across transactions.
+  private _lastCommitTs: bigint = 0n;
 
   constructor(limitsConfig: Partial<TransactionMetrics> | boolean = false) {
     this._limitsConfig = limitsConfig;
@@ -2199,13 +2280,24 @@ class TransactionManager {
     return this._metricsTracker;
   }
 
-  commit(isNested: boolean) {
+  // Returns the transaction's commit timestamp, or null for a nested commit,
+  // whose writes stay pending until the outermost transaction commits.
+  commit(isNested: boolean): bigint | null {
+    let commitTs: bigint | null = null;
+    if (!isNested) {
+      const nowNanos = BigInt(Date.now()) * 1_000_000n;
+      // Bump by one if the clock has not advanced since the last commit.
+      commitTs =
+        nowNanos > this._lastCommitTs ? nowNanos : this._lastCommitTs + 1n;
+      this._lastCommitTs = commitTs;
+    }
     const convex = getConvexGlobal();
     for (const component of Object.values(convex.components)) {
-      component.db.commit();
+      component.db.commit(commitTs);
     }
     this._metricsTracker?.commit();
     this._endTransaction(isNested);
+    return commitTs;
   }
 
   rollback(isNested: boolean) {
@@ -2449,8 +2541,11 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
 
       const rawResult = await nestedTxStorage.run(childLock, invokeInContext);
 
-      transactionManager.commit(isNested);
-      return jsonToConvex(JSON.parse(rawResult)) as T;
+      const commitTs = transactionManager.commit(isNested);
+      const result = jsonToConvex(JSON.parse(rawResult));
+      return commitTs === null
+        ? (result as T)
+        : (resolveCommittedValues(result, commitTs) as T);
     } catch (e) {
       transactionManager.rollback(isNested);
       throw deserializeConvexErrorData(e);
@@ -2499,7 +2594,14 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
 
       const rawResult = await nestedTxStorage.run(childLock, invokeInContext);
 
-      return jsonToConvex(JSON.parse(rawResult)) as T;
+      const result = jsonToConvex(JSON.parse(rawResult));
+      if (!isNested && hasPendingValues(result)) {
+        throw new Error(
+          `Function ${functionPath.udfPath} return value invalid: queries ` +
+            `cannot return an unresolved placeholder value.`,
+        );
+      }
+      return result as T;
     } catch (e) {
       throw deserializeConvexErrorData(e);
     } finally {
@@ -2573,7 +2675,12 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       }
       try {
         const resolved = await resolveFunction(functionPath, "query");
-        validateValidator(resolved.args, args ?? {});
+        validateFunctionArgs(
+          resolved.args,
+          args ?? {},
+          resolved.functionPath,
+          isNested,
+        );
 
         const result = await runQueryWithHandler(
           resolved.handler,
@@ -2610,7 +2717,13 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       const stashed = transactionManager.stashWrites();
       try {
         const resolved = await resolveFunction(functionPath, "query");
-        validateValidator(resolved.args, args ?? {});
+        validateFunctionArgs(
+          resolved.args,
+          args ?? {},
+          resolved.functionPath,
+          // Only reachable from inside a mutation.
+          /* allowPendingValues */ true,
+        );
 
         const result = await runQueryWithHandler(
           resolved.handler,
@@ -2648,7 +2761,12 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       }
       try {
         const resolved = await resolveFunction(functionPath, "mutation");
-        validateValidator(resolved.args, args ?? {});
+        validateFunctionArgs(
+          resolved.args,
+          args ?? {},
+          resolved.functionPath,
+          isNested,
+        );
 
         const result = await runMutationWithHandler(
           resolved.handler,
@@ -2674,7 +2792,13 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
 
     actionFromPath: async (functionPath: FunctionPath, args: any) => {
       const resolved = await resolveFunction(functionPath, "action");
-      validateValidator(resolved.args, args ?? {});
+      // An action runs outside any transaction.
+      validateFunctionArgs(
+        resolved.args,
+        args ?? {},
+        resolved.functionPath,
+        /* allowPendingValues */ false,
+      );
 
       const result = await runActionWithHandler(
         resolved.handler,
@@ -2935,6 +3059,22 @@ function parseArgs(
   return args;
 }
 
+function validateFunctionArgs(
+  argsValidator: ValidatorJSON,
+  args: any,
+  functionPath: FunctionPath,
+  allowPendingValues: boolean,
+) {
+  if (!allowPendingValues && hasPendingValues(args)) {
+    throw new Error(
+      `Invalid arguments for "${functionPath.udfPath}": an unresolved ` +
+        `placeholder value can only be passed to a query or mutation ` +
+        `called from a mutation`,
+    );
+  }
+  validateValidator(argsValidator, resolvePendingValues(args));
+}
+
 function validateReturnValue(
   returnsValidator: ValidatorJSON | null,
   result: any,
@@ -2943,7 +3083,7 @@ function validateReturnValue(
 ) {
   if (returnsValidator !== null) {
     try {
-      validateValidator(returnsValidator, result);
+      validateValidator(returnsValidator, resolvePendingValues(result));
     } catch (e) {
       throw new Error(
         `Return value validation failed for ${functionType} "${functionPath.udfPath}":\n${(e as Error).message}`,

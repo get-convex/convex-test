@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Support `db.vars.commitTs` and `v.commitTs()`.
+
 ## 0.0.54
 
 - Support the `transactionLimits` option on nested `ctx.runQuery` /

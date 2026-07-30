@@ -115,3 +115,28 @@ export const metadata = query({
     return await ctx.meta.getFunctionMetadata();
   },
 });
+
+// Writes a row carrying the transaction's commit timestamp, so a caller can
+// check that the app and the component share one timestamp.
+export const addWithCommitTs = mutation({
+  args: { name: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("counters", {
+      name: args.name,
+      value: 0,
+      shard: 0,
+      commitTs: ctx.db.vars.commitTs,
+    });
+  },
+});
+
+export const getCommitTs = query({
+  args: { name: v.string() },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db
+      .query("counters")
+      .withIndex("name", (q) => q.eq("name", args.name).eq("shard", 0))
+      .unique();
+    return doc!.commitTs ?? null;
+  },
+});
