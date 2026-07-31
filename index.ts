@@ -1943,6 +1943,12 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    *
    * Use in combination with `vi.useFakeTimers()` to test scheduled functions.
    *
+   * Fake timers only need to be active for this call: functions scheduled
+   * while real timers were active are drained too, as long as their
+   * scheduled time has already passed on the real clock (e.g. scheduled
+   * with `runAfter(0)`). Ones whose real-clock time hasn't arrived are
+   * skipped, since they cannot be forced to fire by advancing fake timers.
+   *
    * @param advanceTimers Function that advances timers,
    *   usually `vi.runAllTimers`. This function will be called in a loop
    *   with `finishInProgressScheduledFunctions()`.
