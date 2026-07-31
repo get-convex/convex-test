@@ -253,3 +253,18 @@ export const parallelSequentialComponentQueries = internalQuery({
     return { count1a, count1b, count2a, count2b };
   },
 });
+
+// Writes in both the app and the component within one transaction, so both rows
+// must land on the same commit timestamp.
+export const writeCommitTsAcrossComponents = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const id = await ctx.db.insert("commitTs", {
+      commitTs: ctx.db.vars.commitTs,
+    });
+    await ctx.runMutation(components.counter.public.addWithCommitTs, {
+      name: "commitTs",
+    });
+    return id;
+  },
+});
