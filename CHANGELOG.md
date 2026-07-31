@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.0.55-alpha.0
 
 - Support `db.vars.commitTs` and `v.commitTs()`.
 
