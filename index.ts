@@ -1685,8 +1685,10 @@ function asyncSyscallImpl() {
         // the scheduled function starts as a fresh top-level execution
         // rather than inheriting a stale parent lock.
         nestedTxStorage.exit(() => {
+          scheduler.timerScheduled();
           setTimeout(
             () => {
+              scheduler.timerFired();
               // Scheduled functions run without auth context, even if
               // they were scheduled from an authenticated function.
               const promise = convexGlobalStorage
@@ -2020,6 +2022,12 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    *
    * Use in combination with `vi.useFakeTimers()` to test scheduled functions.
    *
+   * Fake timers only need to be active for this call: functions scheduled
+   * while real timers were active are drained too, as long as their
+   * scheduled time has already passed on the real clock (e.g. scheduled
+   * with `runAfter(0)`). Ones whose real-clock time hasn't arrived are
+   * skipped, since they cannot be forced to fire by advancing fake timers.
+   *
    * @param advanceTimers Function that advances timers,
    *   usually `vi.runAllTimers`. This function will be called in a loop
    *   with `finishInProgressScheduledFunctions()`.
@@ -2201,6 +2209,24 @@ function ensureGlobalProxy() {
 // settled.
 class Scheduler {
   private _inFlight: Set<Promise<void>> = new Set();
+  // Number of setTimeouts registered for scheduled functions that haven't
+  // fired yet. Timers registered while real timers were active cannot be
+  // fired by advancing fake timers — they need real event loop turns —
+  // so `finishAllScheduledFunctions` uses this to know whether to keep
+  // yielding instead of returning early.
+  private _pendingTimerCount = 0;
+
+  timerScheduled() {
+    this._pendingTimerCount += 1;
+  }
+
+  timerFired() {
+    this._pendingTimerCount -= 1;
+  }
+
+  anyPendingTimers(): boolean {
+    return this._pendingTimerCount > 0;
+  }
 
   add(promise: Promise<void>) {
     this._inFlight.add(promise);
@@ -2484,6 +2510,29 @@ export function convexTest<Schema extends GenericSchema>(
       convexGlobal.components[componentPath] = componentInfo;
     },
   } as any;
+}
+
+// Yield through a full event loop iteration so that dynamic import()
+// calls (used to load function modules) can resolve. Using MessageChannel
+// to post to the macrotask queue — it is not faked by vitest and not
+// removed by edge-runtime.
+function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((r) => {
+    const { port1, port2 } = new MessageChannel();
+    port2.onmessage = () => r();
+    port1.postMessage(null);
+  });
+}
+
+// The real setTimeout, captured before any test can install fake timers.
+// MessagePort messages can be delivered without passing through the event
+// loop's timers phase, so `yieldToEventLoop` does not guarantee that
+// expired real timers fire. Awaiting a real 0ms timeout does: all timers
+// that expired earlier fire first.
+const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+
+function yieldThroughRealTimers(): Promise<void> {
+  return new Promise<void>((r) => realSetTimeout(r, 0));
 }
 
 function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
@@ -3001,12 +3050,27 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       // each function.
       // Stop after a fixed number of iterations to avoid infinite loops.
       const { scheduler } = getConvexGlobal();
+      // A function scheduled while real timers were active sits on a real
+      // setTimeout that advanceTimers (fake timers) cannot fire. If it has
+      // already expired it fires within a few real event loop turns, so
+      // yield and re-check before concluding there is nothing left to run.
+      // If it still hasn't fired after this many consecutive idle turns,
+      // its scheduled time hasn't arrived on the real clock and it can
+      // never run during this test, so it is skipped, matching the
+      // behavior before the in-memory scheduler existed.
+      const maxIdleTurns = 20;
+      let idleTurns = 0;
       for (let i = 0; i < maxIterations; i++) {
         advanceTimers();
-        // If no scheduled work fired, there's nothing left to wait for.
         if (!scheduler.anyFunctionsRunning()) {
-          return;
+          if (!scheduler.anyPendingTimers() || idleTurns >= maxIdleTurns) {
+            return;
+          }
+          idleTurns += 1;
+          await yieldThroughRealTimers();
+          continue;
         }
+        idleTurns = 0;
         // Actions may use setTimeout internally (e.g. for delays).
         // Keep advancing timers while waiting so those can resolve.
         let done = false;
@@ -3016,15 +3080,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         const maxPumps = 10000;
         for (let pump = 0; pump < maxPumps && !done; pump++) {
           advanceTimers();
-          // Yield through a full event loop iteration so that dynamic
-          // import() calls (used to load function modules) can resolve.
-          // Using MessageChannel to post to the macrotask queue —
-          // it is not faked by vitest and not removed by edge-runtime.
-          await new Promise<void>((r) => {
-            const { port1, port2 } = new MessageChannel();
-            port2.onmessage = () => r();
-            port1.postMessage(null);
-          });
+          await yieldToEventLoop();
           if (pump === maxPumps - 1 && !done) {
             throw new Error(
               "finishAllScheduledFunctions: scheduled function did not " +
