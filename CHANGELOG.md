@@ -1,8 +1,10 @@
 # Changelog
 
-## 0.0.55-alpha.0
+## 0.0.55
 
 - Support `db.vars.commitTs` and `v.commitTs()`.
+- Fix an issue where `finishAllScheduledFunctions` would drop functions
+  scheduled under real timers.
 
 ## 0.0.54
 
