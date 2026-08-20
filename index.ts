@@ -2243,7 +2243,8 @@ function disallowedInTransaction(name: string): (...args: unknown[]) => never {
   return () => {
     throw new Error(
       `\`${name}\` is not supported in Convex queries or mutations. ` +
-        `Use an action instead, or call \`ctx.runAction\` to perform side effects.`,
+        `Move this code to an action; a mutation can start one with ` +
+        `\`ctx.scheduler.runAfter(0, ...)\`.`,
     );
   };
 }
