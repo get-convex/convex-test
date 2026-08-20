@@ -2031,8 +2031,14 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    * @param advanceTimers Function that advances timers,
    *   usually `vi.runAllTimers`. This function will be called in a loop
    *   with `finishInProgressScheduledFunctions()`.
+   * @param maxIterations Optional maximum number of iterations to run
+   *   scheduled functions. If not provided, defaults to 100. This prevents
+   *   infinite loops if scheduled functions keep scheduling more functions.
    */
-  finishAllScheduledFunctions: (advanceTimers: () => void) => Promise<void>;
+  finishAllScheduledFunctions: (
+    advanceTimers: () => void,
+    maxIterations?: number,
+  ) => Promise<void>;
 };
 
 export type TestConvexForDataModelAndIdentity<
