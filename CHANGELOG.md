@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.56
+
+- Document the second parameter to `finishAllScheduledFunctions`
+
 ## 0.0.55
 
 - Support `db.vars.commitTs` and `v.commitTs()`.
