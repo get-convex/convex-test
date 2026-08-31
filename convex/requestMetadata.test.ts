@@ -24,6 +24,20 @@ const defaultMetadata = {
   authToken: null,
 };
 
+function decodeJwt(token: string) {
+  const [header, payload, signature] = token.split(".");
+  const decode = (part: string) =>
+    JSON.parse(
+      new TextDecoder().decode(
+        Uint8Array.from(
+          atob(part.replace(/-/g, "+").replace(/_/g, "/")),
+          (character) => character.charCodeAt(0),
+        ),
+      ),
+    );
+  return { header: decode(header), payload: decode(payload), signature };
+}
+
 test("default metadata in a mutation", async () => {
   const t = convexTest(schema);
   expect(await t.mutation(api.requestMetadata.metadataMutation)).toEqual(
@@ -126,6 +140,90 @@ test("the IP and user agent propagate to nested calls", async () => {
   expect(component).toEqual(own);
   const recorded = await t.query(api.requestMetadata.recorded);
   expect(recorded[0].metadata).toEqual(own);
+});
+
+test("auth token of an identity", async () => {
+  const t = convexTest(schema).withIdentity({
+    name: "Sarah",
+    email: "sarah@convex.dev",
+    emailVerified: true,
+    pictureUrl: "https://convex.test/sarah.png",
+    givenName: "Sarah",
+    familyName: "Shader",
+    phoneNumberVerified: false,
+    updatedAt: "2024-01-01T00:00:00Z",
+    // A custom claim
+    org: { id: "convex", role: "admin" },
+  });
+  const metadata = await t.mutation(api.requestMetadata.metadataMutation);
+  const { header, payload, signature } = decodeJwt(metadata.authToken!);
+  expect(header).toEqual({ alg: "none", typ: "JWT" });
+  expect(signature).toEqual("");
+  expect(payload).toEqual({
+    iss: "https://convex.test",
+    sub: expect.any(String),
+    name: "Sarah",
+    email: "sarah@convex.dev",
+    email_verified: true,
+    picture: "https://convex.test/sarah.png",
+    given_name: "Sarah",
+    family_name: "Shader",
+    phone_number_verified: false,
+    updated_at: "2024-01-01T00:00:00Z",
+    org: { id: "convex", role: "admin" },
+    convex_test_issued: true,
+  });
+  // The token is issued for the identity `ctx.auth` reports.
+  const identity = await t.query(
+    async (ctx) => await ctx.auth.getUserIdentity(),
+  );
+  expect(payload.sub).toEqual(identity!.subject);
+});
+
+test("the identity's issuer and subject win over custom claims", async () => {
+  const t = convexTest(schema).withIdentity({
+    subject: "sarah",
+    issuer: "https://auth.convex.test",
+    iss: "https://evil.test",
+    sub: "someone-else",
+    convex_test_issued: false,
+  });
+  const metadata = await t.mutation(api.requestMetadata.metadataMutation);
+  const { payload } = decodeJwt(metadata.authToken!);
+  expect(payload).toEqual({
+    iss: "https://auth.convex.test",
+    sub: "sarah",
+    convex_test_issued: true,
+  });
+  // The token identifier isn't a JWT claim.
+  expect(payload.tokenIdentifier).toBeUndefined();
+});
+
+test("the auth token propagates to nested calls and components", async () => {
+  const t = testWithCounter().withIdentity({ name: "Sarah" });
+  const { own, component } = await t.action(
+    api.requestMetadata.actionCallingFunctions,
+  );
+  expect(own.authToken).toEqual(expect.any(String));
+  // Unlike the identity, the token of the request reaches components.
+  expect(component).toEqual(own);
+});
+
+test("both accessor methods can be combined in either order", async () => {
+  const t = convexTest(schema);
+  const identityFirst = t
+    .withIdentity({ name: "Sarah" })
+    .withRequestMetadata({ ip: "1.2.3.4" });
+  const requestFirst = t
+    .withRequestMetadata({ ip: "1.2.3.4" })
+    .withIdentity({ name: "Sarah" });
+  for (const accessor of [identityFirst, requestFirst]) {
+    const metadata = await accessor.mutation(
+      api.requestMetadata.metadataMutation,
+    );
+    expect(metadata.ip).toEqual("1.2.3.4");
+    expect(decodeJwt(metadata.authToken!).payload.name).toEqual("Sarah");
+  }
 });
 
 test("each top-level call gets its own request ID", async () => {
