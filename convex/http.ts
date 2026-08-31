@@ -1,5 +1,5 @@
 import { httpRouter } from "convex/server";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { httpAction, internalQuery } from "./_generated/server";
 
 const http = httpRouter();
@@ -51,6 +51,18 @@ http.route({
   handler: httpAction(async (ctx) => {
     const metadata = await ctx.meta.getFunctionMetadata();
     return new Response(JSON.stringify(metadata), { status: 200 });
+  }),
+});
+
+http.route({
+  path: "/requestMetadata",
+  method: "GET",
+  handler: httpAction(async (ctx) => {
+    const metadata = await ctx.meta.getRequestMetadata();
+    const nested = await ctx.runMutation(api.requestMetadata.metadataMutation);
+    return new Response(JSON.stringify({ own: metadata, nested }), {
+      status: 200,
+    });
   }),
 });
 

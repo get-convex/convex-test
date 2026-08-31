@@ -89,6 +89,14 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         any,
         Name
       >;
+      requestMetadata: FunctionReference<"mutation", "internal", {}, any, Name>;
+      requestMetadataAction: FunctionReference<
+        "action",
+        "internal",
+        {},
+        any,
+        Name
+      >;
       schedule: FunctionReference<
         "mutation",
         "internal",
