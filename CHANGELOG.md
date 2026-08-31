@@ -10,6 +10,11 @@
   fetches data or waits on timers into the test body before calling these methods.
   Use actions for application code that needs these APIs; scheduling through
   `ctx.scheduler` remains supported.
+- The return value of `t.withIdentity(identity)` now has a `.withIdentity`
+  method itself, which also returns context for function calls for a particular
+  identity. We made that change because we will soon add more methods in
+  `TestConvexForDataModel`, and we want for these methods to be callable
+  in any order.
 
 ## 0.0.57
 
