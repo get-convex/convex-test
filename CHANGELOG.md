@@ -22,6 +22,9 @@
   `_scheduled_functions` document ID exposed as `scheduledFunctionId`.
 - Add `t.withRequestMetadata({ ip, userAgent })`, which returns an accessor
   whose calls report the given IP address and user agent.
+- `t.withIdentity(identity)` now also gives the request an `authToken`: an
+  unsecured JWT carrying the identity's claims, so that functions which read
+  the raw token can be tested.
 
 ## 0.0.57
 
