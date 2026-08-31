@@ -58,6 +58,76 @@ test("not available in queries", async () => {
   );
 });
 
+test("IP and user agent", async () => {
+  const t = convexTest(schema).withRequestMetadata({
+    ip: "1.2.3.4",
+    userAgent: "Mozilla/5.0",
+  });
+  expect(await t.mutation(api.requestMetadata.metadataMutation)).toEqual({
+    ...defaultMetadata,
+    ip: "1.2.3.4",
+    userAgent: "Mozilla/5.0",
+  });
+  expect(await t.action(api.requestMetadata.metadataAction)).toEqual({
+    ...defaultMetadata,
+    ip: "1.2.3.4",
+    userAgent: "Mozilla/5.0",
+  });
+});
+
+test("omitted request attributes are null", async () => {
+  const t = convexTest(schema).withRequestMetadata({ ip: "1.2.3.4" });
+  expect(await t.mutation(api.requestMetadata.metadataMutation)).toEqual({
+    ...defaultMetadata,
+    ip: "1.2.3.4",
+  });
+  // Calling the method again replaces both attributes.
+  const t2 = t.withRequestMetadata({ userAgent: "Mozilla/5.0" });
+  expect(await t2.mutation(api.requestMetadata.metadataMutation)).toEqual({
+    ...defaultMetadata,
+    userAgent: "Mozilla/5.0",
+  });
+});
+
+test("the accessor it was called on is not affected", async () => {
+  const t = convexTest(schema);
+  const withMetadata = t.withRequestMetadata({ ip: "1.2.3.4" });
+  expect(
+    await withMetadata.mutation(api.requestMetadata.metadataMutation),
+  ).toMatchObject({ ip: "1.2.3.4" });
+  expect(await t.mutation(api.requestMetadata.metadataMutation)).toMatchObject({
+    ip: null,
+  });
+});
+
+test("accessors with different metadata used in parallel", async () => {
+  const t = convexTest(schema);
+  const [first, second] = await Promise.all([
+    t
+      .withRequestMetadata({ ip: "1.2.3.4" })
+      .mutation(api.requestMetadata.metadataMutation),
+    t
+      .withRequestMetadata({ ip: "5.6.7.8", userAgent: "Firefox" })
+      .mutation(api.requestMetadata.metadataMutation),
+  ]);
+  expect(first).toMatchObject({ ip: "1.2.3.4", userAgent: null });
+  expect(second).toMatchObject({ ip: "5.6.7.8", userAgent: "Firefox" });
+});
+
+test("the IP and user agent propagate to nested calls", async () => {
+  const t = testWithCounter().withRequestMetadata({
+    ip: "1.2.3.4",
+    userAgent: "Mozilla/5.0",
+  });
+  const { own, component } = await t.mutation(
+    api.requestMetadata.mutationCallingMutation,
+  );
+  expect(own).toMatchObject({ ip: "1.2.3.4", userAgent: "Mozilla/5.0" });
+  expect(component).toEqual(own);
+  const recorded = await t.query(api.requestMetadata.recorded);
+  expect(recorded[0].metadata).toEqual(own);
+});
+
 test("each top-level call gets its own request ID", async () => {
   const t = convexTest(schema);
   const first = await t.mutation(api.requestMetadata.metadataMutation);
@@ -105,17 +175,38 @@ test("Node action", async () => {
 });
 
 test("HTTP action", async () => {
-  const t = convexTest(schema);
+  const t = convexTest(schema).withRequestMetadata({
+    ip: "1.2.3.4",
+    userAgent: "Mozilla/5.0",
+  });
   const response = await t.fetch("/requestMetadata");
   const { own, nested } = await response.json();
-  expect(own).toEqual(defaultMetadata);
+  expect(own).toEqual({
+    ...defaultMetadata,
+    ip: "1.2.3.4",
+    userAgent: "Mozilla/5.0",
+  });
   expect(nested).toEqual(own);
+});
+
+test("HTTP request headers do not set the request metadata", async () => {
+  const t = convexTest(schema);
+  const response = await t.fetch("/requestMetadata", {
+    headers: {
+      "X-Forwarded-For": "1.2.3.4",
+      "User-Agent": "Mozilla/5.0",
+    },
+  });
+  const { own } = await response.json();
+  expect(own).toMatchObject({ ip: null, userAgent: null });
 });
 
 test("scheduled mutation", async () => {
   vi.useFakeTimers();
   const t = convexTest(schema);
-  const caller = await t.mutation(api.requestMetadata.scheduleMutation);
+  const caller = await t
+    .withRequestMetadata({ ip: "1.2.3.4", userAgent: "Mozilla/5.0" })
+    .mutation(api.requestMetadata.scheduleMutation);
   await t.finishAllScheduledFunctions(vi.runAllTimers);
   vi.useRealTimers();
 
@@ -125,9 +216,16 @@ test("scheduled mutation", async () => {
     "nestedInScheduledMutation",
   ]);
   const [scheduled, nested] = recorded.map(({ metadata }) => metadata);
-  // The scheduled function is its own request, not the caller's.
+  // The scheduled function is its own request: none of the caller's data
+  // reaches it.
+  expect(scheduled).toEqual({
+    ip: null,
+    userAgent: null,
+    requestId: expect.stringMatching(UUID),
+    scheduledFunctionId: expect.any(String),
+    authToken: null,
+  });
   expect(scheduled.requestId).not.toEqual(caller.requestId);
-  expect(scheduled.requestId).toEqual(expect.stringMatching(UUID));
   const jobs = await t.run(async (ctx) =>
     ctx.db.system.query("_scheduled_functions").collect(),
   );
