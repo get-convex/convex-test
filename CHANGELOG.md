@@ -20,6 +20,8 @@
   functions it calls share the request's `requestId`, components included.
   Scheduled functions run as their own request, with their
   `_scheduled_functions` document ID exposed as `scheduledFunctionId`.
+- Add `t.withRequestMetadata({ ip, userAgent })`, which returns an accessor
+  whose calls report the given IP address and user agent.
 
 ## 0.0.57
 

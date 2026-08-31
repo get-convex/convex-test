@@ -27,6 +27,21 @@ test("withIdentity returns an accessor that can be narrowed again", () => {
   expect(true).toBe(true);
 });
 
+test("withIdentity and withRequestMetadata can be called in either order", () => {
+  const t = convexTest(schema);
+  // Both orders produce an accessor, so neither method loses what the other
+  // one configured.
+  const identityFirst: TestConvexForDataModel<DataModel> = t
+    .withIdentity({ name: "Sarah" })
+    .withRequestMetadata({ ip: "1.2.3.4" });
+  const requestFirst: TestConvexForDataModel<DataModel> = t
+    .withRequestMetadata({ ip: "1.2.3.4" })
+    .withIdentity({ name: "Sarah" });
+  void identityFirst;
+  void requestFirst;
+  expect(true).toBe(true);
+});
+
 test("TestConvex with specific schema is assignable to generic TestConvex", () => {
   const t = convexTest(schema);
   // This is the call that fails with the overloaded call signature approach

@@ -19,6 +19,7 @@ import {
   RegisteredAction,
   RegisteredMutation,
   RegisteredQuery,
+  RequestMetadata,
   SchemaDefinition,
   SystemDataModel,
   UserIdentity,
@@ -2111,6 +2112,20 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   withIdentity(
     identity: Partial<UserIdentity>,
   ): TestConvexForDataModel<DataModel>;
+  /**
+   * To test functions which depend on the metadata of the request that
+   * triggered them, available via `ctx.meta.getRequestMetadata()`, you can
+   * create a version of the `t` accessor with a given IP address and user
+   * agent.
+   *
+   * Attributes that aren't provided are `null`, and calling this method again
+   * replaces both of them.
+   *
+   * @param metadata The `ip` and `userAgent` of the request.
+   */
+  withRequestMetadata(
+    metadata: Partial<Pick<RequestMetadata, "ip" | "userAgent">>,
+  ): TestConvexForDataModel<DataModel>;
 };
 
 /**
@@ -2259,6 +2274,12 @@ type RequestMetadataFake = {
 // when a function is called from the test itself, and replaced when a
 // scheduled function starts.
 const requestMetadataStorage = new AsyncLocalStorage<RequestMetadataFake>();
+
+// The request attributes a test accessor was configured with, which only
+// apply to the functions the accessor itself calls.
+type RequestOptions = { ip: string | null; userAgent: string | null };
+
+const DEFAULT_REQUEST_OPTIONS: RequestOptions = { ip: null, userAgent: null };
 
 // Request IDs are internal bookkeeping. Generating them must not consume a
 // handler's mocked randomness, so they come from a counter instead of `crypto`
@@ -2750,11 +2771,12 @@ export function convexTest<Schema extends GenericSchema>(
     convexGlobal.components[componentPath] = componentInfo;
   }
 
-  // Each accessor is immutable: `withIdentity` returns a new one instead of
-  // modifying the accessor it was called on.
-  function testAccessor(auth: AuthFake): any {
+  // Each accessor is immutable: `withIdentity` and `withRequestMetadata`
+  // return a new one, keeping what the other method configured, so they can be
+  // called in either order.
+  function testAccessor(auth: AuthFake, requestOptions: RequestOptions): any {
     return {
-      ...wrapInContext(withAuth(auth)),
+      ...wrapInContext(withAuth(auth, requestOptions)),
       withIdentity(identity: Partial<UserIdentity>) {
         const subject =
           identity.subject ?? "" + simpleHash(JSON.stringify(identity));
@@ -2763,12 +2785,24 @@ export function convexTest<Schema extends GenericSchema>(
           identity.tokenIdentifier ?? `${issuer}|${subject}`;
         return testAccessor(
           new AuthFake({ ...identity, subject, issuer, tokenIdentifier }),
+          requestOptions,
         );
+      },
+      withRequestMetadata(
+        metadata: Partial<Pick<RequestMetadata, "ip" | "userAgent">>,
+      ) {
+        return testAccessor(auth, {
+          ip: metadata.ip ?? null,
+          userAgent: metadata.userAgent ?? null,
+        });
       },
     };
   }
 
-  return { ...testAccessor(new AuthFake()), registerComponent };
+  return {
+    ...testAccessor(new AuthFake(), DEFAULT_REQUEST_OPTIONS),
+    registerComponent,
+  };
 }
 
 // Yield through a full event loop iteration so that dynamic import()
@@ -2794,7 +2828,10 @@ function yieldThroughRealTimers(): Promise<void> {
   return new Promise<void>((r) => realSetTimeout(r, 0));
 }
 
-function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
+function withAuth(
+  auth: AuthFake = authStorage.getStore() ?? new AuthFake(),
+  requestOptions: RequestOptions = DEFAULT_REQUEST_OPTIONS,
+) {
   // Auth doesn't propagate across component boundaries.
   function authForComponent(componentPath: string) {
     const ctx = executionContextStorage.getStore();
@@ -2808,8 +2845,8 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
   function requestMetadataForExecution(): RequestMetadataFake {
     return (
       requestMetadataStorage.getStore() ?? {
-        ip: null,
-        userAgent: null,
+        ip: requestOptions.ip,
+        userAgent: requestOptions.userAgent,
         requestId: newRequestId(),
         scheduledFunctionId: null,
         authToken: null,
@@ -3328,6 +3365,8 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         depth: 0,
         paginatedQueries: 0,
       };
+      // The request's headers are not inspected: like the identity, the IP and
+      // the user agent are configured on the test accessor.
       const requestMetadata = requestMetadataForExecution();
       const response = await executionContextStorage.run(httpCtx, () =>
         requestMetadataStorage.run(requestMetadata, () =>
