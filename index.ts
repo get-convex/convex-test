@@ -1412,11 +1412,79 @@ function syscallImpl() {
 }
 
 class AuthFake {
-  constructor(private _userIdentity: any = null) {}
+  constructor(
+    private _userIdentity: any = null,
+    // The JWT the request was authenticated with, mirroring what the backend
+    // derives the identity from. `null` for unauthenticated requests.
+    private _token: string | null = null,
+  ) {}
 
   getUserIdentity(): Promise<any> {
     return Promise.resolve(this._userIdentity);
   }
+
+  get token(): string | null {
+    return this._token;
+  }
+}
+
+// Maps the `UserIdentity` attributes to the JWT claims they are derived from,
+// as documented on `UserIdentity`. `tokenIdentifier` is left out because it is
+// computed by the backend from `iss` and `sub` rather than being a claim.
+const JWT_CLAIM_BY_IDENTITY_ATTRIBUTE: Record<string, string> = {
+  subject: "sub",
+  issuer: "iss",
+  name: "name",
+  givenName: "given_name",
+  familyName: "family_name",
+  nickname: "nickname",
+  preferredUsername: "preferred_username",
+  profileUrl: "profile",
+  pictureUrl: "picture",
+  email: "email",
+  emailVerified: "email_verified",
+  gender: "gender",
+  birthday: "birthdate",
+  timezone: "zoneinfo",
+  language: "locale",
+  phoneNumber: "phone_number",
+  phoneNumberVerified: "phone_number_verified",
+  address: "address",
+  updatedAt: "updated_at",
+};
+
+function base64UrlEncode(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+// Builds the token `withIdentity` pretends the request was authenticated with.
+// Real tokens are signed by an identity provider; this one is unsecured
+// (`"alg": "none"`, empty signature) and carries a marker claim, so tests can
+// tell it apart from a real JWT.
+function createTestJwt(identity: Record<string, any>) {
+  const claims: Record<string, any> = {};
+  for (const [attribute, value] of Object.entries(identity)) {
+    if (value === undefined || attribute === "tokenIdentifier") {
+      continue;
+    }
+    // Custom claims are used as is, known attributes use their claim name.
+    claims[JWT_CLAIM_BY_IDENTITY_ATTRIBUTE[attribute] ?? attribute] = value;
+  }
+  // The identity provider always determines who the user is.
+  claims.iss = identity.issuer;
+  claims.sub = identity.subject;
+  claims.convex_test_issued = true;
+  const header = base64UrlEncode(JSON.stringify({ alg: "none", typ: "JWT" }));
+  const payload = base64UrlEncode(JSON.stringify(claims));
+  return `${header}.${payload}.`;
 }
 
 // Runs a function that was scheduled, moving its `_scheduled_functions`
@@ -2594,8 +2662,9 @@ export function convexTest<Schema extends GenericSchema>(
         const issuer = identity.issuer ?? "https://convex.test";
         const tokenIdentifier =
           identity.tokenIdentifier ?? `${issuer}|${subject}`;
+        const fullIdentity = { ...identity, subject, issuer, tokenIdentifier };
         return testAccessor(
-          new AuthFake({ ...identity, subject, issuer, tokenIdentifier }),
+          new AuthFake(fullIdentity, createTestJwt(fullIdentity)),
           requestOptions,
         );
       },
@@ -2659,7 +2728,7 @@ function withAuth(
         // Real request IDs aren't UUIDs, but they are similarly opaque.
         requestId: crypto.randomUUID(),
         scheduledFunctionId: null,
-        authToken: null,
+        authToken: auth.token,
       }
     );
   }
