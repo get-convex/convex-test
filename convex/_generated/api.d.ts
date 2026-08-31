@@ -25,6 +25,8 @@ import type * as mutations from "../mutations.js";
 import type * as nestedLimits from "../nestedLimits.js";
 import type * as pagination from "../pagination.js";
 import type * as queries from "../queries.js";
+import type * as requestMetadata from "../requestMetadata.js";
+import type * as requestMetadataNode from "../requestMetadataNode.js";
 import type * as returnsValidation from "../returnsValidation.js";
 import type * as scheduler from "../scheduler.js";
 import type * as storage from "../storage.js";
@@ -55,6 +57,8 @@ declare const fullApi: ApiFromModules<{
   nestedLimits: typeof nestedLimits;
   pagination: typeof pagination;
   queries: typeof queries;
+  requestMetadata: typeof requestMetadata;
+  requestMetadataNode: typeof requestMetadataNode;
   returnsValidation: typeof returnsValidation;
   scheduler: typeof scheduler;
   storage: typeof storage;

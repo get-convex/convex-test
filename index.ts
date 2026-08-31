@@ -1437,55 +1437,67 @@ async function runScheduledFunction({
   args: Value;
   name: string;
 }) {
-  await authStorage.run(new AuthFake(), async () => {
-    const canceled = await withAuth().runInComponent(
-      componentPath,
-      async () => {
-        const job = db.get("_scheduled_functions", jobId) as
-          | ScheduledFunction
-          | undefined;
-        if (!job) return true;
-        if (job.state.kind === "canceled") {
-          return true;
-        }
-        if (job.state.kind !== "pending") {
+  // A scheduled function is its own request: it doesn't inherit the request
+  // metadata of whoever scheduled it, and it identifies itself through its
+  // job ID.
+  const requestMetadata: RequestMetadataFake = {
+    ip: null,
+    userAgent: null,
+    requestId: crypto.randomUUID(),
+    scheduledFunctionId: jobId,
+    authToken: null,
+  };
+  await requestMetadataStorage.run(requestMetadata, () =>
+    authStorage.run(new AuthFake(), async () => {
+      const canceled = await withAuth().runInComponent(
+        componentPath,
+        async () => {
+          const job = db.get("_scheduled_functions", jobId) as
+            | ScheduledFunction
+            | undefined;
+          if (!job) return true;
+          if (job.state.kind === "canceled") {
+            return true;
+          }
+          if (job.state.kind !== "pending") {
+            throw new Error(
+              `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+            );
+          }
+          db.patch("_scheduled_functions", jobId, {
+            state: { kind: "inProgress" },
+          });
+          return false;
+        },
+      );
+      if (canceled) {
+        return;
+      }
+      try {
+        await withAuth().fun(functionPath, args);
+      } catch (error) {
+        console.error(`Error when running scheduled function ${name}`, error);
+        await withAuth().runInComponent(componentPath, async () => {
+          db.patch("_scheduled_functions", jobId, {
+            state: { kind: "failed" },
+            completedTime: Date.now(),
+          });
+        });
+        return;
+      }
+      await withAuth().runInComponent(componentPath, async () => {
+        const job = db.get("_scheduled_functions", jobId) as ScheduledFunction;
+        if (job.state.kind !== "inProgress") {
           throw new Error(
-            `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+            `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
           );
         }
         db.patch("_scheduled_functions", jobId, {
-          state: { kind: "inProgress" },
-        });
-        return false;
-      },
-    );
-    if (canceled) {
-      return;
-    }
-    try {
-      await withAuth().fun(functionPath, args);
-    } catch (error) {
-      console.error(`Error when running scheduled function ${name}`, error);
-      await withAuth().runInComponent(componentPath, async () => {
-        db.patch("_scheduled_functions", jobId, {
-          state: { kind: "failed" },
-          completedTime: Date.now(),
+          state: { kind: "success" },
         });
       });
-      return;
-    }
-    await withAuth().runInComponent(componentPath, async () => {
-      const job = db.get("_scheduled_functions", jobId) as ScheduledFunction;
-      if (job.state.kind !== "inProgress") {
-        throw new Error(
-          `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
-        );
-      }
-      db.patch("_scheduled_functions", jobId, {
-        state: { kind: "success" },
-      });
-    });
-  });
+    }),
+  );
 }
 
 function asyncSyscallImpl() {
@@ -1612,6 +1624,24 @@ function asyncSyscallImpl() {
             componentPath: ctx.componentPath,
           }),
         );
+      }
+      case "1.0/getRequestMetadata": {
+        const ctx = executionContextStorage.getStore();
+        const requestMetadata = requestMetadataStorage.getStore();
+        if (ctx === undefined || requestMetadata === undefined) {
+          throw new Error(
+            "getRequestMetadata() can only be called from a mutation, action " +
+              "or HTTP action. It is not available in queries or outside of a " +
+              "Convex function.",
+          );
+        }
+        if (ctx.udfType === "query") {
+          throw new Error(
+            "getRequestMetadata() can only be called from a mutation, action " +
+              "or HTTP action. It is not available in queries.",
+          );
+        }
+        return JSON.stringify(convexToJson(requestMetadata));
       }
       case "1.0/getDeploymentMetadata": {
         return JSON.stringify(
@@ -2170,9 +2200,12 @@ type FunctionPath = {
   udfPath: string;
 };
 
+type UdfType = "query" | "mutation" | "action" | "http";
+
 type ExecutionContext = {
   componentPath: string;
   udfPath: string;
+  udfType: UdfType;
   depth: number; // 0 = top-level, 1+ = nested
   // Number of paginated queries (`.paginate()`) executed so far in this
   // function execution. Convex only allows one per function invocation.
@@ -2180,6 +2213,20 @@ type ExecutionContext = {
 };
 
 const executionContextStorage = new AsyncLocalStorage<ExecutionContext>();
+
+type RequestMetadataFake = {
+  ip: string | null;
+  userAgent: string | null;
+  requestId: string;
+  scheduledFunctionId: string | null;
+  authToken: string | null;
+};
+
+// The request metadata of the innermost top-level function execution. Nested
+// calls (including calls into components) inherit it, so it is only created
+// when a function is called from the test itself, and replaced when a
+// scheduled function starts.
+const requestMetadataStorage = new AsyncLocalStorage<RequestMetadataFake>();
 
 type ConvexGlobal = {
   components: Record<string, ComponentInfo>;
@@ -2569,6 +2616,21 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     return isCrossComponent ? new AuthFake() : auth;
   }
 
+  // Nested calls, including calls into components, run as part of the request
+  // that triggered the outermost function, so they share its metadata.
+  function requestMetadataForExecution(): RequestMetadataFake {
+    return (
+      requestMetadataStorage.getStore() ?? {
+        ip: null,
+        userAgent: null,
+        // Real request IDs aren't UUIDs, but they are similarly opaque.
+        requestId: crypto.randomUUID(),
+        scheduledFunctionId: null,
+        authToken: null,
+      }
+    );
+  }
+
   const runMutationWithHandler = async <T>(
     handler: (ctx: any, args: any) => T,
     args: any,
@@ -2595,9 +2657,11 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     const childCtx: ExecutionContext = {
       componentPath: functionPath.componentPath,
       udfPath: functionPath.udfPath,
+      udfType: "mutation",
       depth: (parentCtx?.depth ?? 0) + 1,
       paginatedQueries: 0,
     };
+    const requestMetadata = requestMetadataForExecution();
 
     await transactionManager.begin(isNested, transactionLimits);
     try {
@@ -2610,7 +2674,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         ).invokeMutation(JSON.stringify(convexToJson([parseArgs(args)])));
       const invokeInContext = () =>
         executionContextStorage.run(childCtx, () =>
-          authStorage.run(authForChild, invokeRaw),
+          requestMetadataStorage.run(requestMetadata, () =>
+            authStorage.run(authForChild, invokeRaw),
+          ),
         );
 
       const rawResult = await nestedTxStorage.run(childLock, invokeInContext);
@@ -2650,9 +2716,11 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     const childCtx: ExecutionContext = {
       componentPath: functionPath.componentPath,
       udfPath: functionPath.udfPath,
+      udfType: "query",
       depth: (parentCtx?.depth ?? 0) + 1,
       paginatedQueries: 0,
     };
+    const requestMetadata = requestMetadataForExecution();
 
     await transactionManager.begin(isNested, transactionLimits);
     try {
@@ -2663,7 +2731,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         ).invokeQuery(JSON.stringify(convexToJson([parseArgs(args)])));
       const invokeInContext = () =>
         executionContextStorage.run(childCtx, () =>
-          authStorage.run(authForChild, invokeRaw),
+          requestMetadataStorage.run(requestMetadata, () =>
+            authStorage.run(authForChild, invokeRaw),
+          ),
         );
 
       const rawResult = await nestedTxStorage.run(childLock, invokeInContext);
@@ -2710,24 +2780,30 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     const childCtx: ExecutionContext = {
       componentPath: functionPath.componentPath,
       udfPath: functionPath.udfPath,
+      udfType: "action",
       depth: (parentCtx?.depth ?? 0) + 1,
       paginatedQueries: 0,
     };
+    const requestMetadata = requestMetadataForExecution();
     return await executionContextStorage.run(childCtx, async () => {
       const requestId = "" + Math.random();
       try {
-        const rawResult = await authStorage.run(authForChild, () =>
-          (
-            a as unknown as {
-              invokeAction: (
-                requestId: string,
-                args: string,
-              ) => Promise<string>;
-            }
-          ).invokeAction(
-            requestId,
-            JSON.stringify(convexToJson([parseArgs(args)])),
-          ),
+        const rawResult = await requestMetadataStorage.run(
+          requestMetadata,
+          () =>
+            authStorage.run(authForChild, () =>
+              (
+                a as unknown as {
+                  invokeAction: (
+                    requestId: string,
+                    args: string,
+                  ) => Promise<string>;
+                }
+              ).invokeAction(
+                requestId,
+                JSON.stringify(convexToJson([parseArgs(args)])),
+              ),
+            ),
         );
         return jsonToConvex(JSON.parse(rawResult)) as T;
       } catch (e) {
@@ -3051,15 +3127,19 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       const httpCtx: ExecutionContext = {
         componentPath: getCurrentComponentPath(),
         udfPath: "http",
+        udfType: "http",
         depth: 0,
         paginatedQueries: 0,
       };
+      const requestMetadata = requestMetadataForExecution();
       const response = await executionContextStorage.run(httpCtx, () =>
-        (
-          a as unknown as {
-            invokeHttpAction: (request: Request) => Promise<Response>;
-          }
-        ).invokeHttpAction(new Request(url, init)),
+        requestMetadataStorage.run(requestMetadata, () =>
+          (
+            a as unknown as {
+              invokeHttpAction: (request: Request) => Promise<Response>;
+            }
+          ).invokeHttpAction(new Request(url, init)),
+        ),
       );
       return response;
     },

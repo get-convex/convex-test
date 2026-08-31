@@ -109,6 +109,20 @@ export const mutationWithNumberArg = mutation({
   },
 });
 
+export const requestMetadata = mutation({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.meta.getRequestMetadata();
+  },
+});
+
+export const requestMetadataAction = action({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.meta.getRequestMetadata();
+  },
+});
+
 export const metadata = query({
   args: {},
   handler: async (ctx) => {
