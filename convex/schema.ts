@@ -9,6 +9,16 @@ export default defineSchema({
     nested: v.optional(v.object({ commitTs: v.commitTs() })),
     other: v.optional(v.string()),
   }).index("by_commit_ts", ["commitTs"]),
+  requestMetadata: defineTable({
+    label: v.string(),
+    metadata: v.object({
+      ip: v.union(v.string(), v.null()),
+      userAgent: v.union(v.string(), v.null()),
+      requestId: v.string(),
+      scheduledFunctionId: v.union(v.string(), v.null()),
+      authToken: v.union(v.string(), v.null()),
+    }),
+  }),
   messages: defineTable({
     author: v.string(),
     body: v.string(),
