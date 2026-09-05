@@ -54,4 +54,23 @@ http.route({
   }),
 });
 
+http.route({
+  path: "/globals",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const patch = url.searchParams.get("patch");
+    if (patch === null) {
+      return new Response(atob("aGVsbG8="));
+    }
+    globalThis.atob = () => patch;
+    if (url.searchParams.has("throw")) {
+      throw new Error("HTTP handler failed after patching globals");
+    }
+    const before = atob("aGVsbG8=");
+    const nested = await ctx.runQuery(internal.globals.readAtob);
+    return Response.json({ before, nested, after: atob("aGVsbG8=") });
+  }),
+});
+
 export default http;
