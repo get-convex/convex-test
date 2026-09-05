@@ -3167,7 +3167,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           runAction: byType.action,
           auth,
         };
-        return getHandler(func)(testCtx, a);
+        return globalOverridesStorage.run({}, () =>
+          getHandler(func)(testCtx, a),
+        );
       });
       const httpCtx: ExecutionContext = {
         componentPath: getCurrentComponentPath(),

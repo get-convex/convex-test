@@ -160,7 +160,7 @@ test("action: setTimeout still works", async () => {
   expect(result).toBe("ok");
 });
 
-test("inline mutation: patched globals restored after nested query", async () => {
+test("inline mutation: patches persist across DB reads and are cleaned up afterward", async () => {
   const t = convexTest(schema);
   await t.run(async (ctx) => {
     await ctx.db.insert("messages", { author: "test", body: "hi" });
@@ -178,4 +178,5 @@ test("inline mutation: patched globals restored after nested query", async () =>
   // atob should still be patched after the db query (same handler context)
   expect(result.after).toBe("patched-inline");
   expect(result.count).toBe(1);
+  expect(await t.mutation(async () => atob("aGVsbG8="))).toBe("hello");
 });
