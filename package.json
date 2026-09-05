@@ -20,11 +20,12 @@
   ],
   "scripts": {
     "format": "prettier --write .",
-    "prebuild": "npm run lint && npm run test:once",
+    "prebuild": "npm run lint && npm run test:types && npm run test:once",
     "build": "tsc && replace-in-file '\"./convex/**/*.*s\"' '\"../../../convex/**/*.*s\"' ./dist/index.js",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0 && prettier --check .",
     "test": "vitest",
     "test:once": "vitest run",
+    "test:types": "tsc --noEmit -p convex/tsconfig.json",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:coverage": "vitest run --coverage",
     "clean": "rm -rf dist",
