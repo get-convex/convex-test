@@ -2,9 +2,12 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
+  ActionBuilder,
+  ApiFromModules,
   DataModelFromSchemaDefinition,
   DefaultFunctionArgs,
   DocumentByName,
+  FilterApi,
   FunctionReference,
   FunctionReturnType,
   GenericActionCtx,
@@ -14,8 +17,10 @@ import {
   GenericQueryCtx,
   GenericSchema,
   HttpRouter,
+  MutationBuilder,
   OptionalRestArgs,
   PublicHttpAction,
+  QueryBuilder,
   RegisteredAction,
   RegisteredMutation,
   RegisteredQuery,
@@ -23,8 +28,13 @@ import {
   SystemDataModel,
   UserIdentity,
   actionGeneric,
+  anyApi,
+  filterApi,
   getFunctionAddress,
   httpActionGeneric,
+  internalActionGeneric,
+  internalMutationGeneric,
+  internalQueryGeneric,
   makeFunctionReference,
   mutationGeneric,
   queryGeneric,
@@ -1891,6 +1901,127 @@ async function blobSha(blob: Blob) {
 export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
   TestConvexForDataModelAndIdentity<DataModelFromSchemaDefinition<SchemaDef>>;
 
+/** Schema-bound function builders for an in-memory test application. */
+export type TestApp<SchemaDef extends SchemaDefinition<any, boolean>> = {
+  query: QueryBuilder<DataModelFromSchemaDefinition<SchemaDef>, "public">;
+  internalQuery: QueryBuilder<
+    DataModelFromSchemaDefinition<SchemaDef>,
+    "internal"
+  >;
+  mutation: MutationBuilder<DataModelFromSchemaDefinition<SchemaDef>, "public">;
+  internalMutation: MutationBuilder<
+    DataModelFromSchemaDefinition<SchemaDef>,
+    "internal"
+  >;
+  action: ActionBuilder<DataModelFromSchemaDefinition<SchemaDef>, "public">;
+  internalAction: ActionBuilder<
+    DataModelFromSchemaDefinition<SchemaDef>,
+    "internal"
+  >;
+  /**
+   * Define function modules by their paths, e.g. `test` or `test/callbacks`,
+   * without a leading `./` or file extension. Values are module exports,
+   * rather than the import functions returned by `import.meta.glob`.
+   *
+   * References have the same types and behavior as generated Convex APIs.
+   * Public functions appear in `api` and internal functions in `internal`.
+   * Handlers referencing this API may need explicit return type annotations
+   * to break TypeScript inference cycles.
+   */
+  defineModules<Modules extends Record<string, object>>(
+    this: void,
+    modules: Modules,
+  ): TestAppDefinition<SchemaDef, Modules>;
+};
+
+/** Typed function references and a factory for fresh test instances. */
+export type TestAppDefinition<
+  SchemaDef extends SchemaDefinition<any, boolean>,
+  Modules extends Record<string, object>,
+> = {
+  api: FilterApi<ApiFromModules<Modules>, FunctionReference<any, "public">>;
+  internal: FilterApi<
+    ApiFromModules<Modules>,
+    FunctionReference<any, "internal">
+  >;
+  /**
+   * Create fresh test state. Register components on the returned instance
+   * using their testing helpers or `t.registerComponent`.
+   * `transactionLimits` has the same meaning as in `convexTest`.
+   */
+  createTest(
+    this: void,
+    options?: { transactionLimits?: Partial<TransactionMetrics> | boolean },
+  ): TestConvex<SchemaDef>;
+};
+
+/**
+ * Define an in-memory test application without generated files.
+ *
+ * The returned function builders are typed against `schema`. Pass modules of
+ * registered functions to `defineModules` to get typed `api` and `internal`
+ * references and a `createTest` factory. Each call to `createTest` creates fresh
+ * test state and returns a normal {@link TestConvex}, which can be passed to
+ * component testing helpers such as `componentTest.register(t)`.
+ *
+ * @example
+ * const app = defineTestApp({ schema });
+ * const { api, createTest } = app.defineModules({
+ *   test: {
+ *     bar: app.mutation({
+ *       args: { text: v.string() },
+ *       returns: v.id("messages"),
+ *       handler: async (ctx, args) => ctx.db.insert("messages", args),
+ *     }),
+ *   },
+ * });
+ * const t = createTest();
+ * await t.mutation(api.test.bar, { text: "hello" });
+ */
+export function defineTestApp<
+  SchemaDef extends SchemaDefinition<any, boolean>,
+>({ schema }: { schema: SchemaDef }): TestApp<SchemaDef> {
+  return {
+    query: queryGeneric,
+    internalQuery: internalQueryGeneric,
+    mutation: mutationGeneric,
+    internalMutation: internalMutationGeneric,
+    action: actionGeneric,
+    internalAction: internalActionGeneric,
+
+    defineModules<Modules extends Record<string, object>>(modules: Modules) {
+      const moduleMap = new Map(Object.entries(modules));
+      const loadModule = async (path: string) => {
+        const module = moduleMap.get(path);
+        if (module === undefined) {
+          throw new Error(`Could not find module for: "${path}"`);
+        }
+        return module;
+      };
+      const fullApi = anyApi as unknown as ApiFromModules<Modules>;
+      return {
+        api: filterApi<typeof fullApi, FunctionReference<any, "public">>(
+          fullApi,
+        ),
+        internal: filterApi<typeof fullApi, FunctionReference<any, "internal">>(
+          fullApi,
+        ),
+        createTest(
+          options: {
+            transactionLimits?: Partial<TransactionMetrics> | boolean;
+          } = {},
+        ): TestConvex<SchemaDef> {
+          return createConvexTest(
+            schema,
+            loadModule,
+            options.transactionLimits ?? false,
+          );
+        },
+      };
+    },
+  };
+}
+
 export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   /**
    * Call a public or internal query, or run an inline query function.
@@ -2460,12 +2591,20 @@ export function convexTest<Schema extends GenericSchema>(
     limitsConfig = opts.transactionLimits ?? false;
   }
 
+  return createConvexTest(schema, moduleCache(modules), limitsConfig);
+}
+
+function createConvexTest<SchemaDef extends SchemaDefinition<any, boolean>>(
+  schema: SchemaDef | undefined,
+  modules: ComponentInfo["modules"],
+  limitsConfig: Partial<TransactionMetrics> | boolean,
+): TestConvex<SchemaDef> {
   const rootDb = new DatabaseFake(schema ?? null, ROOT_COMPONENT_PATH);
   const convexGlobal: ConvexGlobal = {
     components: {
       [ROOT_COMPONENT_PATH]: {
         db: rootDb,
-        modules: moduleCache(modules),
+        modules,
       },
     },
     transactionManager: new TransactionManager(limitsConfig),
