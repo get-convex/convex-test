@@ -3291,7 +3291,15 @@ async function resolveFunction<T extends RegisteredFunctionKind>(
       // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw type satisfies never;
   }
-  const args = JSON.parse(func.exportArgs());
+  const args = JSON.parse(func.exportArgs()) as ValidatorJSON;
+  // The real backend rejects these functions at push time, so surface the same
+  // error as soon as the function is resolved.
+  if (args.type !== "object" && args.type !== "any") {
+    throw new Error(
+      `Invalid JSON returned from ${modulePath}.js:${exportName}.exportArgs(): ` +
+        `Args validator must be an object or any`,
+    );
+  }
   const returns = JSON.parse(func.exportReturns());
 
   return { func, functionPath, handler, returns, args };

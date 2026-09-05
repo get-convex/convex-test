@@ -1,6 +1,9 @@
+import { anyApi } from "convex/server";
+import { v } from "convex/values";
 import { expect, test } from "vitest";
 import { convexTest } from "../index";
 import { api } from "./_generated/api";
+import { action, mutation, query } from "./_generated/server";
 import schema from "./schema";
 import counterSchema from "./counter/component/schema";
 
@@ -70,6 +73,88 @@ test("component mutation arguments validation", async () => {
       a: Number.POSITIVE_INFINITY,
     }),
   ).toEqual(Number.POSITIVE_INFINITY);
+});
+
+// The real backend only accepts an object or `v.any()` as the args validator,
+// and rejects anything else at push time. These functions can't live in
+// `convex/` because they'd break `npx convex dev`, so they're defined inline.
+function testWithBadArgsValidators() {
+  return convexTest({
+    schema,
+    modules: {
+      "./_generated/server.ts": () => Promise.resolve({}),
+      "./badArgs.ts": () =>
+        Promise.resolve({
+          unionQuery: query({
+            args: v.union(
+              v.object({ a: v.number() }),
+              v.object({ b: v.number() }),
+            ),
+            /* v8 ignore next */
+            handler: () => "ok",
+          }),
+          unionMutation: mutation({
+            args: v.union(
+              v.object({ a: v.number() }),
+              v.object({ b: v.number() }),
+            ),
+            /* v8 ignore next */
+            handler: () => "ok",
+          }),
+          unionAction: action({
+            args: v.union(
+              v.object({ a: v.number() }),
+              v.object({ b: v.number() }),
+            ),
+            /* v8 ignore next */
+            handler: () => "ok",
+          }),
+          recordQuery: query({
+            args: v.record(v.string(), v.number()),
+            /* v8 ignore next */
+            handler: () => "ok",
+          }),
+        }),
+    },
+  });
+}
+
+test("args validator must be an object or any", async () => {
+  const t = testWithBadArgsValidators();
+  const message =
+    "Invalid JSON returned from badArgs.js:unionQuery.exportArgs(): " +
+    "Args validator must be an object or any";
+  await expect(
+    t.query(anyApi.badArgs.unionQuery, { a: 1 }),
+  ).rejects.toThrowError(message);
+  await expect(
+    t.mutation(anyApi.badArgs.unionMutation, { a: 1 }),
+  ).rejects.toThrowError(/Args validator must be an object or any/);
+  await expect(
+    t.action(anyApi.badArgs.unionAction, { a: 1 }),
+  ).rejects.toThrowError(/Args validator must be an object or any/);
+  await expect(
+    t.query(anyApi.badArgs.recordQuery, { a: 1 }),
+  ).rejects.toThrowError(/Args validator must be an object or any/);
+});
+
+test("object and any args validators are allowed", async () => {
+  const t = convexTest(schema);
+  expect(
+    await t.query(api.argumentsValidation.queryWithObjectValidatorArgs, {
+      a: 1,
+    }),
+  ).toEqual("ok");
+  await expect(
+    t.query(api.argumentsValidation.queryWithObjectValidatorArgs, {
+      a: "bad" as any,
+    }),
+  ).rejects.toThrowError(/Validator error/);
+  expect(
+    await t.query(api.argumentsValidation.queryWithAnyArgs, {
+      anything: true,
+    } as any),
+  ).toEqual("ok");
 });
 
 test("query with union arg", async () => {
