@@ -1418,6 +1418,76 @@ class AuthFake {
   }
 }
 
+// Runs a function that was scheduled, moving its `_scheduled_functions`
+// document through the job states around calling it. Scheduled functions run
+// without auth context, even if they were scheduled from an authenticated
+// function.
+async function runScheduledFunction({
+  db,
+  jobId,
+  componentPath,
+  functionPath,
+  args,
+  name,
+}: {
+  db: DatabaseFake;
+  jobId: GenericId<"_scheduled_functions">;
+  componentPath: string;
+  functionPath: FunctionPath;
+  args: Value;
+  name: string;
+}) {
+  await authStorage.run(new AuthFake(), async () => {
+    const canceled = await withAuth().runInComponent(
+      componentPath,
+      async () => {
+        const job = db.get("_scheduled_functions", jobId) as
+          | ScheduledFunction
+          | undefined;
+        if (!job) return true;
+        if (job.state.kind === "canceled") {
+          return true;
+        }
+        if (job.state.kind !== "pending") {
+          throw new Error(
+            `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
+          );
+        }
+        db.patch("_scheduled_functions", jobId, {
+          state: { kind: "inProgress" },
+        });
+        return false;
+      },
+    );
+    if (canceled) {
+      return;
+    }
+    try {
+      await withAuth().fun(functionPath, args);
+    } catch (error) {
+      console.error(`Error when running scheduled function ${name}`, error);
+      await withAuth().runInComponent(componentPath, async () => {
+        db.patch("_scheduled_functions", jobId, {
+          state: { kind: "failed" },
+          completedTime: Date.now(),
+        });
+      });
+      return;
+    }
+    await withAuth().runInComponent(componentPath, async () => {
+      const job = db.get("_scheduled_functions", jobId) as ScheduledFunction;
+      if (job.state.kind !== "inProgress") {
+        throw new Error(
+          `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
+        );
+      }
+      db.patch("_scheduled_functions", jobId, {
+        state: { kind: "success" },
+      });
+    });
+  });
+}
+
 function asyncSyscallImpl() {
   return async (op: string, jsonArgs: string): Promise<string> => {
     const args = JSON.parse(jsonArgs);
@@ -1689,67 +1759,15 @@ function asyncSyscallImpl() {
           setTimeout(
             () => {
               scheduler.timerFired();
-              // Scheduled functions run without auth context, even if
-              // they were scheduled from an authenticated function.
               const promise = convexGlobalStorage
                 .run(capturedGlobal, () =>
-                  authStorage.run(new AuthFake(), async () => {
-                    const canceled = await withAuth().runInComponent(
-                      componentPath,
-                      async () => {
-                        const job = db.get("_scheduled_functions", jobId) as
-                          | ScheduledFunction
-                          | undefined;
-                        if (!job) return true;
-                        if (job.state.kind === "canceled") {
-                          return true;
-                        }
-                        if (job.state.kind !== "pending") {
-                          throw new Error(
-                            `\`convexTest\` invariant error: Unexpected scheduled function state when starting it: ${job.state.kind}`,
-                          );
-                        }
-                        db.patch("_scheduled_functions", jobId, {
-                          state: { kind: "inProgress" },
-                        });
-                        return false;
-                      },
-                    );
-                    if (canceled) {
-                      return;
-                    }
-                    try {
-                      await withAuth().fun(functionPath, parsedArgs);
-                    } catch (error) {
-                      console.error(
-                        `Error when running scheduled function ${name}`,
-                        error,
-                      );
-                      await withAuth().runInComponent(
-                        componentPath,
-                        async () => {
-                          db.patch("_scheduled_functions", jobId, {
-                            state: { kind: "failed" },
-                            completedTime: Date.now(),
-                          });
-                        },
-                      );
-                      return;
-                    }
-                    await withAuth().runInComponent(componentPath, async () => {
-                      const job = db.get(
-                        "_scheduled_functions",
-                        jobId,
-                      ) as ScheduledFunction;
-                      if (job.state.kind !== "inProgress") {
-                        throw new Error(
-                          `\`convexTest\` invariant error: Unexpected scheduled function state after it finished running: ${job.state.kind}`,
-                        );
-                      }
-                      db.patch("_scheduled_functions", jobId, {
-                        state: { kind: "success" },
-                      });
-                    });
+                  runScheduledFunction({
+                    db,
+                    jobId,
+                    componentPath,
+                    functionPath,
+                    args: parsedArgs,
+                    name,
                   }),
                 )
                 .finally(() => {
