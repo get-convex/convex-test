@@ -1686,7 +1686,7 @@ function asyncSyscallImpl() {
         // rather than inheriting a stale parent lock.
         nestedTxStorage.exit(() => {
           scheduler.timerScheduled();
-          setTimeout(
+          frameworkSetTimeout(
             () => {
               scheduler.timerFired();
               // Scheduled functions run without auth context, even if
@@ -1973,6 +1973,9 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   /**
    * Read from and write to the mock backend.
    *
+   * The callback runs in a transaction, so `fetch` and timers are unavailable.
+   * Perform setup that needs them in the test body before calling `run`.
+   *
    * @param func The async function that reads or writes to the mock backend.
    *   It receives a ctx as its first argument that conforms to
    *   {@link GenericMutationCtx},
@@ -2189,6 +2192,122 @@ function getConvexGlobal(): ConvexGlobal {
   return store;
 }
 
+// Globals that libraries (e.g. workflow engines) may patch during function
+// execution. Each handler invocation gets its own AsyncLocalStorage context,
+// so patches are isolated per-context and nested Convex calls automatically
+// see the original (real) globals. Only assignments are isolated: deleting or
+// redefining a global bypasses its accessor, and mutating an object in place
+// still changes the shared object. Assign undefined to hide a global instead.
+const PATCHABLE_GLOBALS = [
+  "setTimeout",
+  "clearTimeout",
+  "setInterval",
+  "clearInterval",
+  "fetch",
+  "Date",
+  "Math",
+  "console",
+  "process",
+  "crypto",
+  "Crypto",
+  "CryptoKey",
+  "SubtleCrypto",
+  "atob",
+  "btoa",
+  "Request",
+  "Response",
+  "Headers",
+  "URL",
+  "URLSearchParams",
+  "AbortController",
+  "TextEncoder",
+  "TextDecoder",
+  "structuredClone",
+  "queueMicrotask",
+  "performance",
+] as const;
+
+type GlobalOverrides = Record<string, unknown>;
+const globalOverridesStorage = new AsyncLocalStorage<GlobalOverrides>();
+
+// The framework's own scheduler needs setTimeout even when running inside a
+// transaction context where setTimeout is disallowed for user code. Exit the
+// override store before reading globalThis.setTimeout so we get the underlying
+// value (which still honors vitest fake timers, since those replace the proxy
+// target rather than entering an ALS context). Registering the timer outside
+// the store also means the callback doesn't inherit the scheduling function's
+// overrides. Unlike `realSetTimeout`, this is still fake-timer aware, so
+// scheduled functions fire when a test advances timers.
+function frameworkSetTimeout(
+  cb: (...args: unknown[]) => void,
+  ms?: number,
+): ReturnType<typeof setTimeout> {
+  return globalOverridesStorage.exit(() => globalThis.setTimeout(cb, ms));
+}
+
+// Globals that the real Convex runtime does not provide inside queries and
+// mutations (transactions). Reading them is fine; calling them throws. Users
+// can still assign to `globalThis.fetch` etc. inside a handler — writes land
+// in the per-call ALS override map and replace the sentinel for that call.
+function disallowedInTransaction(name: string): (...args: unknown[]) => never {
+  return () => {
+    throw new Error(
+      `\`${name}\` is not supported in Convex queries or mutations. ` +
+        `Move this code to an action; a mutation can start one with ` +
+        `\`ctx.scheduler.runAfter(0, ...)\`.`,
+    );
+  };
+}
+
+function transactionGlobalOverrides(): GlobalOverrides {
+  return {
+    fetch: disallowedInTransaction("fetch"),
+    setTimeout: disallowedInTransaction("setTimeout"),
+    clearTimeout: disallowedInTransaction("clearTimeout"),
+    setInterval: disallowedInTransaction("setInterval"),
+    clearInterval: disallowedInTransaction("clearInterval"),
+  };
+}
+
+// Replace tracked globals with ALS-backed getter/setters so that writes
+// from user code land in the current context's override map while reads
+// fall through to the original value when no override exists.
+let _globalProxiesInstalled = false;
+function installGlobalProxies() {
+  if (_globalProxiesInstalled) return;
+  _globalProxiesInstalled = true;
+
+  const g = globalThis as Record<string, unknown>;
+  const originals: Record<string, unknown> = {};
+
+  for (const key of PATCHABLE_GLOBALS) {
+    if (!(key in g)) continue;
+    const descriptor = Object.getOwnPropertyDescriptor(g, key);
+    originals[key] = g[key];
+
+    try {
+      Object.defineProperty(g, key, {
+        get() {
+          const store = globalOverridesStorage.getStore();
+          return store && key in store ? store[key] : originals[key];
+        },
+        set(value: unknown) {
+          const store = globalOverridesStorage.getStore();
+          if (store) {
+            store[key] = value;
+          } else {
+            originals[key] = value;
+          }
+        },
+        configurable: true,
+        enumerable: descriptor?.enumerable ?? false,
+      });
+    } catch {
+      // Some globals (e.g. crypto) may not be configurable.
+    }
+  }
+}
+
 // Install a permanent global proxy so the Convex runtime's
 // `Convex.syscall` / `Convex.asyncSyscall` / `Convex.jsSyscall`
 // always delegate to the current test's ALS context.
@@ -2197,6 +2316,7 @@ let _globalProxyInstalled = false;
 function ensureGlobalProxy() {
   if (_globalProxyInstalled) return;
   _globalProxyInstalled = true;
+  installGlobalProxies();
   (global as unknown as { Convex: ConvexGlobal }).Convex = {
     get syscall() {
       return getConvexGlobal().syscall;
@@ -2565,7 +2685,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           auth: authStorage.getStore() ?? auth,
           ...extraCtx,
         };
-        return handler(testCtx, a);
+        return globalOverridesStorage.run(transactionGlobalOverrides(), () =>
+          handler(testCtx, a),
+        );
       },
     });
     const transactionManager = getTransactionManager();
@@ -2620,7 +2742,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     const q = queryGeneric({
       handler: (ctx: any, a: any) => {
         const testCtx = { ...ctx, auth: authStorage.getStore() ?? auth };
-        return handler(testCtx, a);
+        return globalOverridesStorage.run(transactionGlobalOverrides(), () =>
+          handler(testCtx, a),
+        );
       },
     });
     const transactionManager = getTransactionManager();
@@ -2683,7 +2807,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           runAction: ctxRunAction,
           auth: authStorage.getStore() ?? auth,
         };
-        return handler(testCtx, innerArgs);
+        return globalOverridesStorage.run({}, () =>
+          handler(testCtx, innerArgs),
+        );
       },
     });
     const authForChild = authForComponent(functionPath.componentPath);
@@ -3027,7 +3153,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           runAction: byType.action,
           auth,
         };
-        return getHandler(func)(testCtx, a);
+        return globalOverridesStorage.run({}, () =>
+          getHandler(func)(testCtx, a),
+        );
       });
       const httpCtx: ExecutionContext = {
         componentPath: getCurrentComponentPath(),
