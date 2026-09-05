@@ -1973,6 +1973,9 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   /**
    * Read from and write to the mock backend.
    *
+   * The callback runs in a transaction, so `fetch` and timers are unavailable.
+   * Perform setup that needs them in the test body before calling `run`.
+   *
    * @param func The async function that reads or writes to the mock backend.
    *   It receives a ctx as its first argument that conforms to
    *   {@link GenericMutationCtx},
@@ -2279,6 +2282,7 @@ function installGlobalProxies() {
 
   for (const key of PATCHABLE_GLOBALS) {
     if (!(key in g)) continue;
+    const descriptor = Object.getOwnPropertyDescriptor(g, key);
     originals[key] = g[key];
 
     try {
@@ -2296,7 +2300,7 @@ function installGlobalProxies() {
           }
         },
         configurable: true,
-        enumerable: true,
+        enumerable: descriptor?.enumerable ?? false,
       });
     } catch {
       // Some globals (e.g. crypto) may not be configurable.
