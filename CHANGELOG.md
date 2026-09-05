@@ -1,10 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.0.57-alpha.0
 
+- Stash and restore globals for tests in ALS for better isolation.
+- Now rejects usage of fetch in query/mutation and other behavior to better
+  match the Convex runtime constraints.
 - Reject function `args` validators that aren't an object or `v.any()`, matching
   the error the real backend raises at push time. Previously e.g. a top-level
   `v.union(...)` args validator worked in tests but failed to deploy.
+- Adds support for upcoming feature (snapshotTs) not yet released.
 
 ## 0.0.56
 
