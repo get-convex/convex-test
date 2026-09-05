@@ -159,7 +159,7 @@ test("staged rows sort after committed ones", async () => {
   });
 });
 
-test("a rolled back mutation writes nothing and still advances the last commit timestamp", async () => {
+test("a rolled back mutation writes nothing, and later commits still advance", async () => {
   const t = convexTest(schema);
   const before = await t.mutation(api.commitTs.returnCommitTs, {});
   await expect(t.mutation(api.commitTs.insertThenThrow, {})).rejects.toThrow(
