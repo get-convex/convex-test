@@ -2192,7 +2192,9 @@ function getConvexGlobal(): ConvexGlobal {
 // Globals that libraries (e.g. workflow engines) may patch during function
 // execution. Each handler invocation gets its own AsyncLocalStorage context,
 // so patches are isolated per-context and nested Convex calls automatically
-// see the original (real) globals.
+// see the original (real) globals. Only assignments are isolated: deleting or
+// redefining a global bypasses its accessor, and mutating an object in place
+// still changes the shared object. Assign undefined to hide a global instead.
 const PATCHABLE_GLOBALS = [
   "setTimeout",
   "clearTimeout",
@@ -2200,8 +2202,13 @@ const PATCHABLE_GLOBALS = [
   "clearInterval",
   "fetch",
   "Date",
+  "Math",
   "console",
+  "process",
   "crypto",
+  "Crypto",
+  "CryptoKey",
+  "SubtleCrypto",
   "atob",
   "btoa",
   "Request",

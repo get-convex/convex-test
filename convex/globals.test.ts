@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { convexTest } from "../index";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
 test("mutation: nested query sees real globals, not patched ones", async () => {
@@ -13,6 +13,64 @@ test("mutation: nested query sees real globals, not patched ones", async () => {
   // After nested call, patch is restored
   expect(result.after).toBe("patched-by-mutation");
 });
+
+test("nested mutations do not consume the caller's random sequence", async () => {
+  const t = convexTest(schema);
+  const sample = (runNested: boolean) =>
+    t.mutation(async (ctx) => {
+      const originalMath = Math;
+      const patchedMath: Math = Object.create(originalMath);
+      let draws = 0;
+      patchedMath.random = () => ++draws / 10;
+      globalThis.Math = patchedMath;
+      try {
+        const before = Math.random();
+        if (runNested) {
+          await ctx.runMutation(internal.globals.consumeRandom);
+        }
+        return [before, Math.random()];
+      } finally {
+        globalThis.Math = originalMath;
+      }
+    });
+
+  // Replaying a recorded child result must not change the caller's sequence.
+  expect(await sample(true)).toEqual([0.1, 0.2]);
+  expect(await sample(false)).toEqual([0.1, 0.2]);
+});
+
+test.each(["process", "Crypto", "crypto", "CryptoKey", "SubtleCrypto"])(
+  "assigning undefined to %s is isolated from nested calls and the test",
+  async (name) => {
+    const t = convexTest(schema);
+    const globals = globalThis as Record<string, unknown>;
+    const original = globals[name];
+    expect(original).toBeDefined();
+    const originalType = await t.query(internal.globals.readGlobalType, {
+      name,
+    });
+    try {
+      const result = await t.mutation(async (ctx) => {
+        globals[name] = undefined;
+        const before = typeof globals[name];
+        const nested = await ctx.runQuery(internal.globals.readGlobalType, {
+          name,
+        });
+        return { before, nested, after: typeof globals[name] };
+      });
+
+      expect(globals[name] === original).toBe(true);
+      expect(result).toEqual({
+        before: "undefined",
+        nested: originalType,
+        after: "undefined",
+      });
+    } finally {
+      // Keep the runner usable even when isolation regresses for process.
+      globals[name] = original;
+    }
+  },
+);
 
 test("action: nested mutation sees real globals, not patched ones", async () => {
   const t = convexTest(schema);
@@ -36,8 +94,8 @@ test("nested action gets its own global context", async () => {
 test("parallel actions have isolated globals", async () => {
   const t = convexTest(schema);
   const [resultA, resultB] = await Promise.all([
-    t.action(internal.globals.actionPatchA, { delayMs: 10 }),
-    t.action(internal.globals.actionPatchB, { delayMs: 10 }),
+    t.action(api.globals.actionPatchA, { delayMs: 10 }),
+    t.action(api.globals.actionPatchB, { delayMs: 10 }),
   ]);
   // Each action should see only its own patch
   expect(resultA).toBe("patched-A");

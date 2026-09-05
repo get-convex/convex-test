@@ -43,6 +43,19 @@ export const readAtob = internalQuery({
   },
 });
 
+export const consumeRandom = internalMutation({
+  args: {},
+  returns: v.number(),
+  handler: async () => Math.random(),
+});
+
+export const readGlobalType = internalQuery({
+  args: { name: v.string() },
+  returns: v.string(),
+  handler: async (_ctx, { name }) =>
+    typeof (globalThis as Record<string, unknown>)[name],
+});
+
 // An action that patches a global, calls a nested mutation, and verifies isolation
 export const actionPatchingGlobal = internalAction({
   args: {},
