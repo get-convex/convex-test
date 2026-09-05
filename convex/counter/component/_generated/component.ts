@@ -96,5 +96,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         any,
         Name
       >;
+      snapshot: FunctionReference<"query", "internal", {}, bigint, Name>;
     };
   };
