@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Reject function `args` validators that aren't an object or `v.any()`, matching
+  the error the real backend raises at push time. Previously e.g. a top-level
+  `v.union(...)` args validator worked in tests but failed to deploy.
+
 ## 0.0.56
 
 - Document the second parameter to `finishAllScheduledFunctions`

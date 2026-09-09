@@ -57,6 +57,20 @@ export const componentMutationWithNumberArg = mutation({
   },
 });
 
+export const queryWithObjectValidatorArgs = query({
+  args: v.object({ a: v.number() }),
+  handler: () => {
+    return "ok";
+  },
+});
+
+export const queryWithAnyArgs = query({
+  args: v.any(),
+  handler: () => {
+    return "ok";
+  },
+});
+
 export const queryWithUnionArg = query({
   args: {
     a: v.union(v.number(), v.string()),
