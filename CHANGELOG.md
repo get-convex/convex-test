@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.0.57
 
 - Reject function `args` validators that aren't an object or `v.any()`, matching
   the error the real backend raises at push time. Previously e.g. a top-level
-  `v.union(...)` args validator worked in tests but failed to deploy.
+  `v.union(...)` args validator worked in tests but failed to deploy. (#138)
+- Support upcoming feature ctx.meta.getSnapshotTs()
 
 ## 0.0.56
 
