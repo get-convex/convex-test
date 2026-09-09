@@ -1386,6 +1386,11 @@ function syscallImpl() {
     const args = JSON.parse(jsonArgs);
     const db = getDb();
     switch (op) {
+      case "1.0/getSnapshotTs": {
+        return JSON.stringify(
+          convexToJson(getTransactionManager().getSnapshotTs()),
+        );
+      }
       case "1.0/queryStream": {
         const { query } = args;
         const tracker = getTransactionManager().getMetricsTracker();
@@ -2267,7 +2272,8 @@ class TransactionManager {
   // `startTransaction` / `commit` / `rollback` in lockstep with the databases'.
   private _metricsTracker: TransactionMetricsTracker | null = null;
   private _limitsConfig: Partial<TransactionMetrics> | boolean;
-  // The last commit timestamp handed out. Strictly increases across transactions.
+  // The latest committed transaction's timestamp, in Unix nanoseconds.
+  // Zero represents the initial empty database, before any commits.
   private _lastCommitTs: bigint = 0n;
 
   constructor(limitsConfig: Partial<TransactionMetrics> | boolean = false) {
@@ -2312,13 +2318,25 @@ class TransactionManager {
     return this._metricsTracker;
   }
 
+  getSnapshotTs(): bigint {
+    if (!this.isInTransaction()) {
+      throw new Error(
+        "getSnapshotTs() can only be called from a query or mutation.",
+      );
+    }
+    // Top-level transactions are serialized and nested commits don't advance
+    // _lastCommitTs, so it remains the latest commit known at transaction start.
+    return this._lastCommitTs;
+  }
+
   // Returns the transaction's commit timestamp, or null for a nested commit,
   // whose writes stay pending until the outermost transaction commits.
   commit(isNested: boolean): bigint | null {
     let commitTs: bigint | null = null;
     if (!isNested) {
       const nowNanos = BigInt(Date.now()) * 1_000_000n;
-      // Bump by one if the clock has not advanced since the last commit.
+      // Assign a new timestamp only when committing the outermost transaction.
+      // Bump by one if the clock is frozen or has moved backwards.
       commitTs =
         nowNanos > this._lastCommitTs ? nowNanos : this._lastCommitTs + 1n;
       this._lastCommitTs = commitTs;

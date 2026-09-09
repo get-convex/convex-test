@@ -1,6 +1,13 @@
 import { v } from "convex/values";
 import { action, mutation, query } from "./_generated/server";
 import { api } from "./_generated/api";
+import { getSnapshotTs } from "../../getSnapshotTs";
+
+export const snapshot = query({
+  args: {},
+  returns: v.int64(),
+  handler: () => getSnapshotTs(),
+});
 
 export const add = mutation({
   args: {
