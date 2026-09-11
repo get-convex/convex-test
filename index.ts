@@ -1691,7 +1691,7 @@ function asyncSyscallImpl() {
         // rather than inheriting a stale parent lock.
         nestedTxStorage.exit(() => {
           scheduler.timerScheduled();
-          setTimeout(
+          frameworkSetTimeout(
             () => {
               scheduler.timerFired();
               // Scheduled functions run without auth context, even if
@@ -1978,6 +1978,9 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   /**
    * Read from and write to the mock backend.
    *
+   * The callback runs in a transaction, so `fetch` and timers are unavailable.
+   * Perform setup that needs them in the test body before calling `run`.
+   *
    * @param func The async function that reads or writes to the mock backend.
    *   It receives a ctx as its first argument that conforms to
    *   {@link GenericMutationCtx},
@@ -2194,6 +2197,140 @@ function getConvexGlobal(): ConvexGlobal {
   return store;
 }
 
+/*
+ * Globals that libraries (e.g. workflow engines) may override during a handler.
+ * Each invocation gets its own AsyncLocalStorage context. Nested Convex calls
+ * start from the test environment's globals, with their own runtime restrictions,
+ * instead of inheriting the caller's overrides.
+ *
+ * Known limitation: isolation relies on the getters/setters installed below:
+ * ✅ `globalThis.Math = replacement` calls the setter, isolating the replacement.
+ * ❌ `delete globalThis.crypto` removes the getter/setter entirely.
+ * ❌ `Object.defineProperty(globalThis, "Math", { value: replacement })` replaces
+ *    the getter/setter without calling it, changing the global for all handlers.
+ * ❌ `Math.random = replacement` changes a property of the shared Math object,
+ *    without calling the setter for globalThis.Math.
+ *
+ * Replacing an accessor bypasses isolation and runtime restrictions even when
+ * done in test setup before calling a handler. For example, vi.stubGlobal uses
+ * Object.defineProperty, so it also bypasses them when called after installation.
+ *
+ * To work around this limitation, assign a replacement object to the global.
+ * To make a global's value unavailable, assign undefined instead of using delete
+ * (the property will still exist). Only the globals listed below that are present
+ * and configurable in the test environment can be isolated. Assignments outside
+ * handlers change the shared test environment and must be restored by the test.
+ */
+const PATCHABLE_GLOBALS = [
+  "setTimeout",
+  "clearTimeout",
+  "setInterval",
+  "clearInterval",
+  "fetch",
+  "Date",
+  "Math",
+  "console",
+  "process",
+  "crypto",
+  "Crypto",
+  "CryptoKey",
+  "SubtleCrypto",
+  "atob",
+  "btoa",
+  "Request",
+  "Response",
+  "Headers",
+  "URL",
+  "URLSearchParams",
+  "AbortController",
+  "TextEncoder",
+  "TextDecoder",
+  "structuredClone",
+  "queueMicrotask",
+  "performance",
+] as const;
+
+type GlobalOverrides = Record<string, unknown>;
+const globalOverridesStorage = new AsyncLocalStorage<GlobalOverrides>();
+
+// The framework's own scheduler needs setTimeout even when running inside a
+// transaction context where setTimeout is disallowed for user code. Exit the
+// override store before reading globalThis.setTimeout so we get the underlying
+// value (which still honors vitest fake timers, since those replace the proxy
+// target rather than entering an ALS context). Registering the timer outside
+// the store also means the callback doesn't inherit the scheduling function's
+// overrides. Unlike `realSetTimeout`, this is still fake-timer aware, so
+// scheduled functions fire when a test advances timers.
+function frameworkSetTimeout(
+  cb: (...args: unknown[]) => void,
+  ms?: number,
+): ReturnType<typeof setTimeout> {
+  return globalOverridesStorage.exit(() => globalThis.setTimeout(cb, ms));
+}
+
+// Globals that the real Convex runtime does not provide inside queries and
+// mutations (transactions). Reading them is fine; calling them throws. Users
+// can still assign to `globalThis.fetch` etc. inside a handler — writes land
+// in the per-call ALS override map and replace the sentinel for that call.
+function disallowedInTransaction(name: string): (...args: unknown[]) => never {
+  return () => {
+    throw new Error(
+      `\`${name}\` is not supported in Convex queries or mutations. ` +
+        `Move this code to an action; a mutation can start one with ` +
+        `\`ctx.scheduler.runAfter(0, ...)\`.`,
+    );
+  };
+}
+
+function transactionGlobalOverrides(): GlobalOverrides {
+  return {
+    fetch: disallowedInTransaction("fetch"),
+    setTimeout: disallowedInTransaction("setTimeout"),
+    clearTimeout: disallowedInTransaction("clearTimeout"),
+    setInterval: disallowedInTransaction("setInterval"),
+    clearInterval: disallowedInTransaction("clearInterval"),
+  };
+}
+
+// Replace tracked globals with ALS-backed getter/setters so that writes
+// from user code land in the current context's override map while reads
+// fall through to the original value when no override exists.
+let _globalProxiesInstalled = false;
+function installGlobalProxies() {
+  if (_globalProxiesInstalled) return;
+  _globalProxiesInstalled = true;
+
+  const g = globalThis as Record<string, unknown>;
+  const originals: Record<string, unknown> = {};
+
+  for (const key of PATCHABLE_GLOBALS) {
+    if (!(key in g)) continue;
+    const descriptor = Object.getOwnPropertyDescriptor(g, key);
+    originals[key] = g[key];
+
+    try {
+      Object.defineProperty(g, key, {
+        get() {
+          const store = globalOverridesStorage.getStore();
+          return store && key in store ? store[key] : originals[key];
+        },
+        set(value: unknown) {
+          const store = globalOverridesStorage.getStore();
+          if (store) {
+            store[key] = value;
+          } else {
+            originals[key] = value;
+          }
+        },
+        configurable: true,
+        enumerable: descriptor?.enumerable ?? false,
+      });
+    } catch {
+      // Some globals (e.g. crypto) may not be configurable.
+    }
+  }
+}
+
 // Install a permanent global proxy so the Convex runtime's
 // `Convex.syscall` / `Convex.asyncSyscall` / `Convex.jsSyscall`
 // always delegate to the current test's ALS context.
@@ -2202,6 +2339,7 @@ let _globalProxyInstalled = false;
 function ensureGlobalProxy() {
   if (_globalProxyInstalled) return;
   _globalProxyInstalled = true;
+  installGlobalProxies();
   (global as unknown as { Convex: ConvexGlobal }).Convex = {
     get syscall() {
       return getConvexGlobal().syscall;
@@ -2559,6 +2697,10 @@ function yieldThroughRealTimers(): Promise<void> {
   return new Promise<void>((r) => realSetTimeout(r, 0));
 }
 
+// Request IDs are internal bookkeeping. Generating them must not consume a
+// handler's mocked Math.random sequence. The prefix marks these as test-only IDs.
+let nextRequestId = 0;
+
 function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
   // Auth doesn't propagate across component boundaries.
   function authForComponent(componentPath: string) {
@@ -2583,7 +2725,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           auth: authStorage.getStore() ?? auth,
           ...extraCtx,
         };
-        return handler(testCtx, a);
+        return globalOverridesStorage.run(transactionGlobalOverrides(), () =>
+          handler(testCtx, a),
+        );
       },
     });
     const transactionManager = getTransactionManager();
@@ -2638,7 +2782,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     const q = queryGeneric({
       handler: (ctx: any, a: any) => {
         const testCtx = { ...ctx, auth: authStorage.getStore() ?? auth };
-        return handler(testCtx, a);
+        return globalOverridesStorage.run(transactionGlobalOverrides(), () =>
+          handler(testCtx, a),
+        );
       },
     });
     const transactionManager = getTransactionManager();
@@ -2701,7 +2847,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           runAction: ctxRunAction,
           auth: authStorage.getStore() ?? auth,
         };
-        return handler(testCtx, innerArgs);
+        return globalOverridesStorage.run({}, () =>
+          handler(testCtx, innerArgs),
+        );
       },
     });
     const authForChild = authForComponent(functionPath.componentPath);
@@ -2713,7 +2861,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       paginatedQueries: 0,
     };
     return await executionContextStorage.run(childCtx, async () => {
-      const requestId = "" + Math.random();
+      const requestId = `fake-request-id-${nextRequestId++}`;
       try {
         const rawResult = await authStorage.run(authForChild, () =>
           (
@@ -2989,8 +3137,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         );
       },
     });
-    // Real backend uses different ID format
-    const requestId = "" + Math.random();
+    const requestId = `fake-request-id-${nextRequestId++}`;
     try {
       const rawResult = await (
         a as unknown as {
@@ -3045,7 +3192,9 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           runAction: byType.action,
           auth,
         };
-        return getHandler(func)(testCtx, a);
+        return globalOverridesStorage.run({}, () =>
+          getHandler(func)(testCtx, a),
+        );
       });
       const httpCtx: ExecutionContext = {
         componentPath: getCurrentComponentPath(),

@@ -19,6 +19,7 @@ import type * as explicitTableNames from "../explicitTableNames.js";
 import type * as getDeploymentMetadata from "../getDeploymentMetadata.js";
 import type * as getFunctionMetadata from "../getFunctionMetadata.js";
 import type * as getSnapshotTs from "../getSnapshotTs.js";
+import type * as globals from "../globals.js";
 import type * as helpers from "../helpers.js";
 import type * as http from "../http.js";
 import type * as messages from "../messages.js";
@@ -50,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   getDeploymentMetadata: typeof getDeploymentMetadata;
   getFunctionMetadata: typeof getFunctionMetadata;
   getSnapshotTs: typeof getSnapshotTs;
+  globals: typeof globals;
   helpers: typeof helpers;
   http: typeof http;
   messages: typeof messages;
