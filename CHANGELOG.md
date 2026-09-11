@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `ctx.storage.generateUploadUrl()` no longer consumes randomness from a handler
+  that mocked `Math.random`, and returns a unique URL even when it did.
+
 ## 0.0.58
 
 - Globals modified within query/mutation/actions (e.g. for Workflow) are now
