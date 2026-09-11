@@ -2213,11 +2213,11 @@ function getConvexGlobal(): ConvexGlobal {
  *
  * At handler entry we rewrap globals replaced by test setup (including
  * vi.stubGlobal), using the replacement as the shared default. Replacing or
- * deleting a property from inside a handler still bypasses isolation.
+ * deleting a property from inside a handler bypasses isolation.
  *
  * To work around this limitation, assign a replacement object to the global.
  * To make a global's value unavailable, assign undefined instead of using delete
- * (the property will still exist). Only the globals listed below that are present
+ * (the property remains present). Only the globals listed below that are present
  * and configurable in the test environment can be isolated. Assignments outside
  * handlers change the shared test environment and must be restored by the test.
  */
@@ -2256,10 +2256,10 @@ const globalOverridesStorage = new AsyncLocalStorage<GlobalOverrides>();
 // The framework's own scheduler needs setTimeout even when running inside a
 // transaction context where setTimeout is disallowed for user code. Exit the
 // override store before reading globalThis.setTimeout so we get the underlying
-// value (which still honors vitest fake timers, since those replace the proxy
+// value (which honors vitest fake timers, since those replace the proxy
 // target rather than entering an ALS context). Registering the timer outside
 // the store also means the callback doesn't inherit the scheduling function's
-// overrides. Unlike `realSetTimeout`, this is still fake-timer aware, so
+// overrides. Unlike `realSetTimeout`, this is fake-timer aware, so
 // scheduled functions fire when a test advances timers.
 function frameworkSetTimeout(
   cb: (...args: unknown[]) => void,
@@ -2269,8 +2269,8 @@ function frameworkSetTimeout(
 }
 
 // Globals that the real Convex runtime does not provide inside queries and
-// mutations (transactions). Reading them is fine; calling them throws. Users
-// can still assign to `globalThis.fetch` etc. inside a handler — writes land
+// mutations (transactions). Reading them is fine; calling them throws. Handlers
+// can assign to `globalThis.fetch` etc. — writes land
 // in the per-call ALS override map and replace the sentinel for that call.
 function disallowedInTransaction(name: string): (...args: unknown[]) => never {
   return () => {
@@ -2312,14 +2312,21 @@ function installGlobalProxies() {
       // eslint-disable-next-line @typescript-eslint/unbound-method -- Compare accessor identity without calling it.
       descriptor?.get && globalProxySetters.get(descriptor.get);
     if (installedSetter && installedSetter === descriptor.set) continue;
+    // Some environments or test setups make globals non-configurable.
+    // Those properties cannot be replaced with our accessors, even if writable.
     if (descriptor?.configurable === false) continue;
 
     // Each replacement gets fresh accessors and its own default. Updating an
     // older accessor's default would make vi.unstubAllGlobals restore the mock
     // instead of the value from before vi.stubGlobal saved that accessor.
+    //
+    // Run this synchronous read outside the overrides context; exit restores
+    // the caller's context before returning. A replacement getter may delegate
+    // to one of our accessors, which must see the shared default here.
     let defaultValue = globalOverridesStorage.exit(() => g[key]);
     const get = () => {
       const store = globalOverridesStorage.getStore();
+      // Reading g[key] here would recursively invoke this getter.
       return store && key in store ? store[key] : defaultValue;
     };
     const set = (value: unknown) => {
@@ -2327,6 +2334,7 @@ function installGlobalProxies() {
       if (store) {
         store[key] = value;
       } else {
+        // Assignments outside handlers update the shared default for this accessor.
         defaultValue = value;
       }
     };
