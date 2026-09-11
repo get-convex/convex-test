@@ -2197,12 +2197,30 @@ function getConvexGlobal(): ConvexGlobal {
   return store;
 }
 
-// Globals that libraries (e.g. workflow engines) may patch during function
-// execution. Each handler invocation gets its own AsyncLocalStorage context,
-// so patches are isolated per-context and nested Convex calls automatically
-// see the original (real) globals. Only assignments are isolated: deleting or
-// redefining a global bypasses its accessor, and mutating an object in place
-// still changes the shared object. Assign undefined to hide a global instead.
+/*
+ * Globals that libraries (e.g. workflow engines) may override during a handler.
+ * Each invocation gets its own AsyncLocalStorage context. Nested Convex calls
+ * start from the test environment's globals, with their own runtime restrictions,
+ * instead of inheriting the caller's overrides.
+ *
+ * Known limitation: isolation relies on the getters/setters installed below:
+ * ✅ `globalThis.Math = replacement` calls the setter, isolating the replacement.
+ * ❌ `delete globalThis.crypto` removes the getter/setter entirely.
+ * ❌ `Object.defineProperty(globalThis, "Math", { value: replacement })` replaces
+ *    the getter/setter without calling it, changing the global for all handlers.
+ * ❌ `Math.random = replacement` changes a property of the shared Math object,
+ *    without calling the setter for globalThis.Math.
+ *
+ * Replacing an accessor bypasses isolation and runtime restrictions even when
+ * done in test setup before calling a handler. For example, vi.stubGlobal uses
+ * Object.defineProperty, so it also bypasses them when called after installation.
+ *
+ * To work around this limitation, assign a replacement object to the global.
+ * To make a global's value unavailable, assign undefined instead of using delete
+ * (the property will still exist). Only the globals listed below that are present
+ * and configurable in the test environment can be isolated. Assignments outside
+ * handlers change the shared test environment and must be restored by the test.
+ */
 const PATCHABLE_GLOBALS = [
   "setTimeout",
   "clearTimeout",
