@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.0.57
+## Unreleased
 
 - Queries and mutations now throw when calling `fetch`, `setTimeout`,
   `clearTimeout`, `setInterval`, or `clearInterval`. These restrictions also apply
@@ -8,6 +8,9 @@
   fetches data or waits on timers into the test body before calling these methods.
   Use actions for application code that needs these APIs; scheduling through
   `ctx.scheduler` remains supported.
+
+## 0.0.57
+
 - Reject function `args` validators that aren't an object or `v.any()`, matching
   the error the real backend raises at push time. Previously e.g. a top-level
   `v.union(...)` args validator worked in tests but failed to deploy. (#138)
