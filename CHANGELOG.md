@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pin `Date.now()` and `new Date()` for each query or mutation, including nested
+  calls and `t.run`, at or after the transaction's snapshot timestamp.
 - Queries and mutations now throw when calling `fetch`, `setTimeout`,
   `clearTimeout`, `setInterval`, or `clearInterval`. These restrictions also apply
   to `t.run` and inline `t.query` / `t.mutation` callbacks. Move test setup that
