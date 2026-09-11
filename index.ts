@@ -2697,6 +2697,10 @@ function yieldThroughRealTimers(): Promise<void> {
   return new Promise<void>((r) => realSetTimeout(r, 0));
 }
 
+// Request IDs are internal bookkeeping. Generating them must not consume a
+// handler's mocked Math.random sequence. The prefix marks these as test-only IDs.
+let nextRequestId = 0;
+
 function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
   // Auth doesn't propagate across component boundaries.
   function authForComponent(componentPath: string) {
@@ -2857,7 +2861,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       paginatedQueries: 0,
     };
     return await executionContextStorage.run(childCtx, async () => {
-      const requestId = "" + Math.random();
+      const requestId = `fake-request-id-${nextRequestId++}`;
       try {
         const rawResult = await authStorage.run(authForChild, () =>
           (
@@ -3133,8 +3137,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         );
       },
     });
-    // Real backend uses different ID format
-    const requestId = "" + Math.random();
+    const requestId = `fake-request-id-${nextRequestId++}`;
     try {
       const rawResult = await (
         a as unknown as {
