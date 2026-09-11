@@ -15,6 +15,11 @@
   identity. We made that change because we will soon add more methods in
   `TestConvexForDataModel`, and we want for these methods to be callable
   in any order.
+- Add implementation for `ctx.meta.getRequestMetadata()` in mutations, actions
+  and HTTP actions. Every call from the test starts a new request, and the
+  functions it calls share the request's `requestId`, components included.
+  Scheduled functions run as their own request, with their
+  `_scheduled_functions` document ID exposed as `scheduledFunctionId`.
 
 ## 0.0.57
 
