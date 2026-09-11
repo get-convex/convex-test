@@ -8,6 +8,7 @@
 
 - `npm run build` # includes lint & test
 - `npm run lint`
+- `npm run typecheck` # typechecks the `convex/` directory
 - `npm run format`
 - `npx vitest`
 
