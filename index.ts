@@ -2211,9 +2211,9 @@ function getConvexGlobal(): ConvexGlobal {
  * ❌ `Math.random = replacement` changes a property of the shared Math object,
  *    without calling the setter for globalThis.Math.
  *
- * Replacing an accessor bypasses isolation and runtime restrictions even when
- * done in test setup before calling a handler. For example, vi.stubGlobal uses
- * Object.defineProperty, so it also bypasses them when called after installation.
+ * At handler entry we rewrap globals replaced by test setup (including
+ * vi.stubGlobal), using the replacement as the shared default. Replacing or
+ * deleting a property from inside a handler still bypasses isolation.
  *
  * To work around this limitation, assign a replacement object to the global.
  * To make a global's value unavailable, assign undefined instead of using delete
@@ -2292,43 +2292,65 @@ function transactionGlobalOverrides(): GlobalOverrides {
   };
 }
 
-// Replace tracked globals with ALS-backed getter/setters so that writes
-// from user code land in the current context's override map while reads
-// fall through to the original value when no override exists.
-let _globalProxiesInstalled = false;
-function installGlobalProxies() {
-  if (_globalProxiesInstalled) return;
-  _globalProxiesInstalled = true;
+// Remember every installed getter/setter pair, including older pairs that
+// vi.unstubAllGlobals may restore. Weak references let unused pairs be collected.
+const globalProxySetters = new WeakMap<
+  () => unknown,
+  (value: unknown) => void
+>();
 
+// Rewrap tracked globals replaced by test setup, preserving the replacement as
+// the default outside handlers. Keep these accessors installed between calls:
+// removing them when one async handler finishes would affect overlapping calls.
+function installGlobalProxies() {
   const g = globalThis as Record<string, unknown>;
-  const originals: Record<string, unknown> = {};
 
   for (const key of PATCHABLE_GLOBALS) {
     if (!(key in g)) continue;
     const descriptor = Object.getOwnPropertyDescriptor(g, key);
-    originals[key] = g[key];
+    const installedSetter =
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- Compare accessor identity without calling it.
+      descriptor?.get && globalProxySetters.get(descriptor.get);
+    if (installedSetter && installedSetter === descriptor.set) continue;
+    if (descriptor?.configurable === false) continue;
+
+    // Each replacement gets fresh accessors and its own default. Updating an
+    // older accessor's default would make vi.unstubAllGlobals restore the mock
+    // instead of the value from before vi.stubGlobal saved that accessor.
+    let defaultValue = globalOverridesStorage.exit(() => g[key]);
+    const get = () => {
+      const store = globalOverridesStorage.getStore();
+      return store && key in store ? store[key] : defaultValue;
+    };
+    const set = (value: unknown) => {
+      const store = globalOverridesStorage.getStore();
+      if (store) {
+        store[key] = value;
+      } else {
+        defaultValue = value;
+      }
+    };
 
     try {
       Object.defineProperty(g, key, {
-        get() {
-          const store = globalOverridesStorage.getStore();
-          return store && key in store ? store[key] : originals[key];
-        },
-        set(value: unknown) {
-          const store = globalOverridesStorage.getStore();
-          if (store) {
-            store[key] = value;
-          } else {
-            originals[key] = value;
-          }
-        },
+        get,
+        set,
         configurable: true,
         enumerable: descriptor?.enumerable ?? false,
       });
+      globalProxySetters.set(get, set);
     } catch {
-      // Some globals (e.g. crypto) may not be configurable.
+      // Some environments may prevent replacing a global property.
     }
   }
+}
+
+function runWithGlobalOverrides<T>(
+  overrides: GlobalOverrides,
+  handler: () => T,
+) {
+  installGlobalProxies();
+  return globalOverridesStorage.run(overrides, handler);
 }
 
 // Install a permanent global proxy so the Convex runtime's
@@ -2725,7 +2747,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           auth: authStorage.getStore() ?? auth,
           ...extraCtx,
         };
-        return globalOverridesStorage.run(transactionGlobalOverrides(), () =>
+        return runWithGlobalOverrides(transactionGlobalOverrides(), () =>
           handler(testCtx, a),
         );
       },
@@ -2782,7 +2804,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
     const q = queryGeneric({
       handler: (ctx: any, a: any) => {
         const testCtx = { ...ctx, auth: authStorage.getStore() ?? auth };
-        return globalOverridesStorage.run(transactionGlobalOverrides(), () =>
+        return runWithGlobalOverrides(transactionGlobalOverrides(), () =>
           handler(testCtx, a),
         );
       },
@@ -2847,9 +2869,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           runAction: ctxRunAction,
           auth: authStorage.getStore() ?? auth,
         };
-        return globalOverridesStorage.run({}, () =>
-          handler(testCtx, innerArgs),
-        );
+        return runWithGlobalOverrides({}, () => handler(testCtx, innerArgs));
       },
     });
     const authForChild = authForComponent(functionPath.componentPath);
@@ -3192,9 +3212,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
           runAction: byType.action,
           auth,
         };
-        return globalOverridesStorage.run({}, () =>
-          getHandler(func)(testCtx, a),
-        );
+        return runWithGlobalOverrides({}, () => getHandler(func)(testCtx, a));
       });
       const httpCtx: ExecutionContext = {
         componentPath: getCurrentComponentPath(),
