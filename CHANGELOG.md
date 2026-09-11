@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.0.58
 
+- Globals modified within query/mutation/actions (e.g. for Workflow) are now
+  scoped so they don't contaminate other functions or tests.
 - Queries and mutations now throw when calling `fetch`, `setTimeout`,
   `clearTimeout`, `setInterval`, or `clearInterval`. These restrictions also apply
   to `t.run` and inline `t.query` / `t.mutation` callbacks. Move test setup that
