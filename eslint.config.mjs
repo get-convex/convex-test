@@ -61,6 +61,54 @@ export default defineConfig([
       "@typescript-eslint/require-await": "off",
     },
   },
+  {
+    // `installGlobalProxies` (see `PATCHABLE_GLOBALS` in `index.ts`) replaces
+    // these globals with accessors backed by AsyncLocalStorage, so reading one
+    // by its bare name can return a value that a test or a handler installed.
+    // Capture the global at module load when the framework needs the real one,
+    // or write `globalThis.<name>` where reading the live (possibly
+    // overridden) value is the intent.
+    files: ["index.ts", "transactionMetrics.ts"],
+    rules: {
+      "no-restricted-globals": [
+        "error",
+        ...[
+          "crypto",
+          "atob",
+          "btoa",
+          "structuredClone",
+          "fetch",
+          "setTimeout",
+          "clearTimeout",
+          "setInterval",
+          "clearInterval",
+          "Date",
+          "console",
+        ].map((name) => ({
+          name,
+          message:
+            `\`${name}\` is proxied per handler. Capture it at module load, ` +
+            `or write \`globalThis.${name}\` to read the live value on purpose.`,
+        })),
+      ],
+
+      // `Math` as a whole isn't restricted: `Math.floor` and friends are only
+      // at risk from a handler that replaces the whole object, and prefixing
+      // every one of them costs more than it saves. `Math.random` is different:
+      // it consumes a handler's mocked sequence, so the framework must never
+      // call it.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "MemberExpression[object.name='Math'][property.name='random']",
+          message:
+            "`Math.random` consumes a handler's mocked randomness. Use a " +
+            "counter for fake identifiers, or capture randomness at module load.",
+        },
+      ],
+    },
+  },
   globalIgnores([
     ".context/**",
     "**/.eslintrc.cjs",

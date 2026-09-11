@@ -77,3 +77,32 @@ export const mutationGenerateUploadUrl = internalMutation({
     return await ctx.storage.generateUploadUrl();
   },
 });
+
+/// globals that the framework uses internally
+
+// `convexTest` hashes stored blobs with `crypto` and `btoa`, and builds upload
+// tokens without randomness. Patching those globals here checks that storage
+// neither breaks nor observes the patches.
+export const actionStoreBlobWithPatchedGlobals = internalAction({
+  args: {
+    bytes: v.bytes(),
+  },
+  handler: async (ctx, { bytes }) => {
+    (globalThis as any).crypto = {};
+    (globalThis as any).btoa = () => "patched";
+    return await ctx.storage.store(new Blob([bytes]));
+  },
+});
+
+export const mutationGenerateUploadUrlsWithPatchedRandom = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const patchedMath = Object.create(Math) as Math;
+    patchedMath.random = () => 0.5;
+    (globalThis as any).Math = patchedMath;
+    return [
+      await ctx.storage.generateUploadUrl(),
+      await ctx.storage.generateUploadUrl(),
+    ];
+  },
+});

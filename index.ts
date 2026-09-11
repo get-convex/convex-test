@@ -252,7 +252,7 @@ class DatabaseFake {
   insert<Table extends TableName>(table: Table, value: any) {
     this._validate(table, value);
     const _id = this._generateId(table);
-    const now = Date.now();
+    const now = globalThis.Date.now();
     const _creationTime =
       now <= this._lastCreationTime ? this._lastCreationTime + 0.001 : now;
     this._lastCreationTime = _creationTime;
@@ -1726,7 +1726,7 @@ function asyncSyscallImpl() {
                     try {
                       await withAuth().fun(functionPath, parsedArgs);
                     } catch (error) {
-                      console.error(
+                      globalThis.console.error(
                         `Error when running scheduled function ${name}`,
                         error,
                       );
@@ -1735,7 +1735,7 @@ function asyncSyscallImpl() {
                         async () => {
                           db.patch("_scheduled_functions", jobId, {
                             state: { kind: "failed" },
-                            completedTime: Date.now(),
+                            completedTime: globalThis.Date.now(),
                           });
                         },
                       );
@@ -1762,7 +1762,7 @@ function asyncSyscallImpl() {
                 });
               scheduler.add(promise);
             },
-            Math.max(0, tsInSecs * 1000 - Date.now()),
+            Math.max(0, tsInSecs * 1000 - globalThis.Date.now()),
           );
         });
         return JSON.stringify(convexToJson(jobId));
@@ -1816,7 +1816,7 @@ function asyncSyscallImpl() {
         // In the real backend the token is cryptographically secure
         const url =
           "https://some-deployment.convex.cloud/api/storage/upload?token=" +
-          Math.random();
+          `fake-upload-token-${nextUploadToken++}`;
         return JSON.stringify(convexToJson(url));
       }
       case "1.0/count": {
@@ -1888,9 +1888,9 @@ async function writeToDatabase<T>(impl: (db: DatabaseFake) => Promise<T>) {
 
 async function blobSha(blob: Blob) {
   const arrayBuffer = await blob.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
+  const hashBuffer = await realCryptoSubtle.digest("SHA-256", arrayBuffer);
   const hashArray = new Uint8Array(hashBuffer);
-  return btoa(String.fromCharCode(...hashArray));
+  return realBtoa(String.fromCharCode(...hashArray));
 }
 
 export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
@@ -2472,7 +2472,7 @@ class TransactionManager {
   commit(isNested: boolean): bigint | null {
     let commitTs: bigint | null = null;
     if (!isNested) {
-      const nowNanos = BigInt(Date.now()) * 1_000_000n;
+      const nowNanos = BigInt(globalThis.Date.now()) * 1_000_000n;
       // Assign a new timestamp only when committing the outermost transaction.
       // Bump by one if the clock is frozen or has moved backwards.
       commitTs =
@@ -2692,6 +2692,8 @@ function yieldToEventLoop(): Promise<void> {
 // expired real timers fire. Awaiting a real 0ms timeout does: all timers
 // that expired earlier fire first.
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+const realCryptoSubtle = globalThis.crypto.subtle;
+const realBtoa = globalThis.btoa.bind(globalThis);
 
 function yieldThroughRealTimers(): Promise<void> {
   return new Promise<void>((r) => realSetTimeout(r, 0));
@@ -2700,6 +2702,9 @@ function yieldThroughRealTimers(): Promise<void> {
 // Request IDs are internal bookkeeping. Generating them must not consume a
 // handler's mocked Math.random sequence. The prefix marks these as test-only IDs.
 let nextRequestId = 0;
+
+// Upload tokens only have to be unique. The prefix marks them as test-only.
+let nextUploadToken = 0;
 
 function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
   // Auth doesn't propagate across component boundaries.

@@ -71,3 +71,29 @@ test("mutation generate upload URL", async () => {
   const result = await t.mutation(internal.storage.mutationGenerateUploadUrl);
   expect(result).toMatch("https://");
 });
+
+test("storing a blob doesn't go through patchable globals", async () => {
+  const t = convexTest(schema);
+  const bytes = new Uint8Array([0b00001100, 0b00000000]).buffer;
+  const storageId = await t.action(
+    internal.storage.actionStoreBlobWithPatchedGlobals,
+    { bytes },
+  );
+  const result = await t.query(internal.storage.listFiles);
+  expect(result).toMatchObject([
+    {
+      _id: storageId,
+      sha256: "v2DkNJys5rzg1VLo14NCjbZtDWSb2eQwo2J+LuFKyDk=",
+      size: 2,
+    },
+  ]);
+});
+
+test("upload URLs don't consume a handler's mocked randomness", async () => {
+  const t = convexTest(schema);
+  const [first, second] = await t.mutation(
+    internal.storage.mutationGenerateUploadUrlsWithPatchedRandom,
+  );
+  expect(first).not.toEqual(second);
+  expect(first).not.toMatch("0.5");
+});
