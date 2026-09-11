@@ -92,7 +92,7 @@ test.each(["process", "Crypto", "crypto", "CryptoKey", "SubtleCrypto"])(
       });
     } finally {
       // Keep the runner usable even when isolation regresses for process.
-      globals[name] = original;
+      if (globals[name] !== original) globals[name] = original;
     }
   },
 );

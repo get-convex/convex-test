@@ -2213,7 +2213,8 @@ function getConvexGlobal(): ConvexGlobal {
  *
  * At handler entry we rewrap globals replaced by test setup (including
  * vi.stubGlobal), using the replacement as the shared default. Replacing or
- * deleting a property from inside a handler bypasses isolation.
+ * deleting a property while a handler is running bypasses isolation, including
+ * when another test changes its shared mocks.
  *
  * To work around this limitation, assign a replacement object to the global.
  * To make a global's value unavailable, assign undefined instead of using delete
@@ -2316,26 +2317,40 @@ function installGlobalProxies() {
     // Those properties cannot be replaced with our accessors, even if writable.
     if (descriptor?.configurable === false) continue;
 
-    // Each replacement gets fresh accessors and its own default. Updating an
-    // older accessor's default would make vi.unstubAllGlobals restore the mock
-    // instead of the value from before vi.stubGlobal saved that accessor.
-    //
-    // Run this synchronous read outside the overrides context; exit restores
-    // the caller's context before returning. A replacement getter may delegate
-    // to one of our accessors, which must see the shared default here.
-    let defaultValue = globalOverridesStorage.exit(() => g[key]);
+    // Resolve inherited properties without evaluating getters during installation.
+    let originalDescriptor = descriptor;
+    for (
+      let prototype = Object.getPrototypeOf(g);
+      !originalDescriptor && prototype;
+      prototype = Object.getPrototypeOf(prototype)
+    ) {
+      originalDescriptor = Object.getOwnPropertyDescriptor(prototype, key);
+    }
+    if (!originalDescriptor) continue;
+
+    // Each installation owns a descriptor copy. Data properties use its value
+    // as mutable backing state; accessors delegate on each read/write with the
+    // global receiver and the reader's current context. Never read g[key] from
+    // our getter, which would recurse. Keeping older copies separate also lets
+    // vi.unstubAllGlobals restore the default from before a stub was installed.
+    const defaultDescriptor = originalDescriptor;
     const get = () => {
       const store = globalOverridesStorage.getStore();
-      // Reading g[key] here would recursively invoke this getter.
-      return store && key in store ? store[key] : defaultValue;
+      if (store && key in store) return store[key];
+      return "value" in defaultDescriptor
+        ? defaultDescriptor.value
+        : defaultDescriptor.get?.call(g);
     };
     const set = (value: unknown) => {
       const store = globalOverridesStorage.getStore();
       if (store) {
         store[key] = value;
+      } else if ("value" in defaultDescriptor && defaultDescriptor.writable) {
+        defaultDescriptor.value = value;
+      } else if (defaultDescriptor.set) {
+        defaultDescriptor.set.call(g, value);
       } else {
-        // Assignments outside handlers update the shared default for this accessor.
-        defaultValue = value;
+        throw new TypeError(`Cannot assign to read only global '${key}'`);
       }
     };
 
