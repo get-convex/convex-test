@@ -1912,7 +1912,7 @@ async function blobSha(blob: Blob) {
 }
 
 export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
-  TestConvexForDataModelAndIdentity<DataModelFromSchemaDefinition<SchemaDef>>;
+  TestConvexRoot<DataModelFromSchemaDefinition<SchemaDef>>;
 
 export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   /**
@@ -2083,9 +2083,11 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   ): TestConvexForDataModel<DataModel>;
 };
 
-export type TestConvexForDataModelAndIdentity<
-  DataModel extends GenericDataModel,
-> = {
+/**
+ * The accessor returned by {@link convexTest}. In addition to running
+ * functions, it can register components.
+ */
+export type TestConvexRoot<DataModel extends GenericDataModel> = {
   /**
    * Register a component, so that the functions of the app under test can call
    * it.
@@ -2096,6 +2098,13 @@ export type TestConvexForDataModelAndIdentity<
     glob: Record<string, () => Promise<any>>,
   ) => void;
 } & TestConvexForDataModel<DataModel>;
+
+/**
+ * @deprecated Use {@link TestConvexRoot} instead.
+ */
+export type TestConvexForDataModelAndIdentity<
+  DataModel extends GenericDataModel,
+> = TestConvexRoot<DataModel>;
 
 function getComponentInfo(componentPath: string): ComponentInfo {
   const convex = getConvexGlobal();
