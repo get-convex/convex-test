@@ -39,6 +39,31 @@ test("nested mutations do not consume the caller's random sequence", async () =>
   expect(await sample(false)).toEqual([0.1, 0.2]);
 });
 
+test.each(["action", "inline action", "run"])(
+  "nested %s does not consume the caller's random sequence",
+  async (method) => {
+    const t = convexTest(schema);
+    const result = await t.action(async (ctx) => {
+      const patchedMath: Math = Object.create(Math);
+      let draws = 0;
+      patchedMath.random = () => ++draws / 10;
+      globalThis.Math = patchedMath;
+
+      const before = Math.random();
+      if (method === "action") {
+        await ctx.runAction(internal.globals.readAtobAction);
+      } else if (method === "inline action") {
+        await t.action(async () => null);
+      } else {
+        await t.run(async () => null);
+      }
+      return [before, Math.random()];
+    });
+
+    expect(result).toEqual([0.1, 0.2]);
+  },
+);
+
 test.each(["process", "Crypto", "crypto", "CryptoKey", "SubtleCrypto"])(
   "assigning undefined to %s is isolated from nested calls and the test",
   async (name) => {
