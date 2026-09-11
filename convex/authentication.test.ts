@@ -15,6 +15,20 @@ test("generated attributes", async () => {
   expect(attributes!.subject).toBeTypeOf("string");
   expect(attributes!.issuer).toBeTypeOf("string");
 });
+test("accessors are immutable", async () => {
+  const t = convexTest(schema);
+  const asSarah = t.withIdentity({ name: "Sarah" });
+  // A narrowed accessor supports everything the original one does, including
+  // being narrowed again.
+  const asMichal = asSarah.withIdentity({ name: "Michal" });
+  const identity = (t: TestConvexForDataModel<DataModel>) =>
+    t.run((ctx) => ctx.auth.getUserIdentity());
+  expect(await identity(asMichal)).toMatchObject({ name: "Michal" });
+  // Neither of the accessors it was derived from is affected.
+  expect(await identity(asSarah)).toMatchObject({ name: "Sarah" });
+  expect(await identity(t)).toEqual(null);
+});
+
 async function runTest(
   fn: (t: TestConvexForDataModel<DataModel>) => Promise<string | null>,
 ) {

@@ -2065,15 +2065,15 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
     advanceTimers: () => void,
     maxIterations?: number,
   ) => Promise<void>;
-};
 
-export type TestConvexForDataModelAndIdentity<
-  DataModel extends GenericDataModel,
-> = {
   /**
    * To test functions which depend on the current authenticated user identity
    * you can create a version of the `t` accessor with given user identity
    * attributes.
+   *
+   * The instance this is called on is not affected, and it is possible to call
+   * `withIdentity` on the returned value again to call functions with a new identity.
+   *
    * @param identity A subset of {@link UserIdentity} attributes. If you
    *   don't provide `issuer`, `subject` or `tokenIdentifier` they are
    *   generated automatically.
@@ -2081,6 +2081,15 @@ export type TestConvexForDataModelAndIdentity<
   withIdentity(
     identity: Partial<UserIdentity>,
   ): TestConvexForDataModel<DataModel>;
+};
+
+export type TestConvexForDataModelAndIdentity<
+  DataModel extends GenericDataModel,
+> = {
+  /**
+   * Register a component, so that the functions of the app under test can call
+   * it.
+   */
   registerComponent: (
     componentPath: string,
     schema: SchemaDefinition<GenericSchema, boolean>,
@@ -2664,32 +2673,37 @@ export function convexTest<Schema extends GenericSchema>(
     return result;
   }
 
-  return {
-    withIdentity(identity: Partial<UserIdentity>) {
-      const subject =
-        identity.subject ?? "" + simpleHash(JSON.stringify(identity));
-      const issuer = identity.issuer ?? "https://convex.test";
-      const tokenIdentifier =
-        identity.tokenIdentifier ?? `${issuer}|${subject}`;
-      return wrapInContext(
-        withAuth(
+  function registerComponent(
+    componentPath: string,
+    schema: SchemaDefinition<GenericSchema, boolean>,
+    glob: Record<string, () => Promise<any>>,
+  ) {
+    const componentInfo = {
+      db: new DatabaseFake(schema, componentPath),
+      modules: moduleCache(glob),
+    };
+    convexGlobal.components[componentPath] = componentInfo;
+  }
+
+  // Each accessor is immutable: `withIdentity` returns a new one instead of
+  // modifying the accessor it was called on.
+  function testAccessor(auth: AuthFake): any {
+    return {
+      ...wrapInContext(withAuth(auth)),
+      withIdentity(identity: Partial<UserIdentity>) {
+        const subject =
+          identity.subject ?? "" + simpleHash(JSON.stringify(identity));
+        const issuer = identity.issuer ?? "https://convex.test";
+        const tokenIdentifier =
+          identity.tokenIdentifier ?? `${issuer}|${subject}`;
+        return testAccessor(
           new AuthFake({ ...identity, subject, issuer, tokenIdentifier }),
-        ),
-      );
-    },
-    ...wrapInContext(withAuth()),
-    registerComponent(
-      componentPath: string,
-      schema: SchemaDefinition<GenericSchema, boolean>,
-      glob: Record<string, () => Promise<any>>,
-    ) {
-      const componentInfo = {
-        db: new DatabaseFake(schema, componentPath),
-        modules: moduleCache(glob),
-      };
-      convexGlobal.components[componentPath] = componentInfo;
-    },
-  } as any;
+        );
+      },
+    };
+  }
+
+  return { ...testAccessor(new AuthFake()), registerComponent };
 }
 
 // Yield through a full event loop iteration so that dynamic import()
