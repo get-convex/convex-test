@@ -209,6 +209,26 @@ test("the auth token propagates to nested calls and components", async () => {
   expect(own.authToken).toEqual(expect.any(String));
   // Unlike the identity, the token of the request reaches components.
   expect(component).toEqual(own);
+  const recorded = await t.query(api.requestMetadata.recorded);
+  expect(recorded.map(({ label }) => label)).toEqual([
+    "mutationFromAction",
+    "actionFromAction",
+  ]);
+  for (const { metadata } of recorded) {
+    expect(metadata.authToken).toEqual(own.authToken);
+  }
+});
+
+test("a mutation calling a mutation shares the auth token", async () => {
+  const t = testWithCounter().withIdentity({ name: "Sarah" });
+  const { own, component } = await t.mutation(
+    api.requestMetadata.mutationCallingMutation,
+  );
+  expect(own.authToken).toEqual(expect.any(String));
+  expect(component).toEqual(own);
+  const recorded = await t.query(api.requestMetadata.recorded);
+  expect(recorded.map(({ label }) => label)).toEqual(["nested"]);
+  expect(recorded[0].metadata).toEqual(own);
 });
 
 test("both accessor methods can be combined in either order", async () => {
