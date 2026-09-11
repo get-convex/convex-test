@@ -2698,7 +2698,7 @@ function yieldThroughRealTimers(): Promise<void> {
 }
 
 // Request IDs are internal bookkeeping. Generating them must not consume a
-// handler's mocked Math.random sequence.
+// handler's mocked Math.random sequence. The prefix marks these as test-only IDs.
 let nextRequestId = 0;
 
 function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
@@ -2861,7 +2861,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
       paginatedQueries: 0,
     };
     return await executionContextStorage.run(childCtx, async () => {
-      const requestId = String(nextRequestId++);
+      const requestId = `fake-request-id-${nextRequestId++}`;
       try {
         const rawResult = await authStorage.run(authForChild, () =>
           (
@@ -3137,8 +3137,7 @@ function withAuth(auth: AuthFake = authStorage.getStore() ?? new AuthFake()) {
         );
       },
     });
-    // Real backend uses different ID format
-    const requestId = String(nextRequestId++);
+    const requestId = `fake-request-id-${nextRequestId++}`;
     try {
       const rawResult = await (
         a as unknown as {
