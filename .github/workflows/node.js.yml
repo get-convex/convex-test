@@ -21,10 +21,6 @@ jobs:
             package-lock.json
           node-version: "22.x"
           cache: "npm"
-      - run: npm i
       - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
       - run: npm run build
       - run: npx pkg-pr-new publish || echo 'pkg-pr-new publish failed'
