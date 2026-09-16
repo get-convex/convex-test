@@ -27,6 +27,14 @@ const defaultMetadata = {
   authToken: null,
 };
 
+test("auth token example", async () => {
+  const t = convexTest(schema).withIdentity({ name: "Sarah" });
+  const { authToken } = await t.mutation(api.requestMetadata.metadataMutation);
+  expect(authToken).toMatchInlineSnapshot(
+    `"eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJuYW1lIjoiU2FyYWgiLCJzdWIiOiIxNzc1NDUzNzc0IiwiaXNzIjoiaHR0cHM6Ly9jb252ZXgudGVzdCJ9."`,
+  );
+});
+
 test("default metadata in a mutation", async () => {
   const t = convexTest(schema);
   expect(await t.mutation(api.requestMetadata.metadataMutation)).toEqual(
