@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 
+import { UnsecuredJWT } from "jose";
 import { expect, test, vi } from "vitest";
 import { convexTest } from "../index";
 import schema from "./schema";
@@ -25,20 +26,6 @@ const defaultMetadata = {
   scheduledFunctionId: null,
   authToken: null,
 };
-
-function decodeJwt(token: string) {
-  const [header, payload, signature] = token.split(".");
-  const decode = (part: string) =>
-    JSON.parse(
-      new TextDecoder().decode(
-        Uint8Array.from(
-          atob(part.replace(/-/g, "+").replace(/_/g, "/")),
-          (character) => character.charCodeAt(0),
-        ),
-      ),
-    );
-  return { header: decode(header), payload: decode(payload), signature };
-}
 
 test("default metadata in a mutation", async () => {
   const t = convexTest(schema);
@@ -158,9 +145,8 @@ test("auth token of an identity", async () => {
     org: { id: "convex", role: "admin" },
   });
   const metadata = await t.mutation(api.requestMetadata.metadataMutation);
-  const { header, payload, signature } = decodeJwt(metadata.authToken!);
+  const { header, payload } = UnsecuredJWT.decode(metadata.authToken!);
   expect(header).toEqual({ alg: "none", typ: "JWT" });
-  expect(signature).toEqual("");
   expect(payload).toEqual({
     iss: "https://convex.test",
     sub: expect.any(String),
@@ -189,7 +175,7 @@ test("the identity's issuer and subject win over custom claims", async () => {
     sub: "someone-else",
   });
   const metadata = await t.mutation(api.requestMetadata.metadataMutation);
-  const { payload } = decodeJwt(metadata.authToken!);
+  const { payload } = UnsecuredJWT.decode(metadata.authToken!);
   expect(payload).toEqual({
     iss: "https://auth.convex.test",
     sub: "sarah",
@@ -241,7 +227,9 @@ test("both accessor methods can be combined in either order", async () => {
       api.requestMetadata.metadataMutation,
     );
     expect(metadata.ip).toEqual("1.2.3.4");
-    expect(decodeJwt(metadata.authToken!).payload.name).toEqual("Sarah");
+    expect(UnsecuredJWT.decode(metadata.authToken!).payload.name).toEqual(
+      "Sarah",
+    );
   }
 });
 
