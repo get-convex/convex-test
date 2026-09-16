@@ -1472,8 +1472,7 @@ function base64UrlEncode(value: string) {
 
 // Builds the token `withIdentity` pretends the request was authenticated with.
 // Real tokens are signed by an identity provider; this one is unsecured
-// (`"alg": "none"`, empty signature) and carries a marker claim, so tests can
-// tell it apart from a real JWT.
+// (`"alg": "none"`, empty signature).
 function createTestJwt(identity: Record<string, any>) {
   const claims: Record<string, any> = {};
   for (const [attribute, value] of Object.entries(identity)) {
@@ -1486,7 +1485,6 @@ function createTestJwt(identity: Record<string, any>) {
   // The identity provider always determines who the user is.
   claims.iss = identity.issuer;
   claims.sub = identity.subject;
-  claims.convex_test_issued = true;
   const header = base64UrlEncode(JSON.stringify({ alg: "none", typ: "JWT" }));
   const payload = base64UrlEncode(JSON.stringify(claims));
   return `${header}.${payload}.`;

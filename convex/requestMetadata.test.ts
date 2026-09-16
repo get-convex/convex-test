@@ -173,7 +173,6 @@ test("auth token of an identity", async () => {
     phone_number_verified: false,
     updated_at: "2024-01-01T00:00:00Z",
     org: { id: "convex", role: "admin" },
-    convex_test_issued: true,
   });
   // The token is issued for the identity `ctx.auth` reports.
   const identity = await t.query(
@@ -188,14 +187,12 @@ test("the identity's issuer and subject win over custom claims", async () => {
     issuer: "https://auth.convex.test",
     iss: "https://evil.test",
     sub: "someone-else",
-    convex_test_issued: false,
   });
   const metadata = await t.mutation(api.requestMetadata.metadataMutation);
   const { payload } = decodeJwt(metadata.authToken!);
   expect(payload).toEqual({
     iss: "https://auth.convex.test",
     sub: "sarah",
-    convex_test_issued: true,
   });
   // The token identifier isn't a JWT claim.
   expect(payload.tokenIdentifier).toBeUndefined();
