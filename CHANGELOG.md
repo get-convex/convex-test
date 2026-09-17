@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.59
+
+- Improves global isolation, improving interactions with vitest.stubGlobal (#142).
+- Implements `ctx.meta.getRequestMetadata()` by introducing `t.withRequestMetadata`
+  with the IP, user agent, and identity's auth token(#134, #135, #136)
+
 ## 0.0.58
 
 - Globals modified within query/mutation/actions (e.g. for Workflow) are now
