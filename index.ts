@@ -1474,13 +1474,16 @@ function base64UrlEncode(value: string) {
 // Real tokens are signed by an identity provider; this one is unsecured
 // (`"alg": "none"`, empty signature).
 function createTestJwt(identity: Record<string, any>) {
-  const claims: Record<string, any> = {};
+  const claims: Record<string, any> = Object.create(null);
   for (const [attribute, value] of Object.entries(identity)) {
     if (value === undefined || attribute === "tokenIdentifier") {
       continue;
     }
     // Custom claims are used as is, known attributes use their claim name.
-    claims[JWT_CLAIM_BY_IDENTITY_ATTRIBUTE[attribute] ?? attribute] = value;
+    const claimName = Object.hasOwn(JWT_CLAIM_BY_IDENTITY_ATTRIBUTE, attribute)
+      ? JWT_CLAIM_BY_IDENTITY_ATTRIBUTE[attribute]
+      : attribute;
+    claims[claimName] = value;
   }
   // The identity provider always determines who the user is.
   claims.iss = identity.issuer;

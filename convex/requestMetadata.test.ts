@@ -192,6 +192,24 @@ test("the identity's issuer and subject win over custom claims", async () => {
   expect(payload.tokenIdentifier).toBeUndefined();
 });
 
+test("prototype-named custom claims do not corrupt the JWT", async () => {
+  // Claims named after Object.prototype properties like "constructor" and
+  // "toString" must survive as own properties in the JWT — not be looked up on
+  // the prototype chain and stored under the wrong key.
+  const t = convexTest(schema).withIdentity({
+    constructor: "override-constructor",
+    toString: "override-tostring",
+  });
+  const metadata = await t.mutation(api.requestMetadata.metadataMutation);
+  const { payload } = UnsecuredJWT.decode(metadata.authToken!);
+  expect(Object.prototype.hasOwnProperty.call(payload, "constructor")).toBe(
+    true,
+  );
+  expect(payload.constructor).toEqual("override-constructor");
+  expect(Object.prototype.hasOwnProperty.call(payload, "toString")).toBe(true);
+  expect((payload as any).toString).toEqual("override-tostring");
+});
+
 test("the auth token propagates to nested calls and components", async () => {
   const t = testWithCounter().withIdentity({ name: "Sarah" });
   const { own, component } = await t.action(
