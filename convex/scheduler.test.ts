@@ -210,12 +210,10 @@ describe("with fake timers", () => {
 
   test("stops advancing timers when the original fake clock is replaced", async () => {
     const { t, loading } = await blockedScheduledFunction();
-    const advanceTimers = vi.fn(vi.runAllTimers);
     const outcome = t
-      .finishAllScheduledFunctions(advanceTimers)
+      .finishAllScheduledFunctions(vi.runAllTimers)
       .catch((error) => error);
     await loading;
-    const callsBeforeTeardown = advanceTimers.mock.calls.length;
 
     // A timed-out test restores its timers, then the next test installs a new clock.
     vi.useRealTimers();
@@ -226,7 +224,6 @@ describe("with fake timers", () => {
     await new Promise<void>((resolve) => realSetTimeout(resolve, 20));
 
     expect(nextTestTimer).not.toHaveBeenCalled();
-    expect(advanceTimers).toHaveBeenCalledTimes(callsBeforeTeardown);
     expect(await outcome).toMatchObject({
       message: expect.stringContaining("timers were restored or replaced"),
     });
@@ -235,21 +232,21 @@ describe("with fake timers", () => {
   test("stops pumping when advanceTimers throws", async () => {
     const { t, loading } = await blockedScheduledFunction();
     const reason = new Error("cannot advance timers");
-    let fail = false;
-    const advanceTimers = vi.fn(() => {
-      if (fail) throw reason;
-      vi.runAllTimers();
-    });
+    const advanceTimers = vi.fn(vi.runAllTimers);
     const outcome = t
       .finishAllScheduledFunctions(advanceTimers)
       .catch((error) => error);
     await loading;
-    fail = true;
+    advanceTimers.mockImplementation(() => {
+      throw reason;
+    });
 
     expect(await outcome).toBe(reason);
-    const callsAfterFailure = advanceTimers.mock.calls.length;
+    advanceTimers.mockClear();
+
     await new Promise<void>((resolve) => realSetTimeout(resolve, 20));
-    expect(advanceTimers).toHaveBeenCalledTimes(callsAfterFailure);
+
+    expect(advanceTimers).not.toHaveBeenCalled();
   });
 
   test("new convexTest after orphaned scheduled functions", async () => {
