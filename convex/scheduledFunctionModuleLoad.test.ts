@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { convexTest } from "../index";
-import { api, internal } from "./_generated/api";
+import { api } from "./_generated/api";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.*s");
@@ -17,36 +17,6 @@ async function afterEventLoopTurns(turns: number): Promise<void> {
   }
 }
 
-// Delay scheduler module loads once slow mode is enabled.
-function modulesWithSlowSchedulerLoad(turns: number) {
-  const control = { slow: false };
-  const loadScheduler = modules["./scheduler.ts"];
-  return {
-    control,
-    modules: {
-      ...modules,
-      "./scheduler.ts": async () => {
-        if (control.slow) {
-          await afterEventLoopTurns(turns);
-        }
-        return await loadScheduler();
-      },
-    },
-  };
-}
-
-// The scheduled action and its mutation each load the scheduler module.
-async function scheduleOneMessage(
-  t: ReturnType<typeof convexTest>,
-  control: { slow: boolean },
-) {
-  await t.mutation(api.scheduler.mutationSchedulingAction, {
-    body: "through a slow module load",
-    delayMs: 0,
-  });
-  control.slow = true;
-}
-
 beforeEach(() => {
   vi.useFakeTimers();
 });
@@ -55,13 +25,24 @@ afterEach(() => {
 });
 
 test("finishes scheduled functions with slow module loads", async () => {
-  const { control, modules } = modulesWithSlowSchedulerLoad(12_000);
-  const t = convexTest(schema, modules);
-  await scheduleOneMessage(t, control);
+  const t = convexTest(schema, {
+    ...modules,
+    "./scheduler.ts": async () => {
+      await afterEventLoopTurns(12_000);
+      return await import("./scheduler");
+    },
+  });
+  await t.mutation(async (ctx) => {
+    await ctx.scheduler.runAfter(0, api.scheduler.add, {
+      body: "through a slow module load",
+      author: "AI",
+    });
+  });
 
   await t.finishAllScheduledFunctions(vi.runAllTimers);
 
-  expect(await t.query(internal.scheduler.list)).toMatchObject([
+  const messages = await t.query((ctx) => ctx.db.query("messages").collect());
+  expect(messages).toMatchObject([
     { body: "through a slow module load", author: "AI" },
   ]);
 });
