@@ -2154,6 +2154,9 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    * with `runAfter(0)`). Ones whose real-clock time hasn't arrived are
    * skipped, since they cannot be forced to fire by advancing fake timers.
    *
+   * Restore fake timers in test teardown so unfinished drains stop advancing
+   * timers. Sharing a fake clock across tests does not provide this cleanup.
+   *
    * @param advanceTimers Function that advances timers,
    *   usually `vi.runAllTimers`. This function will be called in a loop
    *   with `finishInProgressScheduledFunctions()`.
@@ -3488,6 +3491,21 @@ function withAuth(
       // each function.
       // Stop after a fixed number of iterations to avoid infinite loops.
       const { scheduler } = getConvexGlobal();
+      const originalSetTimeout = globalOverridesStorage.exit(
+        () => globalThis.setTimeout,
+      );
+      const advanceTimersIfActive = () => {
+        const currentSetTimeout = globalOverridesStorage.exit(
+          () => globalThis.setTimeout,
+        );
+        if (currentSetTimeout !== originalSetTimeout) {
+          throw new Error(
+            "finishAllScheduledFunctions: timers were restored or replaced " +
+              "while waiting for scheduled functions.",
+          );
+        }
+        advanceTimers();
+      };
       // A function scheduled while real timers were active sits on a real
       // setTimeout that advanceTimers (fake timers) cannot fire. If it has
       // already expired it fires within a few real event loop turns, so
@@ -3499,7 +3517,7 @@ function withAuth(
       const maxIdleTurns = 20;
       let idleTurns = 0;
       for (let i = 0; i < maxIterations; i++) {
-        advanceTimers();
+        advanceTimersIfActive();
         if (!scheduler.anyFunctionsRunning()) {
           if (!scheduler.anyPendingTimers() || idleTurns >= maxIdleTurns) {
             return;
@@ -3510,13 +3528,13 @@ function withAuth(
         }
         idleTurns = 0;
         // Advance timers for action delays and yield for pending module imports.
-        // Rely on the test timeout to bound the wait for unfinished functions.
+        // Stop if teardown restores or replaces the clock.
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
           await new Promise<void>((resolve, reject) => {
             const pump = () => {
               try {
-                advanceTimers();
+                advanceTimersIfActive();
                 timer = realSetTimeout(pump, 0);
               } catch (error) {
                 // Preserve the value thrown by advanceTimers.
