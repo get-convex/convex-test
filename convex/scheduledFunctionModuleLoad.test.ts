@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { convexTest } from "../index";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
@@ -47,35 +47,21 @@ async function scheduleOneMessage(
   control.slow = true;
 }
 
-describe("finishAllScheduledFunctions when a scheduled function's module is slow to load", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
-  test("finishes the function when the load takes a few thousand event-loop turns", async () => {
-    const { control, modules } = modulesWithSlowSchedulerLoad(2_000);
-    const t = convexTest(schema, modules);
-    await scheduleOneMessage(t, control);
+test("finishes scheduled functions with slow module loads", async () => {
+  const { control, modules } = modulesWithSlowSchedulerLoad(12_000);
+  const t = convexTest(schema, modules);
+  await scheduleOneMessage(t, control);
 
-    await t.finishAllScheduledFunctions(vi.runAllTimers);
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
 
-    expect(await t.query(internal.scheduler.list)).toMatchObject([
-      { body: "through a slow module load", author: "AI" },
-    ]);
-  });
-
-  test("finishes the function however many event-loop turns the load takes", async () => {
-    const { control, modules } = modulesWithSlowSchedulerLoad(12_000);
-    const t = convexTest(schema, modules);
-    await scheduleOneMessage(t, control);
-
-    await t.finishAllScheduledFunctions(vi.runAllTimers);
-
-    expect(await t.query(internal.scheduler.list)).toMatchObject([
-      { body: "through a slow module load", author: "AI" },
-    ]);
-  });
+  expect(await t.query(internal.scheduler.list)).toMatchObject([
+    { body: "through a slow module load", author: "AI" },
+  ]);
 });
