@@ -2922,6 +2922,7 @@ export function convexTest<Schema extends GenericSchema>(
 
 // Capture before fake timers are installed.
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+const realClearTimeout = globalThis.clearTimeout.bind(globalThis);
 
 // Let real timers and pending module imports make progress.
 function yieldThroughRealTimers(): Promise<void> {
@@ -3510,17 +3511,27 @@ function withAuth(
         idleTurns = 0;
         // Advance timers for action delays and yield for pending module imports.
         // Rely on the test timeout to bound the wait for unfinished functions.
-        let done = false;
-        const inFlight = scheduler
-          .finishInProgressScheduledFunctions()
-          .finally(() => {
-            done = true;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const pump = () => {
+              try {
+                advanceTimers();
+                timer = realSetTimeout(pump, 0);
+              } catch (error) {
+                // Preserve the value thrown by advanceTimers.
+                // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+                reject(error);
+              }
+            };
+            void scheduler
+              .finishInProgressScheduledFunctions()
+              .then(resolve, reject);
+            pump();
           });
-        while (!done) {
-          advanceTimers();
-          await yieldThroughRealTimers();
+        } finally {
+          realClearTimeout(timer);
         }
-        await inFlight;
       }
       throw new Error(
         "finishAllScheduledFunctions: too many iterations. " +
