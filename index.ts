@@ -2920,25 +2920,10 @@ export function convexTest<Schema extends GenericSchema>(
   };
 }
 
-// Yield through a full event loop iteration so that dynamic import()
-// calls (used to load function modules) can resolve. Using MessageChannel
-// to post to the macrotask queue — it is not faked by vitest and not
-// removed by edge-runtime.
-function yieldToEventLoop(): Promise<void> {
-  return new Promise<void>((r) => {
-    const { port1, port2 } = new MessageChannel();
-    port2.onmessage = () => r();
-    port1.postMessage(null);
-  });
-}
-
-// The real setTimeout, captured before any test can install fake timers.
-// MessagePort messages can be delivered without passing through the event
-// loop's timers phase, so `yieldToEventLoop` does not guarantee that
-// expired real timers fire. Awaiting a real 0ms timeout does: all timers
-// that expired earlier fire first.
+// Capture before fake timers are installed.
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
 
+// Let real timers and pending module imports make progress.
 function yieldThroughRealTimers(): Promise<void> {
   return new Promise<void>((r) => realSetTimeout(r, 0));
 }
@@ -3523,24 +3508,19 @@ function withAuth(
           continue;
         }
         idleTurns = 0;
-        // Actions may use setTimeout internally (e.g. for delays).
-        // Keep advancing timers while waiting so those can resolve.
+        // Advance timers for action delays and yield for pending module imports.
+        // Rely on the test timeout to bound the wait for unfinished functions.
         let done = false;
-        void scheduler.finishInProgressScheduledFunctions().then(() => {
-          done = true;
-        });
-        const maxPumps = 10000;
-        for (let pump = 0; pump < maxPumps && !done; pump++) {
+        const inFlight = scheduler
+          .finishInProgressScheduledFunctions()
+          .finally(() => {
+            done = true;
+          });
+        while (!done) {
           advanceTimers();
-          await yieldToEventLoop();
-          if (pump === maxPumps - 1 && !done) {
-            throw new Error(
-              "finishAllScheduledFunctions: scheduled function did not " +
-                `complete after ${maxPumps} timer pumps. ` +
-                "Does an action have an unresolvable setTimeout or infinite loop?",
-            );
-          }
+          await yieldThroughRealTimers();
         }
+        await inFlight;
       }
       throw new Error(
         "finishAllScheduledFunctions: too many iterations. " +
