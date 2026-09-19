@@ -7,10 +7,8 @@ import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.*s");
 
-// Capture Node's setImmediate before fake timers replace it.
 const realSetImmediate = globalThis.setImmediate;
 
-// Wait for real event-loop turns, independently of fake timer advancement.
 async function afterEventLoopTurns(turns: number): Promise<void> {
   for (let turn = 0; turn < turns; turn++) {
     await new Promise<void>((resolve) => realSetImmediate(resolve));
