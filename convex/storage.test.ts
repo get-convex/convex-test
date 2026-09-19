@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { componentsGeneric, makeFunctionReference } from "convex/server";
 import { convexTest } from "../index";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { internalAction } from "./_generated/server";
 import schema from "./schema";
 
@@ -278,5 +279,134 @@ test.each(["root", "component"] as const)(
     expect(await t.action(storage.actionGetBlob, { id })).toBeNull();
     expect(await t.query(storage.queryGetUrl, { id })).toBeNull();
     expect(await t.query(storage.listFiles)).toEqual([]);
+  },
+);
+
+test("storage actions use their own convexTest instance's transaction", async () => {
+  const outer = convexTest(schema);
+  const inner = convexTest(schema);
+  const id = await outer.run(() =>
+    inner.action((ctx) => ctx.storage.store(new Blob(["separate instance"]))),
+  );
+  expect(
+    await inner.action(async (ctx) => (await ctx.storage.get(id))?.text()),
+  ).toBe("separate instance");
+  expect(await outer.query(internal.storage.listFiles)).toEqual([]);
+
+  await outer.run(() => inner.action((ctx) => ctx.storage.delete(id)));
+  expect(await inner.action(internal.storage.actionGetBlob, { id })).toBeNull();
+});
+
+test("a foreign transaction marker cannot reuse an active inner transaction", async () => {
+  const outer = convexTest(schema);
+  const inner = convexTest(schema);
+  const mutationStarted = deferred();
+  const allowCommit = deferred();
+  const storeRequested = deferred();
+  const allowHash = deferred();
+  class PausedBlob extends Blob {
+    async arrayBuffer() {
+      await allowHash.promise;
+      return super.arrayBuffer();
+    }
+  }
+  const mutation = inner.mutation(async () => {
+    mutationStarted.resolve();
+    await allowCommit.promise;
+  });
+  await mutationStarted.promise;
+  const storage = outer.run(() =>
+    inner.action(async (ctx) => {
+      const result = ctx.storage.store(
+        new PausedBlob(["separate transaction"]),
+      );
+      storeRequested.resolve();
+      return await result;
+    }),
+  );
+  try {
+    await storeRequested.promise;
+    allowCommit.resolve();
+    await mutation;
+    allowHash.resolve();
+    const id = await storage;
+    expect(
+      await inner.action(async (ctx) => (await ctx.storage.get(id))?.text()),
+    ).toBe("separate transaction");
+  } finally {
+    allowCommit.resolve();
+    allowHash.resolve();
+    await Promise.allSettled([mutation, storage]);
+  }
+});
+
+test("storage actions can reenter a live ancestor instance's transaction", async () => {
+  const outer = convexTest(schema);
+  const inner = convexTest(schema);
+  const id = await outer.run(() =>
+    inner.run(() =>
+      outer.action((ctx) =>
+        ctx.storage.store(new Blob(["ancestor transaction"])),
+      ),
+    ),
+  );
+  expect(
+    await outer.action(async (ctx) => (await ctx.storage.get(id))?.text()),
+  ).toBe("ancestor transaction");
+  expect(await inner.query(internal.storage.listFiles)).toEqual([]);
+});
+
+test.each(["idle", "busy"] as const)(
+  "storage ignores a finished transaction when its instance is %s",
+  async (state) => {
+    const t = convexTest(schema);
+    const allowStore = deferred();
+    const storeRequested = deferred();
+    const allowHash = deferred();
+    const mutationStarted = deferred();
+    const allowCommit = deferred();
+    class PausedBlob extends Blob {
+      async arrayBuffer() {
+        await allowHash.promise;
+        return super.arrayBuffer();
+      }
+    }
+    let action!: Promise<Id<"_storage">>;
+    await t.run(async () => {
+      action = t.action(async (ctx) => {
+        await allowStore.promise;
+        const result = ctx.storage.store(new PausedBlob(["deferred storage"]));
+        storeRequested.resolve();
+        return await result;
+      });
+    });
+    const mutation =
+      state === "busy"
+        ? t.mutation(async () => {
+            mutationStarted.resolve();
+            await allowCommit.promise;
+          })
+        : null;
+    try {
+      if (mutation !== null) {
+        await mutationStarted.promise;
+      }
+      allowStore.resolve();
+      await storeRequested.promise;
+      allowCommit.resolve();
+      if (mutation !== null) {
+        await mutation;
+      }
+      allowHash.resolve();
+      const id = await action;
+      expect(
+        await t.action(async (ctx) => (await ctx.storage.get(id))?.text()),
+      ).toBe("deferred storage");
+    } finally {
+      allowStore.resolve();
+      allowCommit.resolve();
+      allowHash.resolve();
+      await Promise.allSettled([mutation, action]);
+    }
   },
 );
