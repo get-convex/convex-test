@@ -2154,9 +2154,6 @@ export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
    * with `runAfter(0)`). Ones whose real-clock time hasn't arrived are
    * skipped, since they cannot be forced to fire by advancing fake timers.
    *
-   * Restore fake timers in test teardown so unfinished drains stop advancing
-   * timers. Sharing a fake clock across tests does not provide this cleanup.
-   *
    * @param advanceTimers Function that advances timers,
    *   usually `vi.runAllTimers`. This function will be called in a loop
    *   with `finishInProgressScheduledFunctions()`.
