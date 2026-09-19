@@ -2927,7 +2927,6 @@ export function convexTest<Schema extends GenericSchema>(
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
 const realClearTimeout = globalThis.clearTimeout.bind(globalThis);
 
-// Let real timers and pending module imports make progress.
 function yieldThroughRealTimers(): Promise<void> {
   return new Promise<void>((r) => realSetTimeout(r, 0));
 }
