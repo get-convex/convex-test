@@ -2920,24 +2920,9 @@ export function convexTest<Schema extends GenericSchema>(
   };
 }
 
-// Yield through a full event loop iteration so that dynamic import()
-// calls (used to load function modules) can resolve. Using MessageChannel
-// to post to the macrotask queue — it is not faked by vitest and not
-// removed by edge-runtime.
-function yieldToEventLoop(): Promise<void> {
-  return new Promise<void>((r) => {
-    const { port1, port2 } = new MessageChannel();
-    port2.onmessage = () => r();
-    port1.postMessage(null);
-  });
-}
-
-// The real setTimeout, captured before any test can install fake timers.
-// MessagePort messages can be delivered without passing through the event
-// loop's timers phase, so `yieldToEventLoop` does not guarantee that
-// expired real timers fire. Awaiting a real 0ms timeout does: all timers
-// that expired earlier fire first.
+// Capture before fake timers are installed.
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+const realClearTimeout = globalThis.clearTimeout.bind(globalThis);
 
 function yieldThroughRealTimers(): Promise<void> {
   return new Promise<void>((r) => realSetTimeout(r, 0));
@@ -3502,6 +3487,21 @@ function withAuth(
       // each function.
       // Stop after a fixed number of iterations to avoid infinite loops.
       const { scheduler } = getConvexGlobal();
+      const originalSetTimeout = globalOverridesStorage.exit(
+        () => globalThis.setTimeout,
+      );
+      const advanceTimersIfActive = () => {
+        const currentSetTimeout = globalOverridesStorage.exit(
+          () => globalThis.setTimeout,
+        );
+        if (currentSetTimeout !== originalSetTimeout) {
+          throw new Error(
+            "finishAllScheduledFunctions: timers were restored or replaced " +
+              "while waiting for scheduled functions.",
+          );
+        }
+        advanceTimers();
+      };
       // A function scheduled while real timers were active sits on a real
       // setTimeout that advanceTimers (fake timers) cannot fire. If it has
       // already expired it fires within a few real event loop turns, so
@@ -3513,7 +3513,7 @@ function withAuth(
       const maxIdleTurns = 20;
       let idleTurns = 0;
       for (let i = 0; i < maxIterations; i++) {
-        advanceTimers();
+        advanceTimersIfActive();
         if (!scheduler.anyFunctionsRunning()) {
           if (!scheduler.anyPendingTimers() || idleTurns >= maxIdleTurns) {
             return;
@@ -3523,23 +3523,28 @@ function withAuth(
           continue;
         }
         idleTurns = 0;
-        // Actions may use setTimeout internally (e.g. for delays).
-        // Keep advancing timers while waiting so those can resolve.
-        let done = false;
-        void scheduler.finishInProgressScheduledFunctions().then(() => {
-          done = true;
-        });
-        const maxPumps = 10000;
-        for (let pump = 0; pump < maxPumps && !done; pump++) {
-          advanceTimers();
-          await yieldToEventLoop();
-          if (pump === maxPumps - 1 && !done) {
-            throw new Error(
-              "finishAllScheduledFunctions: scheduled function did not " +
-                `complete after ${maxPumps} timer pumps. ` +
-                "Does an action have an unresolvable setTimeout or infinite loop?",
-            );
-          }
+        // Advance timers while waiting for scheduled functions to finish.
+        // Stop if teardown restores or replaces the clock.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const pump = () => {
+              try {
+                advanceTimersIfActive();
+                timer = realSetTimeout(pump, 0);
+              } catch (error) {
+                // Preserve the value thrown by advanceTimers.
+                // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+                reject(error);
+              }
+            };
+            void scheduler
+              .finishInProgressScheduledFunctions()
+              .then(resolve, reject);
+            pump();
+          });
+        } finally {
+          realClearTimeout(timer);
         }
       }
       throw new Error(
