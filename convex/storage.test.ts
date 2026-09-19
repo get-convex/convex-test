@@ -14,6 +14,17 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
+class PausedBlob extends Blob {
+  readonly readStarted = deferred();
+  readonly allowRead = deferred();
+
+  async arrayBuffer() {
+    this.readStarted.resolve();
+    await this.allowRead.promise;
+    return super.arrayBuffer();
+  }
+}
+
 test("action store blob", async () => {
   const t = convexTest(schema);
   const bytes = new Uint8Array([0b00001100, 0b00000000]).buffer;
@@ -89,15 +100,9 @@ test.each(["direct", "scheduled"] as const)(
     const actionStarted = deferred();
     const allowStore = deferred();
     const storeRequested = deferred();
-    const allowHash = deferred();
+    const blob = new PausedBlob(["stored"]);
     const mutationStarted = deferred();
     const allowCommit = deferred();
-    class PausedBlob extends Blob {
-      async arrayBuffer() {
-        await allowHash.promise;
-        return super.arrayBuffer();
-      }
-    }
     const t = convexTest(schema, {
       "./_generated/server.js": async () => ({}),
       "./storage.js": async () => ({
@@ -106,7 +111,7 @@ test.each(["direct", "scheduled"] as const)(
           handler: async (ctx) => {
             actionStarted.resolve();
             await allowStore.promise;
-            const result = ctx.storage.store(new PausedBlob(["stored"]));
+            const result = ctx.storage.store(blob);
             storeRequested.resolve();
             return await result;
           },
@@ -130,7 +135,7 @@ test.each(["direct", "scheduled"] as const)(
       await storeRequested.promise;
       allowCommit.resolve();
       await mutation;
-      allowHash.resolve();
+      blob.allowRead.resolve();
       if (action !== null) {
         await action;
       } else {
@@ -150,7 +155,7 @@ test.each(["direct", "scheduled"] as const)(
     } finally {
       allowStore.resolve();
       allowCommit.resolve();
-      allowHash.resolve();
+      blob.allowRead.resolve();
       await Promise.allSettled([mutation, action]);
       await t.finishInProgressScheduledFunctions();
     }
@@ -159,35 +164,21 @@ test.each(["direct", "scheduled"] as const)(
 
 test("concurrent actions store blobs in separate transactions", async () => {
   const t = convexTest(schema);
-  const firstHashStarted = deferred();
-  const allowFirstHash = deferred();
+  const firstBlob = new PausedBlob(["first"]);
+  const secondBlob = new PausedBlob(["second"]);
   const secondStoreRequested = deferred();
-  const allowSecondHash = deferred();
-  class FirstBlob extends Blob {
-    async arrayBuffer() {
-      firstHashStarted.resolve();
-      await allowFirstHash.promise;
-      return super.arrayBuffer();
-    }
-  }
-  class SecondBlob extends Blob {
-    async arrayBuffer() {
-      await allowSecondHash.promise;
-      return super.arrayBuffer();
-    }
-  }
-  const first = t.action((ctx) => ctx.storage.store(new FirstBlob(["first"])));
-  await firstHashStarted.promise;
+  const first = t.action((ctx) => ctx.storage.store(firstBlob));
+  await firstBlob.readStarted.promise;
   const second = t.action(async (ctx) => {
-    const result = ctx.storage.store(new SecondBlob(["second"]));
+    const result = ctx.storage.store(secondBlob);
     secondStoreRequested.resolve();
     return await result;
   });
   try {
     await secondStoreRequested.promise;
-    allowFirstHash.resolve();
+    firstBlob.allowRead.resolve();
     const firstId = await first;
-    allowSecondHash.resolve();
+    secondBlob.allowRead.resolve();
     const secondId = await second;
     expect(
       await t.action(async (ctx) => [
@@ -196,8 +187,8 @@ test("concurrent actions store blobs in separate transactions", async () => {
       ]),
     ).toEqual(["first", "second"]);
   } finally {
-    allowFirstHash.resolve();
-    allowSecondHash.resolve();
+    firstBlob.allowRead.resolve();
+    secondBlob.allowRead.resolve();
     await Promise.allSettled([first, second]);
   }
 });
@@ -303,13 +294,7 @@ test("a foreign transaction marker cannot reuse an active inner transaction", as
   const mutationStarted = deferred();
   const allowCommit = deferred();
   const storeRequested = deferred();
-  const allowHash = deferred();
-  class PausedBlob extends Blob {
-    async arrayBuffer() {
-      await allowHash.promise;
-      return super.arrayBuffer();
-    }
-  }
+  const blob = new PausedBlob(["separate transaction"]);
   const mutation = inner.mutation(async () => {
     mutationStarted.resolve();
     await allowCommit.promise;
@@ -317,9 +302,7 @@ test("a foreign transaction marker cannot reuse an active inner transaction", as
   await mutationStarted.promise;
   const storage = outer.run(() =>
     inner.action(async (ctx) => {
-      const result = ctx.storage.store(
-        new PausedBlob(["separate transaction"]),
-      );
+      const result = ctx.storage.store(blob);
       storeRequested.resolve();
       return await result;
     }),
@@ -328,14 +311,14 @@ test("a foreign transaction marker cannot reuse an active inner transaction", as
     await storeRequested.promise;
     allowCommit.resolve();
     await mutation;
-    allowHash.resolve();
+    blob.allowRead.resolve();
     const id = await storage;
     expect(
       await inner.action(async (ctx) => (await ctx.storage.get(id))?.text()),
     ).toBe("separate transaction");
   } finally {
     allowCommit.resolve();
-    allowHash.resolve();
+    blob.allowRead.resolve();
     await Promise.allSettled([mutation, storage]);
   }
 });
@@ -362,20 +345,14 @@ test.each(["idle", "busy"] as const)(
     const t = convexTest(schema);
     const allowStore = deferred();
     const storeRequested = deferred();
-    const allowHash = deferred();
+    const blob = new PausedBlob(["deferred storage"]);
     const mutationStarted = deferred();
     const allowCommit = deferred();
-    class PausedBlob extends Blob {
-      async arrayBuffer() {
-        await allowHash.promise;
-        return super.arrayBuffer();
-      }
-    }
     let action!: Promise<Id<"_storage">>;
     await t.run(async () => {
       action = t.action(async (ctx) => {
         await allowStore.promise;
-        const result = ctx.storage.store(new PausedBlob(["deferred storage"]));
+        const result = ctx.storage.store(blob);
         storeRequested.resolve();
         return await result;
       });
@@ -397,7 +374,7 @@ test.each(["idle", "busy"] as const)(
       if (mutation !== null) {
         await mutation;
       }
-      allowHash.resolve();
+      blob.allowRead.resolve();
       const id = await action;
       expect(
         await t.action(async (ctx) => (await ctx.storage.get(id))?.text()),
@@ -405,7 +382,7 @@ test.each(["idle", "busy"] as const)(
     } finally {
       allowStore.resolve();
       allowCommit.resolve();
-      allowHash.resolve();
+      blob.allowRead.resolve();
       await Promise.allSettled([mutation, action]);
     }
   },
