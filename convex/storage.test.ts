@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { componentsGeneric, makeFunctionReference } from "convex/server";
 import { convexTest } from "../index";
 import { internal } from "./_generated/api";
@@ -12,6 +12,21 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
     resolve = r;
   });
   return { promise, resolve };
+}
+
+async function waitForCheckpoint(
+  checkpoint: Promise<void>,
+  operation: Promise<unknown>,
+  description: string,
+): Promise<void> {
+  await Promise.race([
+    checkpoint,
+    operation.then(() => {
+      throw new Error(
+        `${description} was not reached before the operation completed`,
+      );
+    }),
+  ]);
 }
 
 class PausedBlob extends Blob {
@@ -103,46 +118,66 @@ test.each(["direct", "scheduled"] as const)(
     const blob = new PausedBlob(["stored"]);
     const mutationStarted = deferred();
     const allowCommit = deferred();
+    let storeResult!: Promise<Id<"_storage">>;
     const t = convexTest(schema, {
       "./_generated/server.js": async () => ({}),
       "./storage.js": async () => ({
         store: internalAction({
           args: {},
           handler: async (ctx) => {
-            actionStarted.resolve();
-            await allowStore.promise;
-            const result = ctx.storage.store(blob);
-            storeRequested.resolve();
-            return await result;
+            storeResult = (async () => {
+              actionStarted.resolve();
+              await allowStore.promise;
+              const result = ctx.storage.store(blob);
+              storeRequested.resolve();
+              return await result;
+            })();
+            return await storeResult;
           },
         }),
       }),
     });
     const store = makeFunctionReference<"action">("storage:store");
-    const action = invocation === "direct" ? t.action(store) : null;
-    const jobId =
-      invocation === "scheduled"
-        ? await t.mutation((ctx) => ctx.scheduler.runAfter(0, store, {}))
-        : null;
-    await actionStarted.promise;
-    const mutation = t.mutation(async () => {
-      mutationStarted.resolve();
-      await allowCommit.promise;
-    });
+    let action: Promise<unknown> | undefined;
+    let mutation: Promise<unknown> | undefined;
     try {
-      await mutationStarted.promise;
+      if (invocation === "scheduled") {
+        vi.useFakeTimers();
+      }
+      action =
+        invocation === "direct"
+          ? t.action(store)
+          : (async () => {
+              const jobId = await t.mutation((ctx) =>
+                ctx.scheduler.runAfter(0, store, {}),
+              );
+              vi.runAllTimers();
+              await t.finishInProgressScheduledFunctions();
+              const job = await t.query((ctx) => ctx.db.system.get(jobId));
+              expect(job?.state.kind).toBe("success");
+            })();
+      await waitForCheckpoint(actionStarted.promise, action, "Action start");
+      mutation = t.mutation(async () => {
+        mutationStarted.resolve();
+        await allowCommit.promise;
+      });
+      await waitForCheckpoint(
+        mutationStarted.promise,
+        mutation,
+        "Mutation start",
+      );
       allowStore.resolve();
-      await storeRequested.promise;
+      // A failed scheduled action cannot record its state until the mutation
+      // releases its lock, so observe the handler result at this checkpoint.
+      await waitForCheckpoint(
+        storeRequested.promise,
+        storeResult,
+        "Storage request",
+      );
       allowCommit.resolve();
       await mutation;
       blob.allowRead.resolve();
-      if (action !== null) {
-        await action;
-      } else {
-        await t.finishInProgressScheduledFunctions();
-        const job = await t.query((ctx) => ctx.db.system.get(jobId!));
-        expect(job?.state.kind).toBe("success");
-      }
+      await action;
       const files = await t.query((ctx) =>
         ctx.db.system.query("_storage").collect(),
       );
@@ -156,8 +191,20 @@ test.each(["direct", "scheduled"] as const)(
       allowStore.resolve();
       allowCommit.resolve();
       blob.allowRead.resolve();
-      await Promise.allSettled([mutation, action]);
-      await t.finishInProgressScheduledFunctions();
+      await Promise.allSettled([
+        mutation,
+        action,
+        storeResult,
+        (async () => {
+          if (invocation === "scheduled") {
+            vi.runAllTimers();
+          }
+          await t.finishInProgressScheduledFunctions();
+        })(),
+      ]);
+      if (invocation === "scheduled") {
+        vi.useRealTimers();
+      }
     }
   },
 );
@@ -168,14 +215,19 @@ test("concurrent actions store blobs in separate transactions", async () => {
   const secondBlob = new PausedBlob(["second"]);
   const secondStoreRequested = deferred();
   const first = t.action((ctx) => ctx.storage.store(firstBlob));
-  await firstBlob.readStarted.promise;
-  const second = t.action(async (ctx) => {
-    const result = ctx.storage.store(secondBlob);
-    secondStoreRequested.resolve();
-    return await result;
-  });
+  let second: Promise<Id<"_storage">> | undefined;
   try {
-    await secondStoreRequested.promise;
+    await waitForCheckpoint(firstBlob.readStarted.promise, first, "Blob read");
+    second = t.action(async (ctx) => {
+      const result = ctx.storage.store(secondBlob);
+      secondStoreRequested.resolve();
+      return await result;
+    });
+    await waitForCheckpoint(
+      secondStoreRequested.promise,
+      second,
+      "Second storage request",
+    );
     firstBlob.allowRead.resolve();
     const firstId = await first;
     secondBlob.allowRead.resolve();
@@ -207,14 +259,23 @@ test("action storage deletion survives a concurrent mutation rollback", async ()
       throw new Error("rollback");
     }),
   ).rejects.toThrow("rollback");
-  await mutationStarted.promise;
-  const deletion = t.action(async (ctx) => {
-    const result = ctx.storage.delete(id);
-    deleteRequested.resolve();
-    await result;
-  });
+  let deletion: Promise<unknown> | undefined;
   try {
-    await deleteRequested.promise;
+    await waitForCheckpoint(
+      mutationStarted.promise,
+      mutation,
+      "Mutation start",
+    );
+    deletion = t.action(async (ctx) => {
+      const result = ctx.storage.delete(id);
+      deleteRequested.resolve();
+      await result;
+    });
+    await waitForCheckpoint(
+      deleteRequested.promise,
+      deletion,
+      "Delete request",
+    );
     allowRollback.resolve();
     await mutation;
     await deletion;
@@ -299,16 +360,21 @@ test("a foreign transaction marker cannot reuse an active inner transaction", as
     mutationStarted.resolve();
     await allowCommit.promise;
   });
-  await mutationStarted.promise;
-  const storage = outer.run(() =>
-    inner.action(async (ctx) => {
-      const result = ctx.storage.store(blob);
-      storeRequested.resolve();
-      return await result;
-    }),
-  );
+  let storage: Promise<Id<"_storage">> | undefined;
   try {
-    await storeRequested.promise;
+    await waitForCheckpoint(
+      mutationStarted.promise,
+      mutation,
+      "Mutation start",
+    );
+    storage = outer.run(() =>
+      inner.action(async (ctx) => {
+        const result = ctx.storage.store(blob);
+        storeRequested.resolve();
+        return await result;
+      }),
+    );
+    await waitForCheckpoint(storeRequested.promise, storage, "Storage request");
     allowCommit.resolve();
     await mutation;
     blob.allowRead.resolve();
@@ -349,27 +415,36 @@ test.each(["idle", "busy"] as const)(
     const mutationStarted = deferred();
     const allowCommit = deferred();
     let action!: Promise<Id<"_storage">>;
-    await t.run(async () => {
-      action = t.action(async (ctx) => {
-        await allowStore.promise;
-        const result = ctx.storage.store(blob);
-        storeRequested.resolve();
-        return await result;
-      });
-    });
-    const mutation =
-      state === "busy"
-        ? t.mutation(async () => {
-            mutationStarted.resolve();
-            await allowCommit.promise;
-          })
-        : null;
+    let mutation: Promise<unknown> | null = null;
     try {
+      await t.run(async () => {
+        action = t.action(async (ctx) => {
+          await allowStore.promise;
+          const result = ctx.storage.store(blob);
+          storeRequested.resolve();
+          return await result;
+        });
+      });
+      mutation =
+        state === "busy"
+          ? t.mutation(async () => {
+              mutationStarted.resolve();
+              await allowCommit.promise;
+            })
+          : null;
       if (mutation !== null) {
-        await mutationStarted.promise;
+        await waitForCheckpoint(
+          mutationStarted.promise,
+          mutation,
+          "Mutation start",
+        );
       }
       allowStore.resolve();
-      await storeRequested.promise;
+      await waitForCheckpoint(
+        storeRequested.promise,
+        action,
+        "Storage request",
+      );
       allowCommit.resolve();
       if (mutation !== null) {
         await mutation;
