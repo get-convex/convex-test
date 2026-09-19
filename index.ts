@@ -3526,7 +3526,7 @@ function withAuth(
           continue;
         }
         idleTurns = 0;
-        // Advance timers for action delays and yield for pending module imports.
+        // Advance timers while waiting for scheduled functions to finish.
         // Stop if teardown restores or replaces the clock.
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
