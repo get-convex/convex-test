@@ -1995,7 +1995,7 @@ function jsSyscallImpl() {
 // If we're in action, wrap the write in a transaction.
 async function writeToDatabase<T>(impl: (db: DatabaseFake) => Promise<T>) {
   const db = getDb();
-  if (!getTransactionManager().isInTransaction()) {
+  if (nestedTxStorage.getStore() === undefined) {
     return await withAuth().run(async () => {
       return await impl(db);
     });
