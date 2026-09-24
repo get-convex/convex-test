@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.60
+
+- Improves the implementation of `finishAllScheduledFunctions` to avoid false positives in the hung scheduled function detection.
+
 ## 0.0.59
 
 - Improves global isolation, improving interactions with vitest.stubGlobal (#142).
