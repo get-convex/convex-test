@@ -1089,11 +1089,14 @@ function evaluateSearchFilter(
     case "Eq":
       return compareValues(result, evaluateQueryValue(filter.value)) === 0;
     case "Search": {
+      if (typeof result !== "string") {
+        return false;
+      }
       const queryTerms = filter.value
         .toLowerCase()
         .split(/\s+/)
         .filter((term) => term.length > 0);
-      const documentWords = (result as string)
+      const documentWords = result
         .split(/\s+/)
         .map((word) => word.toLowerCase());
       return queryTerms.some((queryTerm) =>
