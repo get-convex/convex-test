@@ -1613,6 +1613,12 @@ function asyncSyscallImpl() {
           maximumRowsRead,
           maximumBytesRead,
         } = args;
+        // Like in a deployed backend, components can't use `.paginate()`.
+        if (getCurrentComponentPath() !== "") {
+          throw new Error(
+            "paginate() is only supported in the app. Learn more at https://docs.convex.dev/components/authoring#pagination",
+          );
+        }
         // Convex only allows a single paginated query (`.paginate()`) per
         // function execution. Multiple `.paginate()` calls pass in the test
         // mock but fail at runtime in a deployed function, so always enforce

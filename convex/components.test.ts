@@ -273,3 +273,15 @@ test("parallel mutations on different components", async () => {
   expect(count1).toEqual(1);
   expect(count2).toEqual(1);
 });
+
+test("components can't paginate", async () => {
+  const t = testWithCounter();
+  await expect(
+    t.query(components.counter.public.paginate, {
+      paginationOpts: { numItems: 10, cursor: null },
+    }),
+  ).rejects.toThrow("paginate() is only supported in the app");
+  await expect(t.query(internal.component.paginateInComponent)).rejects.toThrow(
+    "paginate() is only supported in the app",
+  );
+});
