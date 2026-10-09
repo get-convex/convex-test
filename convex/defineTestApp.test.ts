@@ -3,7 +3,6 @@ import {
   type ApiFromModules,
   type DataModelFromSchemaDefinition,
   type GenericMutationCtx,
-  componentsGeneric,
   createFunctionHandle,
   defineSchema,
   defineTable,
@@ -11,7 +10,11 @@ import {
   makeFunctionReference,
 } from "convex/server";
 import { v } from "convex/values";
-import { defineTestApp, type TestConvex } from "../index";
+import {
+  defineTestApp,
+  type ComponentRegistration,
+  type TestConvex,
+} from "../index";
 import { components } from "./_generated/api";
 import counterTest from "./counter/test";
 import type * as counterCallbacks from "./counter/component/callbacks";
@@ -31,7 +34,7 @@ const callback = vi.fn(
   },
 );
 
-const { api, internal, createTest } = app.defineModules({
+const modules = {
   test: {
     bar: app.mutation({
       args: { key: v.string() },
@@ -92,7 +95,8 @@ const { api, internal, createTest } = app.defineModules({
       },
     }),
   },
-});
+};
+const { api, internal, createTest } = app.defineModules(modules);
 
 afterEach(() => {
   vi.useRealTimers();
@@ -217,13 +221,17 @@ test("accepts a component's default testing helper and custom registration name"
 });
 
 test("components invoke application callbacks through function handles", async () => {
-  const t = createTest();
-  counterTest.register(t);
-  const counter = (
-    componentsGeneric() as unknown as {
-      counter: ApiFromModules<{ callbacks: typeof counterCallbacks }>;
-    }
-  ).counter;
+  const register: ComponentRegistration<
+    ApiFromModules<{ callbacks: typeof counterCallbacks }>
+  > = (t, name) => counterTest.register(t, name);
+  const componentApp = defineTestApp({
+    schema,
+    components: {
+      counter: { register },
+    },
+  });
+  const t = componentApp.defineModules(modules).createTest();
+  const counter = componentApp.components.counter;
   const handle = await t.run(async () => {
     return await createFunctionHandle(internal.test.callbacks.complete);
   });
