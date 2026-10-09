@@ -2038,26 +2038,11 @@ export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
  * A component registration function that can return its generated `ComponentApi`.
  *
  * Returning typed component references lets `defineTestApp` infer the component
- * API without importing this type in the component package. Existing helpers
- * returning `void` can be adapted with
+ * API. If the component doesn't export a `register` function from their /test
+ * entrypoint that returns the ComponentApi, it can be cast like
  * `{ register: componentTest.register as ComponentRegistration<ComponentApi> }`.
- * Registration runs synchronously on every `createTest()` call. The instance
- * name comes from the `components` map. `defineTestApp` creates its own references
- * before registration and does not use the returned value.
  *
- * @example
- * // In a component's test entrypoint:
- * import type { TestConvex } from "convex-test";
- * import { componentsGeneric } from "convex/server";
- * import type { ComponentApi } from "./_generated/component.js";
- *
- * export function register(
- *   t: TestConvex<any>, name = "sampleComponent",
- * ): ComponentApi {
- *   t.registerComponent(name, schema, modules);
- *   return componentsGeneric()[name] as unknown as ComponentApi;
- * }
- * export default { register, schema, modules };
+ * Note: `defineTestApp` does not use the returned value.
  */
 export type ComponentRegistration<Api> = (
   t: TestConvexRoot<any>,
@@ -2162,7 +2147,10 @@ export type TestAppDefinition<
  * cast to {@link ComponentRegistration} to supply their API type.
  *
  * @example
- * const app = defineTestApp({ schema });
+ * const app = defineTestApp({
+ *   schema,
+ *   components: { sampleComponent: sampleComponentTest },
+ * });
  * const { api, createTest } = app.defineModules({
  *   test: {
  *     bar: app.mutation({
@@ -2174,15 +2162,6 @@ export type TestAppDefinition<
  * });
  * const t = createTest();
  * await t.mutation(api.test.bar, { text: "hello" });
- *
- * @example
- * // Typed component testing exports can be used directly.
- * const app = defineTestApp({
- *   schema,
- *   components: { sampleComponent: sampleComponentTest },
- * });
- * const { createTest } = app.defineModules({});
- * const t = createTest(); // Registers a fresh sampleComponent instance.
  * await t.query(app.components.sampleComponent.public.count, { name: "beans" });
  */
 export function defineTestApp<
@@ -2197,9 +2176,9 @@ export function defineTestApp<
 }): TestApp<SchemaDef, Components> {
   const registrations = Object.entries(components ?? {});
   for (const [name] of registrations) {
-    if (name.length === 0 || name.includes("/")) {
+    if (name.length === 0 || name.includes("/") || name.includes(" ")) {
       throw new Error(
-        `Invalid component instance name "${name}": expected a nonempty name without slashes. Register nested components inside the registration helper.`,
+        `Invalid component instance name "${name}": expected a nonempty name without slashes or spaces. Register nested components inside the parent's "register" function.`,
       );
     }
   }
