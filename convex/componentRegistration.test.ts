@@ -10,6 +10,7 @@ import {
   defineTestApp,
   type ComponentRegistration,
   type TestConvex,
+  type TestConvexRoot,
 } from "../index";
 import counterTest, { type ComponentApi, register } from "./counter/test";
 import * as counterTestNamespace from "./counter/test";
@@ -109,6 +110,55 @@ test("calls registration helpers for each fresh instance using the configured na
   expect(
     await second.query(app.components.second.public.count, { name: "beans" }),
   ).toBe(0);
+});
+
+test("registration returns usable references for default and renamed top-level instances", async () => {
+  const t = defineTestApp({ schema }).defineModules({}).createTest();
+  const counter = register(t);
+  const renamed = register(t, "renamed");
+  expectTypeOf(counter).toEqualTypeOf<ComponentApi>();
+  await t.mutation(renamed.public.add, { name: "beans", count: 4 });
+  expect(await t.query(renamed.public.count, { name: "beans" })).toBe(4);
+  expect(await t.query(counter.public.count, { name: "beans" })).toBe(0);
+});
+
+test("accepts and composes existing registration signatures", async () => {
+  const broad = (
+    t: TestConvex<SchemaDefinition<GenericSchema, boolean>>,
+    name?: string,
+  ) => {
+    legacyRegister(t, name);
+  };
+  const anySchema = (t: TestConvex<any>, name?: string) => {
+    broad(t, name);
+  };
+  const anyModel = (t: TestConvexRoot<any>, name?: string) => {
+    anySchema(t, name);
+  };
+  // Assignment checks compatibility before the API type is supplied by a cast.
+  const helpers: ComponentRegistration<ComponentApi>[] = [
+    legacyRegister,
+    broad,
+    anySchema,
+    anyModel,
+  ];
+  for (const register of helpers) {
+    const app = defineTestApp({
+      schema,
+      components: { renamed: { register } },
+    });
+    expectTypeOf(app.components.renamed).toEqualTypeOf<
+      ComponentApi<"renamed">
+    >();
+    const t = app.defineModules({}).createTest();
+    await t.mutation(app.components.renamed.public.add, {
+      name: "beans",
+      count: 1,
+    });
+    expect(
+      await t.query(app.components.renamed.public.count, { name: "beans" }),
+    ).toBe(1);
+  }
 });
 
 test("accepts assertions for existing unannotated helpers", async () => {

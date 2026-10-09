@@ -2035,39 +2035,34 @@ export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
   TestConvexRoot<DataModelFromSchemaDefinition<SchemaDef>>;
 
 /**
- * A component registration function carrying its generated `ComponentApi` type.
- * The API marker is type-only; no property needs to be supplied at runtime.
+ * A component registration function that can return its generated `ComponentApi`.
  *
- * Component packages can annotate their exported `register` function with this type.
- * Existing helpers can be adapted with
+ * Returning typed component references lets `defineTestApp` infer the component
+ * API without importing this type in the component package. Existing helpers
+ * returning `void` can be adapted with
  * `{ register: componentTest.register as ComponentRegistration<ComponentApi> }`.
- * Use a type annotation rather than `satisfies` so the export retains the API
- * type for consumers to infer.
+ * Registration runs synchronously on every `createTest()` call. The instance
+ * name comes from the `components` map. `defineTestApp` creates its own references
+ * before registration and does not use the returned value.
  *
  * @example
  * // In a component's test entrypoint:
- * import type { ComponentRegistration } from "convex-test";
+ * import type { TestConvex } from "convex-test";
+ * import { componentsGeneric } from "convex/server";
  * import type { ComponentApi } from "./_generated/component.js";
  *
- * export const register: ComponentRegistration<ComponentApi> = (
- *   t, name = "sampleComponent",
- * ) => {
+ * export function register(
+ *   t: TestConvex<any>, name = "sampleComponent",
+ * ): ComponentApi {
  *   t.registerComponent(name, schema, modules);
- * };
+ *   return componentsGeneric()[name] as unknown as ComponentApi;
+ * }
  * export default { register, schema, modules };
  */
-export type ComponentRegistration<Api> = {
-  /**
-   * Synchronously register the component and its dependencies. `defineTestApp`
-   * supplies the instance name from its `components` map on every `createTest`.
-   */
-  <SchemaDef extends SchemaDefinition<GenericSchema, boolean>>(
-    t: TestConvex<SchemaDef>,
-    name?: string,
-  ): void;
-  /** Type-only API marker. Do not supply a value at runtime. */
-  readonly _componentApi?: Api;
-};
+export type ComponentRegistration<Api> = (
+  t: TestConvexRoot<any>,
+  name?: string,
+) => Api | void;
 
 // Match generated ComponentApi<Name> references for each named installation.
 type ComponentApiForName<Api, Name extends string> =
@@ -2162,8 +2157,9 @@ export type TestAppDefinition<
  * component testing helpers such as `componentTest.register(t)`.
  *
  * Optional `components` map keys are instance names. Each helper's `register`
- * function runs on every `createTest()` call. Annotate `register` functions with
- * {@link ComponentRegistration} to infer their API types in `app.components`.
+ * function runs on every `createTest()` call. Helpers returning `ComponentApi`
+ * provide typed references in `app.components`. Helpers returning `void` can be
+ * cast to {@link ComponentRegistration} to supply their API type.
  *
  * @example
  * const app = defineTestApp({ schema });

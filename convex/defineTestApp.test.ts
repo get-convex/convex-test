@@ -223,7 +223,9 @@ test("accepts a component's default testing helper and custom registration name"
 test("components invoke application callbacks through function handles", async () => {
   const register: ComponentRegistration<
     ApiFromModules<{ callbacks: typeof counterCallbacks }>
-  > = (t, name) => counterTest.register(t, name);
+  > = (t, name) => {
+    counterTest.register(t, name);
+  };
   const componentApp = defineTestApp({
     schema,
     components: {
