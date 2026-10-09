@@ -2219,7 +2219,13 @@ export function defineTestApp<
             options.transactionLimits ?? false,
           );
           for (const [name, registration] of registrations) {
-            registration.register(t, name);
+            const result = registration.register(t, name);
+            if (typeof result?.then === "function") {
+              throw new Error(
+                `Component registration for "${name}" returned a Promise. ` +
+                  `The "register" function must be synchronous.`,
+              );
+            }
           }
           return t;
         },
