@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.61-alpha.0
+
+- Define a full test application with inline functions and schema without
+  generated files or an `import.meta.glob`. `defineTestApp` provides
+  schema-bound function builders, typed function references, component
+  registration, and fresh `convexTest` instances. Used primarily when testing
+  libraries and components that want to have a simple app to test with.
+
 ## 0.0.60
 
 - Improves the implementation of `finishAllScheduledFunctions` to avoid false positives in the hung scheduled function detection.

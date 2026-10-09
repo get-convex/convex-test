@@ -2,9 +2,12 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
+  ActionBuilder,
+  ApiFromModules,
   DataModelFromSchemaDefinition,
   DefaultFunctionArgs,
   DocumentByName,
+  FilterApi,
   FunctionReference,
   FunctionReturnType,
   GenericActionCtx,
@@ -14,8 +17,10 @@ import {
   GenericQueryCtx,
   GenericSchema,
   HttpRouter,
+  MutationBuilder,
   OptionalRestArgs,
   PublicHttpAction,
+  QueryBuilder,
   RegisteredAction,
   RegisteredMutation,
   RegisteredQuery,
@@ -24,8 +29,14 @@ import {
   SystemDataModel,
   UserIdentity,
   actionGeneric,
+  anyApi,
+  componentsGeneric,
+  filterApi,
   getFunctionAddress,
   httpActionGeneric,
+  internalActionGeneric,
+  internalMutationGeneric,
+  internalQueryGeneric,
   makeFunctionReference,
   mutationGeneric,
   queryGeneric,
@@ -2023,6 +2034,206 @@ async function blobSha(blob: Blob) {
 export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
   TestConvexRoot<DataModelFromSchemaDefinition<SchemaDef>>;
 
+/**
+ * A component registration function that can return its generated `ComponentApi`.
+ *
+ * Returning typed component references lets `defineTestApp` infer the component
+ * API. If the component doesn't export a `register` function from their /test
+ * entrypoint that returns the ComponentApi, it can be cast like
+ * `{ register: componentTest.register as ComponentRegistration<ComponentApi> }`.
+ *
+ * Note: `defineTestApp` does not use the returned value.
+ */
+export type ComponentRegistration<Api> = (
+  t: TestConvexRoot<any>,
+  name: string,
+) => Api | void;
+
+// Match generated ComponentApi<Name> references for each named installation.
+type ComponentApiForName<Api, Name extends string> =
+  Api extends FunctionReference<
+    infer Type,
+    infer Visibility,
+    infer Args,
+    infer ReturnType
+  >
+    ? FunctionReference<Type, Visibility, Args, ReturnType, Name>
+    : { [Key in keyof Api]: ComponentApiForName<Api[Key], Name> };
+
+type ComponentRegistrations = Record<
+  string,
+  { register: ComponentRegistration<any> }
+>;
+
+type RegisteredComponents<Components extends ComponentRegistrations> = {
+  [Name in keyof Components]: Components[Name]["register"] extends ComponentRegistration<
+    infer Api
+  >
+    ? ComponentApiForName<Api, Name & string>
+    : never;
+};
+
+/** Schema-bound function builders for an in-memory test application. */
+export type TestApp<
+  SchemaDef extends SchemaDefinition<any, boolean>,
+  Components extends ComponentRegistrations = Record<never, never>,
+> = {
+  /** Typed references to the configured component instances. */
+  components: RegisteredComponents<Components>;
+  query: QueryBuilder<DataModelFromSchemaDefinition<SchemaDef>, "public">;
+  internalQuery: QueryBuilder<
+    DataModelFromSchemaDefinition<SchemaDef>,
+    "internal"
+  >;
+  mutation: MutationBuilder<DataModelFromSchemaDefinition<SchemaDef>, "public">;
+  internalMutation: MutationBuilder<
+    DataModelFromSchemaDefinition<SchemaDef>,
+    "internal"
+  >;
+  action: ActionBuilder<DataModelFromSchemaDefinition<SchemaDef>, "public">;
+  internalAction: ActionBuilder<
+    DataModelFromSchemaDefinition<SchemaDef>,
+    "internal"
+  >;
+  /**
+   * Define function modules by their paths, e.g. `test` or `test/callbacks`,
+   * without a leading `./` or file extension. Values are module exports,
+   * rather than the import functions returned by `import.meta.glob`.
+   *
+   * References have the same types and behavior as generated Convex APIs.
+   * Public functions appear in `api` and internal functions in `internal`.
+   * Handlers referencing this API may need explicit return type annotations
+   * to break TypeScript inference cycles.
+   */
+  defineModules<Modules extends Record<string, object>>(
+    this: void,
+    modules: Modules,
+  ): TestAppDefinition<SchemaDef, Modules>;
+};
+
+/** Typed function references and a factory for fresh test instances. */
+export type TestAppDefinition<
+  SchemaDef extends SchemaDefinition<any, boolean>,
+  Modules extends Record<string, object>,
+> = {
+  api: FilterApi<ApiFromModules<Modules>, FunctionReference<any, "public">>;
+  internal: FilterApi<
+    ApiFromModules<Modules>,
+    FunctionReference<any, "internal">
+  >;
+  /**
+   * Create fresh test state and register the configured components. Additional
+   * components can be registered using their helpers or `t.registerComponent`.
+   * `transactionLimits` has the same meaning as in `convexTest`.
+   */
+  createTest(
+    this: void,
+    options?: { transactionLimits?: Partial<TransactionMetrics> | boolean },
+  ): TestConvex<SchemaDef>;
+};
+
+/**
+ * Define an in-memory test application without generated files.
+ *
+ * The returned function builders are typed against `schema`. Pass modules of
+ * registered functions to `defineModules` to get typed `api` and `internal`
+ * references and a `createTest` factory. Each call to `createTest` creates fresh
+ * test state and returns a normal {@link TestConvex}, which can be passed to
+ * component testing helpers such as `componentTest.register(t)`.
+ *
+ * Optional `components` map keys are instance names. Each helper's `register`
+ * function runs on every `createTest()` call. Helpers returning `ComponentApi`
+ * provide typed references in `app.components`. Helpers returning `void` can be
+ * cast to {@link ComponentRegistration} to supply their API type.
+ *
+ * @example
+ * const app = defineTestApp({
+ *   schema,
+ *   components: { sampleComponent: sampleComponentTest },
+ * });
+ * const { api, createTest } = app.defineModules({
+ *   test: {
+ *     bar: app.mutation({
+ *       args: { text: v.string() },
+ *       returns: v.id("messages"),
+ *       handler: async (ctx, args) => ctx.db.insert("messages", args),
+ *     }),
+ *   },
+ * });
+ * const t = createTest();
+ * await t.mutation(api.test.bar, { text: "hello" });
+ * await t.query(app.components.sampleComponent.public.count, { name: "beans" });
+ */
+export function defineTestApp<
+  SchemaDef extends SchemaDefinition<any, boolean>,
+  Components extends ComponentRegistrations = Record<never, never>,
+>({
+  schema,
+  components,
+}: {
+  schema: SchemaDef;
+  components?: Components;
+}): TestApp<SchemaDef, Components> {
+  const registrations = Object.entries(components ?? {});
+  for (const [name] of registrations) {
+    if (name.length === 0 || name.includes("/") || name.includes(" ")) {
+      throw new Error(
+        `Invalid component instance name "${name}": expected a nonempty name without slashes or spaces. Register nested components inside the parent's "register" function.`,
+      );
+    }
+  }
+  return {
+    components: componentsGeneric() as RegisteredComponents<Components>,
+    query: queryGeneric,
+    internalQuery: internalQueryGeneric,
+    mutation: mutationGeneric,
+    internalMutation: internalMutationGeneric,
+    action: actionGeneric,
+    internalAction: internalActionGeneric,
+
+    defineModules<Modules extends Record<string, object>>(modules: Modules) {
+      const moduleMap = new Map(Object.entries(modules));
+      const loadModule = async (path: string) => {
+        const module = moduleMap.get(path);
+        if (module === undefined) {
+          throw new Error(`Could not find module for: "${path}"`);
+        }
+        return module;
+      };
+      const fullApi = anyApi as unknown as ApiFromModules<Modules>;
+      return {
+        api: filterApi<typeof fullApi, FunctionReference<any, "public">>(
+          fullApi,
+        ),
+        internal: filterApi<typeof fullApi, FunctionReference<any, "internal">>(
+          fullApi,
+        ),
+        createTest(
+          options: {
+            transactionLimits?: Partial<TransactionMetrics> | boolean;
+          } = {},
+        ): TestConvex<SchemaDef> {
+          const t = createConvexTest(
+            schema,
+            loadModule,
+            options.transactionLimits ?? false,
+          );
+          for (const [name, registration] of registrations) {
+            const result = registration.register(t, name);
+            if (typeof result?.then === "function") {
+              throw new Error(
+                `Component registration for "${name}" returned a Promise. ` +
+                  `The "register" function must be synchronous.`,
+              );
+            }
+          }
+          return t;
+        },
+      };
+    },
+  };
+}
+
 export type TestConvexForDataModel<DataModel extends GenericDataModel> = {
   /**
    * Call a public or internal query, or run an inline query function.
@@ -2852,12 +3063,20 @@ export function convexTest<Schema extends GenericSchema>(
     limitsConfig = opts.transactionLimits ?? false;
   }
 
+  return createConvexTest(schema, moduleCache(modules), limitsConfig);
+}
+
+function createConvexTest<SchemaDef extends SchemaDefinition<any, boolean>>(
+  schema: SchemaDef | undefined,
+  modules: ComponentInfo["modules"],
+  limitsConfig: Partial<TransactionMetrics> | boolean,
+): TestConvex<SchemaDef> {
   const rootDb = new DatabaseFake(schema ?? null, ROOT_COMPONENT_PATH);
   const convexGlobal: ConvexGlobal = {
     components: {
       [ROOT_COMPONENT_PATH]: {
         db: rootDb,
-        modules: moduleCache(modules),
+        modules,
       },
     },
     transactionManager: new TransactionManager(limitsConfig),
