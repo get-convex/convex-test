@@ -2061,7 +2061,7 @@ export type TestConvex<SchemaDef extends SchemaDefinition<any, boolean>> =
  */
 export type ComponentRegistration<Api> = (
   t: TestConvexRoot<any>,
-  name?: string,
+  name: string,
 ) => Api | void;
 
 // Match generated ComponentApi<Name> references for each named installation.

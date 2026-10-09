@@ -135,12 +135,16 @@ test("accepts and composes existing registration signatures", async () => {
   const anyModel = (t: TestConvexRoot<any>, name?: string) => {
     anySchema(t, name);
   };
+  const requiredName = (t: TestConvexRoot<any>, name: string) => {
+    anyModel(t, name);
+  };
   // Assignment checks compatibility before the API type is supplied by a cast.
   const helpers: ComponentRegistration<ComponentApi>[] = [
     legacyRegister,
     broad,
     anySchema,
     anyModel,
+    requiredName,
   ];
   for (const register of helpers) {
     const app = defineTestApp({
