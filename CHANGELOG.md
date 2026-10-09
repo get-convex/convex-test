@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.0.61-alpha.0
 
 - Define a full test application with inline functions and schema without
   generated files or an `import.meta.glob`. `defineTestApp` provides
