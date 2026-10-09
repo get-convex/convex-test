@@ -1,12 +1,14 @@
 # Changelog
 
-## 0.0.61-alpha.0
+## 0.0.61
 
 - Define a full test application with inline functions and schema without
   generated files or an `import.meta.glob`. `defineTestApp` provides
   schema-bound function builders, typed function references, component
   registration, and fresh `convexTest` instances. Used primarily when testing
-  libraries and components that want to have a simple app to test with.
+  libraries and components that want to have a simple app to test with. (#140)
+- Prevent components from calling .paginate() (#157)
+- Fix text search on missing or non-string fields (#156)
 
 ## 0.0.60
 
