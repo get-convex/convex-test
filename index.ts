@@ -137,6 +137,12 @@ const ROOT_COMPONENT_PATH = "";
 class NestedLock {
   private _lock: Promise<void> | null = null;
   private _release: (() => void) | null = null;
+  transactionActive = true;
+
+  constructor(
+    readonly transactionManager: TransactionManager,
+    readonly parent: NestedLock | undefined,
+  ) {}
 
   async acquire() {
     while (this._lock !== null) {
@@ -2015,7 +2021,7 @@ function jsSyscallImpl() {
 // If we're in action, wrap the write in a transaction.
 async function writeToDatabase<T>(impl: (db: DatabaseFake) => Promise<T>) {
   const db = getDb();
-  if (!getTransactionManager().isInTransaction()) {
+  if (!getTransactionManager().isInCurrentTransaction()) {
     return await withAuth().run(async () => {
       return await impl(db);
     });
@@ -2898,6 +2904,19 @@ class TransactionManager {
     return this._waitOnCurrentFunction !== null;
   }
 
+  isInCurrentTransaction(): boolean {
+    for (
+      let lock = nestedTxStorage.getStore();
+      lock !== undefined;
+      lock = lock.parent
+    ) {
+      if (lock.transactionManager === this && lock.transactionActive) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // The metrics tracker, or null when not inside a transaction.
   getMetricsTracker(): TransactionMetricsTracker | null {
     return this._metricsTracker;
@@ -3217,8 +3236,11 @@ function withAuth(
     const requestMetadata = requestMetadataForExecution();
 
     await transactionManager.begin(isNested, transactionLimits);
+    const childLock = new NestedLock(
+      transactionManager,
+      nestedTxStorage.getStore(),
+    );
     try {
-      const childLock = new NestedLock();
       const invokeRaw = () =>
         (
           m as unknown as {
@@ -3242,6 +3264,8 @@ function withAuth(
     } catch (e) {
       transactionManager.rollback(isNested);
       throw deserializeConvexErrorData(e);
+    } finally {
+      childLock.transactionActive = false;
     }
   };
 
@@ -3278,8 +3302,11 @@ function withAuth(
     const requestMetadata = requestMetadataForExecution();
 
     await transactionManager.begin(isNested, transactionLimits);
+    const childLock = new NestedLock(
+      transactionManager,
+      nestedTxStorage.getStore(),
+    );
     try {
-      const childLock = new NestedLock();
       const invokeRaw = () =>
         (
           q as unknown as { invokeQuery: (args: string) => Promise<string> }
@@ -3304,6 +3331,7 @@ function withAuth(
     } catch (e) {
       throw deserializeConvexErrorData(e);
     } finally {
+      childLock.transactionActive = false;
       transactionManager.rollback(isNested);
     }
   };
