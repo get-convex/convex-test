@@ -1,8 +1,4 @@
-import {
-  componentsGeneric,
-  type GenericSchema,
-  type SchemaDefinition,
-} from "convex/server";
+import type { GenericSchema, SchemaDefinition } from "convex/server";
 import type { TestConvex } from "../../index";
 import type { ComponentApi } from "./component/_generated/component";
 import schema from "./component/schema";
@@ -15,8 +11,7 @@ const modules = import.meta.glob("./component/**/*.ts");
 export function register<
   Schema extends SchemaDefinition<GenericSchema, boolean>,
 >(t: TestConvex<Schema>, name = "counter"): ComponentApi {
-  t.registerComponent(name, schema, modules);
-  return componentsGeneric()[name] as unknown as ComponentApi;
+  return t.registerComponent<ComponentApi>(name, schema, modules);
 }
 
 export default { register, schema, modules };

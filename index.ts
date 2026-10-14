@@ -2425,12 +2425,14 @@ export type TestConvexRoot<DataModel extends GenericDataModel> = {
   /**
    * Register a component, so that the functions of the app under test can call
    * it.
+   *
+   * @returns References to the component's functions, typed as `ComponentApi`.
    */
-  registerComponent: (
+  registerComponent: <ComponentApi = unknown>(
     componentPath: string,
     schema: SchemaDefinition<GenericSchema, boolean>,
     glob: Record<string, () => Promise<any>>,
-  ) => void;
+  ) => ComponentApi;
 } & TestConvexForDataModel<DataModel>;
 
 /**
@@ -3101,7 +3103,7 @@ function createConvexTest<SchemaDef extends SchemaDefinition<any, boolean>>(
     return result;
   }
 
-  function registerComponent(
+  function registerComponent<ComponentApi = unknown>(
     componentPath: string,
     schema: SchemaDefinition<GenericSchema, boolean>,
     glob: Record<string, () => Promise<any>>,
@@ -3111,6 +3113,7 @@ function createConvexTest<SchemaDef extends SchemaDefinition<any, boolean>>(
       modules: moduleCache(glob),
     };
     convexGlobal.components[componentPath] = componentInfo;
+    return componentsGeneric()[componentPath] as unknown as ComponentApi;
   }
 
   // Each accessor is immutable: `withIdentity` and `withRequestMetadata`
