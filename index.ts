@@ -2426,13 +2426,25 @@ export type TestConvexRoot<DataModel extends GenericDataModel> = {
    * Register a component, so that the functions of the app under test can call
    * it.
    *
-   * @returns References to the component's functions, typed as `ComponentApi`.
+   * @deprecated Pass an explicit `ComponentApi` type argument to get typed
+   * references to the component's functions.
    */
-  registerComponent: <ComponentApi = unknown>(
+  registerComponent(
     componentPath: string,
     schema: SchemaDefinition<GenericSchema, boolean>,
     glob: Record<string, () => Promise<any>>,
-  ) => ComponentApi;
+  ): unknown;
+  /**
+   * Register a component, so that the functions of the app under test can call
+   * it.
+   *
+   * @returns References to the component's functions, typed as `ComponentApi`.
+   */
+  registerComponent<ComponentApi>(
+    componentPath: string,
+    schema: SchemaDefinition<GenericSchema, boolean>,
+    glob: Record<string, () => Promise<any>>,
+  ): ComponentApi;
 } & TestConvexForDataModel<DataModel>;
 
 /**
