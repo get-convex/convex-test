@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.62
+
+- Return typed component references from registerComponent (#161)
+
 ## 0.0.61
 
 - Define a full test application with inline functions and schema without
