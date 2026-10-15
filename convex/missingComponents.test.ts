@@ -92,3 +92,13 @@ test("error message lists currently-registered components to catch typos", async
     t.query(components.counter.public.count, { name: "beans" }),
   ).rejects.toThrow(/Registered components: "counter2"/);
 });
+
+test("error message points at the component's `/test` register helper", async () => {
+  // Published components conventionally export a `register` helper from a
+  // `/test` entrypoint. The error should nudge users toward that helper
+  // before falling back to calling `t.registerComponent` by hand.
+  const t = convexTest(schema);
+  await expect(
+    t.query(components.counter.public.count, { name: "beans" }),
+  ).rejects.toThrow(/register\(t\)/);
+});

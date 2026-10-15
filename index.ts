@@ -1833,9 +1833,7 @@ function asyncSyscallImpl() {
           reference,
           functionHandle,
         });
-        // Surface the "component not registered" error eagerly at handle
-        // creation time, rather than later when the handle is used (which
-        // could happen in a scheduled function whose error is only logged).
+        // Load the component eagerly so a missing registration fails here.
         getComponentInfo(functionPath.componentPath);
         const handle = createFunctionHandle(functionPath);
         return JSON.stringify(handle);
@@ -1856,10 +1854,7 @@ function asyncSyscallImpl() {
         } = args;
         const functionAddress = { name, reference, functionHandle };
         const functionPath = getFunctionPathFromAddress(functionAddress);
-        // Surface the "component not registered" error eagerly at schedule
-        // time. Otherwise the failure happens when the timer fires and is
-        // only logged via `console.error`, leaving the test green and the
-        // root cause buried.
+        // Load the component eagerly so a missing registration fails here.
         getComponentInfo(functionPath.componentPath);
         // Convert args to a Convex value before storing them or passing them to the function
         const parsedArgs = jsonToConvex(fnArgs);
@@ -2470,8 +2465,9 @@ function formatUnregisteredComponentError(componentPath: string): string {
       : `Registered components: ${registered.map((p) => `"${p}"`).join(", ")}.`;
   return (
     `Component "${componentPath}" is not registered on this \`convexTest\` instance. ` +
-    `Before running code that depends on it, call ` +
-    `\`t.registerComponent("${componentPath}", schema, modules)\` ` +
+    `If it is a published component, import its test helper and call it on \`t\` ` +
+    `(e.g. \`import { register } from "<component>/test"; register(t);\`). ` +
+    `Otherwise call \`t.registerComponent("${componentPath}", schema, modules)\` directly ` +
     `(see https://github.com/get-convex/convex-test#components). ` +
     registeredHint
   );
