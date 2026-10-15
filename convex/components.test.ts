@@ -5,6 +5,7 @@ import { convexTest } from "../index";
 import schema from "./schema";
 import { components, internal } from "./_generated/api";
 import counterSchema from "./counter/component/schema";
+import type { QueryCtx } from "./_generated/server";
 
 const counterModules = import.meta.glob("./counter/component/**/*.ts");
 
@@ -274,14 +275,50 @@ test("parallel mutations on different components", async () => {
   expect(count2).toEqual(1);
 });
 
-test("components can't paginate", async () => {
+test("components can paginate directly and from an app query", async () => {
   const t = testWithCounter();
+  await t.mutation(components.counter.public.add, { name: "beans", count: 3 });
+  const direct = await t.query(components.counter.public.paginate, {
+    paginationOpts: { numItems: 10, cursor: null },
+  });
+  expect(direct.page).toMatchObject([{ name: "beans", value: 3 }]);
+  expect(direct.isDone).toBe(true);
+  const nested = await t.query(internal.component.paginateInComponent);
+  expect(nested).toEqual(direct);
+});
+
+test.each(["query", "mutation"] as const)(
+  "app and component pagination share a limit in a %s",
+  async (udfType) => {
+    const t = testWithCounter();
+    for (const componentFirst of [false, true]) {
+      const handler = async (ctx: QueryCtx) => {
+        const app = () =>
+          ctx.db.query("messages").paginate({ numItems: 10, cursor: null });
+        const component = () =>
+          ctx.runQuery(components.counter.public.paginate, {
+            paginationOpts: { numItems: 10, cursor: null },
+          });
+        await (componentFirst ? component() : app());
+        await (componentFirst ? app() : component());
+      };
+      await expect(
+        udfType === "query" ? t.query(handler) : t.mutation(handler),
+      ).rejects.toThrow(/single paginated query.*transaction/);
+    }
+  },
+);
+
+test("pagination in different components shares a transaction limit", async () => {
+  const t = testWithTwoCounters();
   await expect(
-    t.query(components.counter.public.paginate, {
-      paginationOpts: { numItems: 10, cursor: null },
+    t.query(async (ctx) => {
+      await ctx.runQuery(components.counter.public.paginate, {
+        paginationOpts: { numItems: 10, cursor: null },
+      });
+      await ctx.runQuery(components.counter2.public.paginate, {
+        paginationOpts: { numItems: 10, cursor: null },
+      });
     }),
-  ).rejects.toThrow("paginate() is only supported in the app");
-  await expect(t.query(internal.component.paginateInComponent)).rejects.toThrow(
-    "paginate() is only supported in the app",
-  );
+  ).rejects.toThrow(/single paginated query.*transaction/);
 });

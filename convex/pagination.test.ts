@@ -3,6 +3,7 @@ import { convexTest } from "../index";
 import { api } from "./_generated/api";
 import schema from "./schema";
 import type { PaginationResult } from "convex/server";
+import type { QueryCtx } from "./_generated/server";
 
 test("paginate", async () => {
   const t = convexTest(schema);
@@ -397,10 +398,10 @@ test("paginate with deletes and composite index", async () => {
   expect(isDone3).toEqual(true);
 });
 
-const paginateOnce = (ctx: any) =>
+const paginateOnce = (ctx: QueryCtx) =>
   ctx.db.query("messages").paginate({ cursor: null, numItems: 10 });
 
-test("multiple paginate calls in one function execution throw", async () => {
+test("multiple paginate calls in one transaction throw", async () => {
   const t = convexTest({ schema });
   await t.run(async (ctx) => {
     await ctx.db.insert("messages", { author: "sarah", body: "hello" });
@@ -422,25 +423,25 @@ test("a single paginate call is allowed", async () => {
   expect(page).toMatchObject([{ author: "sarah", body: "hello" }]);
 });
 
-test("paginate in separate function executions does not throw", async () => {
+test("paginate in separate transactions does not throw", async () => {
   const t = convexTest({ schema });
   await t.run(async (ctx) => {
     await ctx.db.insert("messages", { author: "sarah", body: "hello" });
   });
-  // Each call is its own function execution, so the per-execution count resets.
+  // Each call is its own transaction, so the count resets.
   const a = await t.query(async (ctx) => paginateOnce(ctx));
   const b = await t.query(async (ctx) => paginateOnce(ctx));
   expect(a.page.length).toBe(1);
   expect(b.page.length).toBe(1);
 });
 
-test("paginate once per nested function via runQuery does not throw", async () => {
+test("an action can paginate in separate query transactions", async () => {
   const t = convexTest({ schema });
   await t.run(async (ctx) => {
     await ctx.db.insert("messages", { author: "sarah", body: "hello" });
   });
   // An action invoking two queries, each paginating once. Each query is its
-  // own function execution, so this is allowed.
+  // own transaction, so this is allowed.
   const result = await t.action(async (ctx) => {
     const first = await ctx.runQuery(api.pagination.listAll, {
       paginationOptions: { cursor: null, numItems: 10 },
@@ -453,3 +454,24 @@ test("paginate once per nested function via runQuery does not throw", async () =
   expect(result.first.page.length).toBe(1);
   expect(result.second.page.length).toBe(1);
 });
+
+test.each(["query", "mutation"] as const)(
+  "nested queries share the enclosing %s pagination limit",
+  async (udfType) => {
+    const t = convexTest({ schema });
+    const handler = async (ctx: QueryCtx) => {
+      await ctx.runQuery(api.pagination.listAll, {
+        paginationOptions: { cursor: null, numItems: 10 },
+      });
+      await ctx.runQuery(api.pagination.listAll, {
+        paginationOptions: { cursor: null, numItems: 10 },
+      });
+    };
+    await expect(
+      udfType === "query" ? t.query(handler) : t.mutation(handler),
+    ).rejects.toThrow(/single paginated query.*transaction/);
+
+    // A failed transaction must not consume the next transaction's allowance.
+    await expect(t.query(paginateOnce)).resolves.toMatchObject({ page: [] });
+  },
+);
