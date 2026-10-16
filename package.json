@@ -9,8 +9,8 @@
     "convex"
   ],
   "homepage": "https://docs.convex.dev/functions/testing",
-  "bugs": "https://github.com/get-convex/convex-test/issues",
-  "repository": "https://github.com/get-convex/convex-test",
+  "bugs": "https://github.com/convex/convex-test/issues",
+  "repository": "https://github.com/convex/convex-test",
   "main": "dist/index.js",
   "type": "module",
   "files": [
